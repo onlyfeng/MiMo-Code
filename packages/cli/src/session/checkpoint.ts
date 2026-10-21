@@ -213,31 +213,6 @@ const REBUILD_WAIT_MS = "30 seconds"
 const FIRST_CHECKPOINT_WAIT_MS = "5 minutes"
 
 
-// Rebuild-time microcompact (see
-// docs/superpowers/specs/2026-06-03-rebuild-tail-microcompact-design.md).
-//
-// After computing the boundary, msgs strictly newer than the boundary
-// survive into the rebuild context. Their tool_use parts are kept (so the
-// LLM still sees what action was taken), but for tools in this whitelist
-// the tool_result content is replaced with a placeholder. Result is either
-// large-and-regeneratable (read/view_image/bash/grep/glob/webfetch/websearch) or
-// essentially a "done" confirmation (edit/write/multiedit). Tools NOT here
-// carry state the LLM references later (actor/task/question/skill/memory).
-const COMPACTABLE_TOOL_NAMES = new Set<string>([
-  "read",
-  "view_image",
-  "bash",
-  "grep",
-  "glob",
-  "webfetch",
-  "websearch",
-  "edit",
-  "write",
-  "multiedit",
-  "apply_patch",
-  "codesearch",
-])
-
 function estimateMessageTokens(m: { parts: Array<{ type: string; [k: string]: unknown }> }): number {
   // Same estimator used elsewhere in checkpoint.ts (Token.estimate over JSON).
   // Sum across all parts of the message.
@@ -503,15 +478,6 @@ export interface Interface {
   }>
 
   readonly hasCheckpoint: (sessionID: SessionID) => Effect.Effect<boolean>
-
-  /**
-   * Returns true when the session has any memory artifacts:
-   * either a populated `<data>/memory/sessions/<sid>/` directory, or
-   * any tasks recorded in the task registry. Used by the per-user-message
-   * recall reminder so it fires whenever there is anything to recall —
-   * not only when classic v2 checkpoints exist.
-   */
-  readonly hasMemoryOrTasks: (sessionID: SessionID) => Effect.Effect<boolean>
 
   /** Returns the content of the latest checkpoint file, or undefined if none exists. */
   readonly loadLatest: (sessionID: SessionID) => Effect.Effect<string | undefined>
@@ -1235,17 +1201,6 @@ export const layer: Layer.Layer<
       return yield* Effect.promise(() => Bun.file(checkpointPath(sessionID)).exists())
     })
 
-    const hasMemoryOrTasks = Effect.fn("SessionCheckpoint.hasMemoryOrTasks")(function* (sessionID: SessionID) {
-      const memoryRoot = yield* memory.root()
-      const sessMemDir = path.join(memoryRoot, "sessions", sessionID)
-      const memEntries = yield* Effect.promise(() =>
-        fs.readdir(sessMemDir).catch(() => [] as string[]),
-      )
-      if (memEntries.length > 0) return true
-      const tasks = yield* taskRegistry.list({ session_id: sessionID, include_terminal: true })
-      return tasks.length > 0
-    })
-
     const loadLatest = Effect.fn("SessionCheckpoint.loadLatest")(function* (sessionID: SessionID) {
       const content = yield* Effect.promise(() =>
         Bun.file(checkpointPath(sessionID)).text().catch(() => ""),
@@ -1768,52 +1723,6 @@ export const layer: Layer.Layer<
         })
       }
 
-      // Microcompact: messages strictly newer than the boundary will survive
-      // into the rebuild context. Clear tool_result content for compactable
-      // tools so the first uncached request after rebuild is smaller. tool_use
-      // is preserved — LLM still sees what action was taken; result body
-      // becomes "[Old tool result content cleared]" via the converter at
-      // message-v2.ts (ToolStateCompleted → output).
-      // See docs/superpowers/specs/2026-06-03-rebuild-tail-microcompact-design.md.
-      //
-      // boundaryTime resolution (fail-closed):
-      // 1. Prefer explicit input.boundaryCreatedAt (production callers
-      //    compute it but may pass undefined if the boundary message is no
-      //    longer in their filterCompactedEffect slice).
-      // 2. Else look up input.boundary in allMsgs (full DB, includes
-      //    pre-marker history).
-      // 3. Else SKIP — the previous fallback of 0 would clear EVERY
-      //    completed compactable tool result in the entire session,
-      //    corrupting future checkpoint writer input. Log a warning.
-      const allMsgs = yield* session.messages({ sessionID: input.sessionID, agentID: "*" })
-      const boundaryTime =
-        input.boundaryCreatedAt ??
-        allMsgs.find((m) => m.info.id === input.boundary)?.info.time.created
-      if (boundaryTime === undefined) {
-        log.warn("microcompact skipped: no boundary timestamp available", {
-          sessionID: input.sessionID,
-          boundary: input.boundary,
-        })
-        return true
-      }
-      let cleared = 0
-      for (const m of allMsgs) {
-        if (m.info.id === msg.id) continue
-        if (m.info.time.created <= boundaryTime) continue
-        for (const part of m.parts) {
-          if (part.type !== "tool") continue
-          if (!COMPACTABLE_TOOL_NAMES.has(part.tool)) continue
-          if (part.state.status !== "completed") continue
-          if (part.state.time.compacted) continue
-          part.state.time.compacted = Date.now()
-          yield* session.updatePart(part)
-          cleared += 1
-        }
-      }
-      if (cleared > 0) {
-        log.info("rebuild microcompact", { sessionID: input.sessionID, cleared })
-      }
-
       return true
     })
 
@@ -1823,7 +1732,6 @@ export const layer: Layer.Layer<
       waitForWriterSettlement,
       drainWriters,
       hasCheckpoint,
-      hasMemoryOrTasks,
       loadLatest,
       loadCheckpoints,
       renderIndex,

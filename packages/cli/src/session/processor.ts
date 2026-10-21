@@ -988,6 +988,8 @@ export const layer: Layer.Layer<
             )
 
             // Retry a pure empty output through the bounded unknown budget.
+            // Clear the empty turn's parts so it never sits in session history,
+            // keeping the assistant identity the retry writes into.
             // Reasoning-only output keeps the run loop's scoped continuation;
             // settled tool records and side effects must never be dropped or replayed.
             // Length and structured-output recovery remain owned by the run loop.
@@ -1010,10 +1012,17 @@ export const layer: Layer.Layer<
               ) {
                 const reason = classification.reason
                 slog.info("invalid output, dropping empty turn", { reason, finish: ctx.assistantMessage.finish })
-                yield* session.removeMessage({
-                  sessionID: ctx.sessionID,
-                  messageID: ctx.assistantMessage.id,
-                })
+                // Reset the content but keep the message identity: removing the message and
+                // rebuilding it under the same ID is indistinguishable, on the wire, from a
+                // late frame of an already-deleted entity, so consumers that order by events
+                // discard the retried content for good.
+                for (const part of parts) {
+                  yield* session.removePart({
+                    sessionID: ctx.sessionID,
+                    messageID: ctx.assistantMessage.id,
+                    partID: part.id,
+                  })
+                }
                 ctx.assistantMessage.finish = undefined
                 ctx.assistantMessage.error = undefined
                 ctx.assistantMessage.time.completed = undefined

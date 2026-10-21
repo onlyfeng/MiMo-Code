@@ -39,7 +39,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionCompaction } from "../../src/session/compaction"
-import { SessionPrompt } from "../../src/session/prompt"
+import { SessionPrompt, SESSION_MEMORY_DIR_MARKER } from "../../src/session/prompt"
 import { defaultLayer as CronBridgeDefaultLayer } from "../../src/session/cron-bridge"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
@@ -72,6 +72,17 @@ import { Instance } from "../../src/project/instance"
 import { bunEval, provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
+
+// The runLoop may persist the memory paths reminder on a user
+// message; tests pinning user parts compare everything else.
+function usersWithoutDirReminder(messages: MessageV2.WithParts[]) {
+  return messages
+    .filter((m) => m.info.role === "user")
+    .map((m) => ({
+      ...m,
+      parts: m.parts.filter((p) => !(p.type === "text" && p.text.includes(SESSION_MEMORY_DIR_MARKER))),
+    }))
+}
 import { Inbox } from "../../src/inbox"
 import { inboxServiceRef } from "../../src/inbox/inbox-ref"
 import { Metrics } from "../../src/metrics"
@@ -5547,7 +5558,7 @@ reminderMcpIt.live(
       expect(tools[1]).toContain('"name":"example_lookup"')
       expect(tools[1]).not.toContain('"name":"mcp_tool_search"')
         const messages = yield* MessageV2.filterCompactedEffect(session.id)
-        expect(messages.find((message) => message.info.role === "user")?.parts).toEqual([
+        expect(usersWithoutDirReminder(messages)[0]?.parts).toEqual([
           expect.objectContaining({ type: "text", text: "turn 0" }),
         ])
       }),
@@ -9697,7 +9708,7 @@ describe("trailing-user resume integration", () => {
           expect(JSON.stringify(messages.at(-1)?.content)).toContain(opts.text)
           const after = yield* sessions.messages({ sessionID: chat.id, agentID: "main" })
           expect(after.filter((m) => m.info.role === "user").map((m) => m.info.id)).toEqual([user1.id, user2.id])
-          expect(after.filter((m) => m.info.role === "user")).toEqual(before.filter((m) => m.info.role === "user"))
+          expect(usersWithoutDirReminder(after)).toEqual(usersWithoutDirReminder(before))
           expect(after.flatMap((m) => m.parts).filter((p) => p.type === "tool")).toEqual(
             before.flatMap((m) => m.parts).filter((p) => p.type === "tool"),
           )
@@ -10612,7 +10623,7 @@ describe("trailing-user resume integration", () => {
         const resumed = after.filter((m) => m.info.role === "assistant" && m.info.parentID === user2.id)
         expect(resumed).toHaveLength(1)
         expect(resumed[0]!.parts.some((p) => p.type === "text" && p.text === "RESUMED_ONCE")).toBe(true)
-        expect(after.filter((m) => m.info.role === "user")).toEqual(before.filter((m) => m.info.role === "user"))
+        expect(usersWithoutDirReminder(after)).toEqual(usersWithoutDirReminder(before))
         expect(after.flatMap((m) => m.parts).filter((p) => p.type === "tool")).toEqual(
           before.flatMap((m) => m.parts).filter((p) => p.type === "tool"),
         )

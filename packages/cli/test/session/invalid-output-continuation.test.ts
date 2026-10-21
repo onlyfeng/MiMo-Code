@@ -38,6 +38,11 @@ function assistantOnly(
   return msgs.filter((m): m is MessageV2.WithParts & { info: MessageV2.Assistant } => m.info.role === "assistant")
 }
 
+// The retry must resend the first attempt's history unchanged: no injected reminder.
+function nonSystemMessages(capture: { messages: unknown }) {
+  return (capture.messages as { role: string; content: unknown }[]).filter((m) => m.role !== "system")
+}
+
 afterEach(async () => {
   await Instance.disposeAll()
 })
@@ -198,11 +203,58 @@ describe("invalid-output continuation — integration", () => {
               const nonSystem = retry.filter((m) => m.role !== "system")
               expect(nonSystem.length).toBe(1)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("no usable"))).toBe(false)
-              expect(nonSystem.some((m) => JSON.stringify(m.content).includes("system-reminder"))).toBe(false)
+              expect(nonSystem).toEqual(nonSystemMessages(stub.captures[0]))
               expect({ statuses, attempts }).toEqual({ statuses: [1], attempts: [1] })
             }),
           ),
       })
+    } finally {
+      await stub.stop()
+    }
+  })
+
+  // 空回合丢弃必须重置内容而不是删除身份：先删再用同一 ID 重建的事件序列
+  // 与「已删实体的迟到帧」完全同形，按事件顺序判定的下游只能按删除处理，
+  // 重试后的正文就永久不再出现（切会话也补不回来，只有重启换新中心才恢复）。
+  test("dropping an empty turn keeps the assistant message identity", async () => {
+    await using tmp = await tmpdir({ git: true })
+    // Only a pure empty step is dropped inside process; reasoning-only output
+    // takes the run loop's scoped continuation instead.
+    const stub = startScriptedLLMServer([{ lines: emptyStopResponse() }, { lines: textStopResponse("final answer") }])
+    try {
+      await writeConfig(tmp.path, stub.origin)
+      const observed = await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "empty-turn-identity" })
+              const removedMessages: string[] = []
+              const unsubscribe = Bus.subscribe(MessageV2.Event.Removed, (event) => {
+                if (event.properties.sessionID !== session.id) return
+                removedMessages.push(event.properties.messageID)
+              })
+              yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "Answer my question." }],
+              }).pipe(Effect.ensuring(Effect.sync(unsubscribe)))
+              const messages = yield* sessions.messages({ sessionID: session.id, agentID: "main" })
+              return { messages, removedMessages }
+            }),
+          ),
+      })
+      const assistants = assistantOnly(observed.messages)
+      expect(assistants.length).toBe(1)
+      const assistant = assistants[0]!
+      // 身份保留：空回合重置后重试写入的仍是同一条 assistant，删除事实不指向它。
+      expect(observed.removedMessages).not.toContain(assistant.info.id)
+      expect(observed.removedMessages).toEqual([])
+      // 内容重置：空回合的 step 记录不残留，最终只有重试后的一个 step 及其正文。
+      expect(assistant.parts.some((part) => part.type === "text" && part.text === "final answer")).toBe(true)
+      expect(assistant.parts.filter((part) => part.type === "step-start")).toHaveLength(1)
     } finally {
       await stub.stop()
     }
@@ -280,7 +332,7 @@ describe("invalid-output continuation — integration", () => {
               const nonSystem = retry.filter((m) => m.role !== "system")
               expect(nonSystem.length).toBe(1)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("no usable"))).toBe(false)
-              expect(nonSystem.some((m) => JSON.stringify(m.content).includes("system-reminder"))).toBe(false)
+              expect(nonSystem).toEqual(nonSystemMessages(stub.captures[0]))
               const msgs = yield* sessions.messages({ sessionID: session.id, agentID: "general-1" })
               const assistants = assistantOnly(msgs)
               expect(assistants.length).toBe(1)
@@ -321,7 +373,7 @@ describe("invalid-output continuation — integration", () => {
               expect(nonSystem.length).toBe(1)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("checkpoint writer turn ended"))).toBe(false)
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("CHECKPOINT_COMPLETE"))).toBe(false)
-              expect(nonSystem.some((m) => JSON.stringify(m.content).includes("system-reminder"))).toBe(false)
+              expect(nonSystem).toEqual(nonSystemMessages(stub.captures[0]))
               expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(true)
             }),
           ),

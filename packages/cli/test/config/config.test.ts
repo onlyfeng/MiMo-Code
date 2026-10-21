@@ -1,4 +1,4 @@
-import { test, expect, describe, mock, afterEach, beforeEach } from "bun:test"
+import { test, expect, describe, mock, afterEach, beforeEach, spyOn } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Config, ConfigManaged } from "../../src/config"
@@ -25,7 +25,7 @@ import fs from "fs/promises"
 import { pathToFileURL } from "url"
 import { Global } from "../../src/global"
 import { ProjectID } from "../../src/project/schema"
-import { Filesystem } from "../../src/util"
+import { Filesystem, Log } from "../../src/util"
 import { ConfigPlugin } from "@/config/plugin"
 
 const emptyAccount = Layer.mock(Account.Service)({
@@ -382,6 +382,32 @@ test("preserves opt-in auto_worktree without changing other config", async () =>
       expect(config.auto_worktree).toBe(true)
     },
   })
+})
+
+test("ignores removed compaction.prune with one warning", async () => {
+  await using tmp = await tmpdir({
+    init: (dir) =>
+      writeConfig(dir, {
+        $schema: "https://opencode.ai/config.json",
+        model: "test/model",
+        compaction: { auto: false, prune: true },
+      }),
+  })
+  const warn = spyOn(Log.create({ service: "config" }), "warn")
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await load()
+        expect(config.model).toBe("test/model")
+        expect(config.compaction).toEqual({ auto: false })
+      },
+    })
+    expect(warn.mock.calls).toHaveLength(1)
+    expect(String(warn.mock.calls[0][0])).toContain("compaction.prune")
+  } finally {
+    warn.mockRestore()
+  }
 })
 
 test("ignores legacy tui keys in opencode config", async () => {
