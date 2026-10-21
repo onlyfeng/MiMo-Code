@@ -8,6 +8,14 @@ commits: 4e58a80184..3db8b9bb19
 
 # Lossless Session DB
 
+## Fork integration note
+
+The report and verification counts below describe the upstream implementation
+and its original validation. Fork validation is recorded separately in
+[the synchronization record](../../upstream-sync-2026-10-21-786151b3.md).
+The fork's `observedToolParts` protection inside `SessionCompaction.prune` is
+removed together with that function (FC-015).
+
 ## Report
 
 **What was built** — No code path rewrites a persisted part to shrink context any more. Turn-end prune and `stripNonEssential` are gone from `session/prune.ts` together with their call in `session/prompt.ts`; the uncalled `SessionCompaction.prune`, the rebuild-time microcompact in `insertRebuildBoundary`, `pressureLevel` / `contextPressureLevel`, `Flag.MIMOCODE_DISABLE_PRUNE` and the `compaction.prune` config key are removed. `fireCheckpoints`, the threshold functions and `resetThresholds` are unchanged.
