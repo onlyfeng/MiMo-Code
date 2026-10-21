@@ -7,6 +7,15 @@ source: https://github.com/XiaomiMiMo/MiMo-Code/pull/2695
 
 # Empty Turn Keeps Message Identity
 
+## Fork integration note
+
+The report and verification counts below describe the upstream implementation
+and its original validation. Fork validation is recorded separately in
+[the synchronization record](../../upstream-sync-2026-10-21-786151b3.md).
+In the fork only a pure empty step reaches this drop path. Reasoning-only output
+keeps the run loop's scoped continuation (FC-009), so the fork's identity
+regression drives a pure-empty stop instead of a think-only one.
+
 ## Report
 
 **What was built** — Dropping a think-only/empty step now clears that message's parts and keeps the message itself, instead of deleting the message and rebuilding a shell under the same ID. The retry writes into the surviving identity, the trigger condition and the retry request history are untouched, and the final persisted result is still exactly one assistant message carrying the retried answer. On the wire the sequence is now `message.part.removed` × N → `message.updated` → `message.part.updated`; no `message.removed` is published for a turn that will still deliver content.

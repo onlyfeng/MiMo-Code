@@ -8,6 +8,16 @@ commits: 4e58a80184..2bfc561e54
 
 # Memory Paths Reminder
 
+## Fork integration note
+
+The report and verification counts below describe the upstream implementation
+and its original validation. Fork validation is recorded separately in
+[the synchronization record](../../upstream-sync-2026-10-21-786151b3.md).
+The fork adopts the new memory instructions and the reminder unchanged. Its
+file tools also keep resolving the earlier `{current_session_id}` placeholder,
+because system prompts frozen in an existing session's prefix snapshot still
+tell the model to keep that segment verbatim (FC-002).
+
 ## Report
 
 **What was built** — The per-user-message recall reminder and `SessionCheckpoint.hasMemoryOrTasks` are gone. The `# Memory system` block names the project memory file as `<memoryRoot>/projects/<project_id>/MEMORY.md` and the session directory as `<memoryRoot>/sessions/<session_id>`, and says the real paths are given in a system reminder. The system prompt contains no project or session id and no nonexistent path, so it is byte-identical across projects and sessions.
