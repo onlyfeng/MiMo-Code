@@ -120,7 +120,6 @@ The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, 
 | Key | Purpose |
 |-----|---------|
 | `compaction.auto` | Auto-compact when context full (default true) |
-| `compaction.prune` | Prune old tool outputs (default true) |
 | `compaction.tail_turns` | Deprecated compatibility setting; projected compaction keeps whole API rounds arriving during compression |
 | `compaction.preserve_recent_tokens` | Deprecated compatibility setting; optional older API rounds use at most 40000 tokens, also capped by the ratio-based trigger after frozen prefix and projection overhead. New external requests arriving during compaction and their following messages remain even beyond that optional budget; oversized requests still undergo normal overflow handling |
 | `compaction.reserved` | Compatibility buffer for validating `compaction.max_context`, together with any output reservation; not subtracted from the ratio-based trigger |
@@ -140,7 +139,7 @@ The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, 
 | `dream.auto` / `dream.interval_days` | Auto memory consolidation on session start (default true / 7 days) |
 | `distill.auto` / `distill.interval_days` | Auto workflow packaging (default true / 30 days) |
 | `voice.asr_model` | ASR model (default `xiaomi/mimo-v2.5-asr`) |
-| `voice.control_model` | Voice control model (default `xiaomi/mimo-v2.5`) |
+| `voice.control_model` | Voice control model (default `xiaomi/mimo-v2.6-flash`) |
 | `workflow.maxConcurrentAgents` | Process-wide subagent concurrency ceiling (default min(16, 2×cores)) |
 | `workflow.maxDepth` | Max workflow nesting depth (default 8) |
 

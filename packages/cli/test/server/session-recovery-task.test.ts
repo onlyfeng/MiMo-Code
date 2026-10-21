@@ -10,7 +10,7 @@ import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer, AppRuntime } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
-import { SessionPrompt } from "../../src/session/prompt"
+import { SessionPrompt, SESSION_MEMORY_DIR_MARKER } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -50,6 +50,10 @@ const config = (url: string): Partial<Config.Info> => ({
     },
   },
 })
+// The runLoop may persist the memory paths reminder on a user message that no
+// reply follows yet; every other part must stay untouched.
+const isDirReminder = (part: MessageV2.Part) => part.type === "text" && part.text.includes(SESSION_MEMORY_DIR_MARKER)
+
 const resume = (dir: string, sessionID: string, assistantID: string, taskID: string, signal?: AbortSignal) =>
   Effect.promise(() =>
     Promise.resolve(
@@ -305,15 +309,11 @@ for (const scenario of [
               expect(user?.parts.filter((part) => original.parts.some((original) => original.id === part.id))).toEqual(
                 original.parts,
               )
-              const reminders = user?.parts.filter(
+              // The original user was already answered, so no reminder may rewrite it.
+              const added = user?.parts.filter(
                 (part) => !original.parts.some((original) => original.id === part.id),
               )
-              expect(reminders).toHaveLength(1)
-              expect(reminders?.[0]).toMatchObject({
-                type: "text",
-                synthetic: true,
-                text: expect.stringContaining("This session has memory at"),
-              })
+              expect(added).toEqual([])
               const continuation = messages.find(
                 (message) => message.info.role === "user" && message.info.source === "hook",
               )
@@ -488,7 +488,10 @@ it.live(
             Effect.timeout("10 seconds"),
           )
           expect(yield* llm.calls).toBe(1)
-          expect(messages.find((message) => message.info.id === user.id)).toEqual(before)
+          const recovered = messages.find((message) => message.info.id === user.id)
+          expect(recovered && { ...recovered, parts: recovered.parts.filter((part) => !isDirReminder(part)) }).toEqual(
+            before,
+          )
           expect(
             messages
               .flatMap((message) => message.parts)
