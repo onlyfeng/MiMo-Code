@@ -18,8 +18,8 @@ authority.
 - Last reviewed: 2026-10-21
 - Upstream: `8fd65328d976ae5636b46221264626e71ce0037f`
 - Prior reviewed upstream: `cf8c09d5315ea04a5af613f392ff17a8832b33c1`
-- Main behavior (runtime/tests): `543cd2a6b864c7c76fec8d35419e57470e9bb596` (memory paths reminder with legacy placeholder resolution, lossless session database, empty-turn identity reset, voice control default and terminal refusal retry order)
-- Inherited compat behavior: `6f0ee690fc4f1a2cce05c8118b90446d9d7cf4dc` (shared sync inherited; compat request estimation retained without pressure levels; JSON-schema recall suppression retired)
+- Main behavior (runtime/tests): `4c710d22f6985e1c100e6a5dac2e069d85fb8c7c` (memory paths reminder with legacy placeholder resolution and adapted fork user-part assertions, lossless session database, empty-turn identity reset, voice control default and terminal refusal retry order)
+- Inherited compat behavior: `17cfd7672a3e0b362405274308c4bba26c4a0224` (shared sync inherited; compat request estimation retained without pressure levels; JSON-schema recall suppression retired)
 - Bundled guidance content: `dfd6d5f8a9b25dfadb86cda088cd285aea466a49` (YAML-safe Compose Next source and merge confirmation; `mimocode-docs` prune and voice entries)
 - Prior fork `main` tip: `5db15cfbd85722eeb20346731e5c90e7d0b88d3a`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
@@ -522,7 +522,11 @@ not change their implementation. The preceding review is retained in the
   `synthetic-reminder.test.ts` and `session-memory-dir-reminder-persist.test.ts`
   at the reviewed main behavior. The system-prompt stability case runs in a git
   fixture, because the fork's non-git fixture resolves the project ID to
-  `global`, a word the global memory path also contains.
+  `global`, a word the global memory path also contains. Fork
+  `server/session-recovery-task.test.ts` asserts that an answered recovered user
+  gains no part. Its historical-task case and `skill-catalog-reopen.test.ts`
+  exclude the reminder only on a never-sent user, and the reopen case asserts
+  exactly one.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0b665c7e681e44cac6f1a6acf18732015fb2bf86`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
