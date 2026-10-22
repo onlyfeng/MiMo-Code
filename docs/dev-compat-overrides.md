@@ -10,6 +10,17 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-22; live upstream `8fd65328..213365a0`.
+- Starting compat: `ac667d4b2db1dce6f893ca6d6944f72ab5f21e61`; inherited main runtime/tests: `7a3585829e247c0f27eefa90f33073dad82eaffe`; reviewed compat runtime/tests: `951fcd2d3ef19c0f72df2892c7ba675c05abb918`.
+- Scope: C01-C03 in [the shared synchronization record](upstream-sync-2026-10-22.md). Main owns appended boundary placement, chronological legacy compatibility, receipt-aware writer/turn restoration, atomic recovery settlement, Compose Next anchors and spec provenance.
+- Direct adaptation: import unions in checkpoint/prompt retain coverage queries, schema helpers, model selection and request overflow classification. DC-CONTEXT-001 retains capped digest/rebuild output, current-turn preflight, canonical request sizing and coverage; DC-ACTOR-001 retains frozen full-context authority, capture and static overflow handling.
+- Adjacent review: DC-MODEL-001 per-agent MaxMode, DC-TUI-001 selection display and DC-WEBSEARCH-001 native/fallback routing inherit changed prompt code without a policy change. DC-ACTOR-002 and DC-PROVIDER-001 remain unchanged. DC-NET-001/002, DC-PLATFORM-001 and DC-WEBFETCH-001 have no incoming implementation delta; Windows remains a final CI runtime requirement.
+- Validation: Bun 1.3.14 `bun ci` completes without changing the lockfile; CLI typecheck exits 0 and SDK regeneration exits 0 with no extra diff. Final affected tests and exact-SHA CI are pending in the shared record.
+- Shared ownership: shared registries/history/report are inherited unchanged from main; this file owns the compat review.
+
+## Previous review record: 8fd65328 synchronization
+
 - Status: active; all eleven DC owners remain compat-owned. No override is retired or promoted to shared `main`.
 - Last reviewed: 2026-10-21; full live synchronization over `cf8c09d5315ea04a5af613f392ff17a8832b33c1..8fd65328d976ae5636b46221264626e71ce0037f`.
 - Starting compat: `e7bbf8e60116074b50fa9a53eb3f61224cac1b1f`; inherited main runtime/tests: `4c710d22f6985e1c100e6a5dac2e069d85fb8c7c`; reviewed compat runtime/tests: `17cfd7672a3e0b362405274308c4bba26c4a0224`, integrated with accepted main PR #172 merge `1c5a6cccb92494c5c0b0796e153b88829a3e39dc` without further source change.

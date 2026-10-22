@@ -4042,3 +4042,7 @@ record-only commit and are verified separately.
   all ten test jobs and actual Windows runtime. Final docs-only descendant
   equivalence, remote tips, ancestry and scoped cleanup are checked in the
   execution receipt. This registry-only update advances no runtime behavior reference.
+
+## 2026-10-22 — inherited `213365a0` synchronization
+
+C01-C03 remain shared main capabilities; all eleven DC owners remain. Preserve capped rebuild context and digest, coverage/preflight, full-context actor, model/display/search policy and unchanged network/platform overlays. See [shared evidence](upstream-sync-2026-10-22.md) and the current compat registry for validation and exact-SHA publication.
