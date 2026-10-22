@@ -22,4 +22,17 @@ All rows audit `8fd65328..213365a0`. Shared canonical owner is `main`; compat in
 
 ## Validation and publication
 
-Pending. No local or remote completion is claimed by this initial inventory.
+Runtime/test integration: `fa79aa92`; legacy same-time correction: `a69ef021`.
+C01 uses an optional `CheckpointPart.placement: "after-tail"` discriminator. Backdated legacy markers keep the fork's chronological seam reconstruction; new markers stop at the appended boundary. The raw writer history and logical run-loop turn are restored through receipt-aware chronological positions, never an ID range. Recovery settlement excludes checkpoint markers from its atomic latest-message/parent queries without dropping queue visibility or lease checks. Task/source/run-approval and frozen tool rebinding are retained. Compat retains capped digest/rendering, coverage, preflight and full-context actor extensions. SDK was regenerated on both resolved branches.
+
+The legacy same-time regression initially exposed that upstream timestamp-based detection cannot distinguish all fork records. The explicit discriminator plus the existing exact-position collapse resolves this; the original legacy fixture is now seeded with its persisted old shape. Its assertions remain intact. A reverse-ID unanswered input is covered by the real request placement test.
+
+Bun is pinned to packageManager 1.3.14 for validation; `bun ci` completed on both branches and bun.lock is unchanged. Default commands remove ambient MIMOCODE_EXPERIMENTAL, MIMOCODE_MCP_TOOL_SEARCH and MIMOCODE_CODEX_MODE. Package preload remains @opentui/solid/preload plus test/preload.ts (isolated HOME/XDG, in-memory DB, default plugins disabled; no added experimental selectors).
+
+Local evidence so far: main CLI typecheck exit 0; root lint 3,661 warnings / 0 errors; SDK generation exit 0. A 41-case rebuild run passed 40 and exposed the legacy same-time collapse; after the correction its owning legacy/unify set passes 24/24, and the reverse-ID real request passes 1/1 (6 filtered). Broader checkpoint/prompt and final branch CI remain pending; temporary logs use the operation prefix outside the repository.
+
+C02 content review preserves YAML source quoting and merge confirmation, adopts stable S1/S2/S3 and S2.1 anchors. C03 frontmatter adopts the upstream PR sources while keeping the fork's later context-budget review date and all retained behavior notes; the obsolete inbox spec deletion changes no implementation. No FD/FC/DC owner retires.
+
+## Publication
+
+Pending exact-SHA lint/typecheck/test on both final branches, remote/ancestry verification, refreshed upstream check and scoped cleanup. This record will be completed from actual runs.
