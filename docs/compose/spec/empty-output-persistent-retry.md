@@ -7,6 +7,16 @@ source: https://github.com/XiaomiMiMo/MiMo-Code/pull/2703
 
 # Empty Output Retries Persistently
 
+## Fork integration
+
+Fork `main` and `dev/compat` apply persistent server retry only to genuinely empty,
+replay-safe, tool-free, non-structured steps that did not finish by length.
+Reasoning-only output retains bounded actor-scoped continuation with atomic
+source/task/run ownership; summary recovery retains its separate retry and
+fallback rules. Explicit bounded server overrides and cancellation still apply.
+See [FC-013](../../fork-capabilities.md#fc-013--retry-budget-resolution-and-maxmode-final-step-enforcement)
+and [the synchronization record](../../upstream-sync-2026-10-22.md).
+
 ## Report
 
 **What was built** — `SessionRetry.decide` now classifies `InvalidOutputError` (empty or think-only step) as `kind: "server"`, so `budgetFor` applies the persistent server budget: no retry count, no wall-clock deadline, exponential backoff capped at 30 s. A turn whose upstream stalls or closes without content keeps retrying until usable output arrives or the user cancels, instead of failing after two attempts when one stalled attempt outlasts the former 15-minute `unknown` deadline. The retry reason stays "empty output", so the existing retry status and Desktop reconnect copy are unchanged.
