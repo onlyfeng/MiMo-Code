@@ -5438,19 +5438,19 @@ it.live(
 )
 
 it.live(
-  "request preflight stops when recovery makes no progress",
+  "request preflight rebuild digests post-checkpoint history and preserves the active turn",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Stalled preflight recovery" })
+        const chat = yield* sessions.create({ title: "Checkpoint preflight recovery" })
         const checkpoint = yield* seed(chat.id, { finish: "stop" })
         yield* Effect.promise(() => mkdir(path.dirname(checkpointPath(chat.id)), { recursive: true }))
         yield* Effect.promise(() =>
           Bun.write(
             checkpointPath(chat.id),
-            "# Session checkpoint\n\n## §1 Active intent\nKeep diagnosing the stalled overflow recovery.\n",
+            "# Session checkpoint\n\n## §1 Active intent\nKeep the current request after digesting earlier activity.\n",
           ),
         )
         yield* Effect.sync(() =>
@@ -5471,12 +5471,13 @@ it.live(
         yield* sessions.updatePart({ ...historyText, text: "post-checkpoint history " + "x".repeat(400 * 1024) })
         yield* user(chat.id, "ACTIVE_TURN_AFTER_CHECKPOINT")
 
+        yield* llm.text("recovered after rebuild")
         const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("20 seconds"))
 
         expect(result.info.role).toBe("assistant")
         if (result.info.role === "assistant") {
-          expect(result.info.finish).toBe("error")
-          expect(result.info.error).toMatchObject({ name: "ModelError", data: { message: expect.stringContaining("no sufficient progress") } })
+          expect(result.info.finish).toBe("stop")
+          expect(result.info.error).toBeUndefined()
         }
         const messages = yield* sessions.messages({ sessionID: chat.id })
         expect(
@@ -5486,11 +5487,15 @@ it.live(
         ).toHaveLength(1)
         expect(
           messages.filter((message) => message.info.role === "assistant" && message.info.error?.name === "ModelError"),
-        ).toHaveLength(1)
+        ).toHaveLength(0)
         expect(messages.flatMap((message) => message.parts).filter((part) => part.type === "checkpoint")).toHaveLength(
           1,
         )
-        expect(yield* llm.hits).toHaveLength(0)
+        const inputs = yield* llm.inputs
+        expect(inputs).toHaveLength(1)
+        expect(JSON.stringify(inputs[0].messages)).toContain("ACTIVE_TURN_AFTER_CHECKPOINT")
+        expect(JSON.stringify(inputs[0].messages)).not.toContain("x".repeat(400 * 1024))
+        expect(result.parts.some((part) => part.type === "text" && part.text === "recovered after rebuild")).toBe(true)
       }),
       { git: true, config: checkpointRecoveryOverflowCfg },
     ),
