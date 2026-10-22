@@ -34,7 +34,10 @@ type ScriptedResponse = {
   beforeReply?: () => Promise<unknown>
 }
 
-function sseChunk(delta: Record<string, unknown>, finishReason?: string): string {
+/** Token usage reported on the finishing chunk of a scripted step. */
+export type ScriptedUsage = { promptTokens: number }
+
+function sseChunk(delta: Record<string, unknown>, finishReason?: string, usage?: ScriptedUsage): string {
   const payload = {
     id: "chatcmpl-stub",
     object: "chat.completion.chunk",
@@ -44,16 +47,25 @@ function sseChunk(delta: Record<string, unknown>, finishReason?: string): string
         ...(finishReason ? { finish_reason: finishReason } : {}),
       },
     ],
+    ...(usage
+      ? {
+          usage: {
+            prompt_tokens: usage.promptTokens,
+            completion_tokens: 1,
+            total_tokens: usage.promptTokens + 1,
+          },
+        }
+      : {}),
   }
   return `data: ${JSON.stringify(payload)}\n\n`
 }
 
 /** Build SSE lines for a plain text stop response */
-export function textStopResponse(text: string): string[] {
+export function textStopResponse(text: string, usage?: ScriptedUsage): string[] {
   return [
     sseChunk({ role: "assistant" }),
     sseChunk({ content: text }),
-    sseChunk({}, "stop"),
+    sseChunk({}, "stop", usage),
     "data: [DONE]\n\n",
   ]
 }
@@ -130,7 +142,10 @@ export function toolCallResponse(params: { id: string; name: string; args: strin
 }
 
 /** Build one assistant step containing multiple tool calls in emission order. */
-export function toolCallsResponse(calls: { id: string; name: string; args: string }[]): string[] {
+export function toolCallsResponse(
+  calls: { id: string; name: string; args: string }[],
+  usage?: ScriptedUsage,
+): string[] {
   return [
     sseChunk({ role: "assistant" }),
     ...calls.flatMap((call, index) => [
@@ -139,7 +154,7 @@ export function toolCallsResponse(calls: { id: string; name: string; args: strin
       }),
       sseChunk({ tool_calls: [{ index, function: { arguments: call.args } }] }),
     ]),
-    sseChunk({}, "tool_calls"),
+    sseChunk({}, "tool_calls", usage),
     "data: [DONE]\n\n",
   ]
 }
