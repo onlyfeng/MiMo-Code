@@ -216,6 +216,7 @@ export type StreamInput = {
     next: number
     phase?: "request" | "stream"
     scope?: "request" | "live-step" | "max-candidate" | "max-judge"
+    kind: SessionRetry.RetryKind
     hostCode?: string
   }) => Effect.Effect<void>
 }
@@ -992,21 +993,20 @@ const live: Layer.Layer<
                     // Recoverable kinds (network / rate_limit / server) use persistent
                     // budgets and the request-phase ladder is often the only waiter the
                     // user can observe — processor stream retries never see the failure.
-                    // Publish session.status{retry} here so Desktop can show the
-                    // reconnect row instead of a dead spinner. Attempts stay on
-                    // Session.Event.RetryAttempt as well for diagnostics, main-only (FC-013)
-                    // unless the caller is propose-only ensemble (quietRetryDiagnostics).
+                    // The processor records it on the assistant message for every actor
+                    // and publishes session.status{retry} for main, so Desktop can show
+                    // the reconnect row instead of a dead spinner. Attempts stay on
+                    // Session.Event.RetryAttempt as well for diagnostics.
+                    // Global diagnostics remain main-only and quiet ensembles remain isolated.
                     // The Promise bridge would reattach ambient ALS instead of this fiber's InstanceRef.
-                    const ownsMainStatus = !input.ephemeral && (!input.agentID || input.agentID === "main")
-                    if (ownsMainStatus && input.onRetryStatus) {
-                      // Processor-owned SessionStatus (same map GET /session/status serves),
-                      // so reload/hydrate still shows the reconnect row.
+                    if (!input.ephemeral && input.onRetryStatus) {
                       yield* input.onRetryStatus({
                         attempt: nextAttempt,
                         message: decision.message,
                         next: Date.now() + wait,
                         phase: decision.phase,
                         scope: decision.scope,
+                        kind: decision.kind,
                         hostCode: decision.hostCode,
                       }).pipe(Effect.ignore)
                     }

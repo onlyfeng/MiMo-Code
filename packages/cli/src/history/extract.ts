@@ -1,3 +1,4 @@
+import { normalizeRetryPart } from "../session/retry-record"
 import { boundedJson, INDEX_MAX_BYTES, INDEX_MAX_LINES, previewForIndex, previewToolOutput } from "./index-preview"
 import type { MessageV2 } from "../session/message-v2"
 
@@ -88,7 +89,7 @@ export function extract(
   // Index ALL content for History.search (shared tool contract). Visibility
   // for other consumers is enforced at query time via kind + projection semantics.
   void opts
-  const raw = extractRaw(part, messageRole, opts)
+  const raw = extractRaw(normalizeRetryPart(part) as MessageV2.Part, messageRole, opts)
   if (!raw) return null
   // body = original preview (display); body_idx = search form (D5/D7).
   return { ...raw, body_idx: buildSearchIndexText(raw.body) }
@@ -155,7 +156,7 @@ function extractRaw(part: MessageV2.Part, messageRole: "user" | "assistant", opt
     case "retry":
       return {
         kind: "retry",
-        body: previewForIndex([part.error.data.message, part.error.data.responseBody].filter(Boolean).join(" ")),
+        body: previewForIndex(part.message),
         tool_name: null,
       }
     case "snapshot":

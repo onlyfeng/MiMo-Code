@@ -522,7 +522,7 @@ scripted.live("session.processor does not persist empty streamed text parts", ()
     {
       git: true,
       // Inspect cleanup of this attempt without retrying into the mock's default reply.
-      config: (url) => ({ ...providerCfg(url), retry: { unknown: { maxRetries: 0 } } }),
+      config: (url) => ({ ...providerCfg(url), retry: { server: { mode: "bounded", maxRetries: 0 } } }),
     },
   ),
 )
@@ -539,7 +539,7 @@ scripted.live("session.processor removes text cleared by a completion hook", () 
     {
       git: true,
       // Inspect cleanup of this attempt without retrying into the mock's default reply.
-      config: (url) => ({ ...providerCfg(url), retry: { unknown: { maxRetries: 0 } } }),
+      config: (url) => ({ ...providerCfg(url), retry: { server: { mode: "bounded", maxRetries: 0 } } }),
     },
   ),
 )

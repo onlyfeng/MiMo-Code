@@ -168,7 +168,8 @@ export default [
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data, source) => {
-    MessageV2.Event.PartUpdated.schema.parse(data)
+    const parsed = MessageV2.Event.PartUpdated.schema.parse({ ...data, part: MessageV2.normalizeRetryPart(data.part) })
+    data.part = parsed.part
     if (data.part.sessionID !== data.sessionID) throw new SyncEvent.ReplayValidationError("Part belongs to another session")
     assertPartOwner(db, data.sessionID, data.part.messageID, data.part.id)
     const { id, messageID, sessionID, ...rest } = data.part

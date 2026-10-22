@@ -637,6 +637,8 @@ export const layer: Layer.Layer<
 
       if (result === "text-repeat") return yield* rollback("Compaction produced repeated text")
       if (result === "stop") return yield* rollback("Compaction failed before producing a summary")
+      // Summary steps never observe lane inputs.
+      if (result === "superseded") return yield* Effect.die(new Error("Compaction step cannot be superseded"))
 
       // A reasoning model asked to write a summary can spend the whole step
       // thinking and finish without emitting any text — the "think-only" step

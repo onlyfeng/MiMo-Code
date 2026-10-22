@@ -92,7 +92,7 @@ export function storeImportedSession(
     if (msg.sessionID !== info.id || messageIDs.has(msg.id)) throw new Error(`Invalid imported message: ${msg.id}`)
     messageIDs.add(msg.id)
     const parts = message.parts.map((value) => {
-      const part = MessageV2.Part.parse(value)
+      const part = MessageV2.Part.parse(MessageV2.normalizeRetryPart(value))
       if (part.sessionID !== info.id || part.messageID !== msg.id || partIDs.has(part.id))
         throw new Error(`Invalid imported part: ${part.id}`)
       partIDs.add(part.id)

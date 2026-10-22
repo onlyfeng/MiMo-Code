@@ -4534,6 +4534,38 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
       })
 
+    // Removes the retry records of the user turns this run completed successfully.
+    // Called only at the run loop's success exits, never from failure, abort or
+    // interruption paths, so a failed turn keeps its records next to the error.
+    // `fromUserID` is the first real user message the run worked on; every
+    // assistant answering it or a later user message (synthetic re-entries,
+    // queued prompts admitted into the same run) belongs to completed work. A step
+    // superseded by a newer input holds nothing but its record, so it goes as well.
+    const clearTurnRetryRecords = Effect.fn("SessionPrompt.clearTurnRetryRecords")(function* (
+      sessionID: SessionID,
+      agentID: string,
+      fromUserID: MessageID,
+    ) {
+      for (const part of MessageV2.retryParts(sessionID, agentID, fromUserID)) {
+        yield* sessions.removePart({ sessionID: part.sessionID, messageID: part.messageID, partID: part.id })
+        // Keep the assistant identity: durable receipts may still reference its first delivery.
+      }
+    })
+
+    // Completes once the lane holds an accepted input that no run has claimed yet:
+    // a steer or queued prompt the run loop would take at its next step.
+    const awaitNewInput = (lane: Lane) => {
+      const controller = inboxControllerRef.current
+      if (!controller) return undefined
+      return Effect.gen(function* () {
+        let revision = -1
+        for (;;) {
+          if ((yield* controller.listAccepted(lane)).length > 0) return
+          revision = yield* controller.observeInput(lane, revision)
+        }
+      })
+    }
+
     const runLoop: (
       sessionID: SessionID,
       agentID?: string,
@@ -4584,6 +4616,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // prose text instead of a structured tool_use). Local to runLoop so each
       // fresh user turn starts clean.
       let textToolCallRetries = 0
+      let runFirstUserID: MessageID | undefined
       const resolvedAgentID = agentID ?? "main"
       const hintToken: MainHintToken = resolvedAgentID === "main" && turnSource === "user"
         ? openMainHintToken(sessionID, ctx.directory)
@@ -5763,6 +5796,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (!lastUser) {
             throw new Error("No user message found in stream. This should never happen.")
           }
+          const currentUserID = lastUser.id
+          const currentTurnIndex = turnMsgs.findIndex((message) => message.info.id === currentUserID)
+          runFirstUserID ??= turnMsgs.slice(0, currentTurnIndex + 1).findLast((message) =>
+            message.info.role === "user" && !message.parts.every(isSyntheticPart),
+          )?.info.id ?? lastUser.id
           if (resolvedAgentID === "main" && (subagentWaitUser || unprocessedPrompt)) {
             const previous = subagentWaitUser
             subagentWaitUser = undefined
@@ -5897,6 +5935,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 continue
               }
               if (yield* goalGate(lastUser)) continue
+              if (classification.type === "final" && runFirstUserID)
+                yield* clearTurnRetryRecords(sessionID, resolvedAgentID, runFirstUserID)
               yield* slog.info("exiting loop", { classification: classification.type })
               break
             }
@@ -6304,6 +6344,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 sessionID,
                 model,
                 agentMetrics,
+                awaitNewInput: recovery ? undefined : awaitNewInput({ sessionID, agentID: resolvedAgentID }),
               })
 
               const outcome: "break" | "continue" = yield* Effect.gen(function* () {
@@ -6528,6 +6569,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           .pipe(Effect.ignore),
                       ),
                     )
+
+                  if (result === "superseded") return "continue" as const
 
                   if (
                     result === "continue" &&
@@ -6933,6 +6976,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   ),
                 )
 
+                if (result === "superseded") return "continue" as const
+
                 if (handle.message.time.completed && !handle.message.error) {
                   yield* SessionPrefixSnapshot.advance({
                     sessionID,
@@ -7182,6 +7227,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               continue
             }
             if (yield* goalGate(lastUser)) continue
+            if (structured !== undefined && !handle.message.error && runFirstUserID)
+              yield* clearTurnRetryRecords(sessionID, resolvedAgentID, runFirstUserID)
             break
           }
           continue

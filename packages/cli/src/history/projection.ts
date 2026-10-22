@@ -43,7 +43,11 @@ export function projection(preview = false) {
       'name', ${field("$.name")},
       'files', ${field("$.files")},
       'projection', json_object('summary', ${field("$.projection.summary")}, 'manifest', ${field("$.projection.manifest")}),
-      'error', json_object('data', json_object('message', ${field("$.error.data.message")}, 'responseBody', ${field("$.error.data.responseBody")})),
+      'message', ${field("$.message")},
+      'error', json_object('data', json_object(
+        'message', ${field("$.error.data.message")},
+        'responseBody', ${field("$.error.data.responseBody")}
+      )),
       'snapshot', ${field("$.snapshot")},
       'checkpointDir', ${field("$.checkpointDir")},
       'checkpointNumber', ${field("$.checkpointNumber")},
