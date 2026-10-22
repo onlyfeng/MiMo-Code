@@ -4043,6 +4043,12 @@ record-only commit and are verified separately.
   equivalence, remote tips, ancestry and scoped cleanup are checked in the
   execution receipt. This registry-only update advances no runtime behavior reference.
 
-## 2026-10-22 — inherited `213365a0` synchronization
+## 2026-10-22 — inherited `e37f2c2d` synchronization
 
-C01-C03 remain shared main capabilities; all eleven DC owners remain. Preserve capped rebuild context and digest, coverage/preflight, full-context actor, model/display/search policy and unchanged network/platform overlays. See [shared evidence](upstream-sync-2026-10-22.md) and the current compat registry for validation and exact-SHA publication.
+C01-C05 remain shared main capabilities; all eleven DC owners remain. Preserve capped rebuild context and digest, coverage/preflight, full-context actor, model/display/search policy and unchanged network/platform overlays. See [shared evidence](upstream-sync-2026-10-22.md) and the current compat registry for validation and exact-SHA publication.
+
+The final preflight adaptation is fork PR #174: the new appended rebuild digests oversized post-checkpoint history, sends the active turn once and succeeds; frozen-fork no-progress and exhausted-budget guards remain intact. The 18-case preflight set passes. Shared CI bootstrap repair is inherited from main and adds no DC owner.
+
+Live advancement is inherited from main runtime/test `3f6ac1542e605d61bc828dffbdaed74dfc51d620` into compat runtime/test `be4b22055b299a608b064730cc922508a0b002e6`. Persistent empty retries and durable retry parts preserve chronological parent selection, legacy normalization, main-only diagnostics, bounded reasoning continuation and receipt identity. Native-search fallback supplies the required retry kind without a policy change. The 52 production overlay paths and all eleven DC owners are unchanged. Local validation: 125 pass/two existing skips/zero failures, plus 25 native/request/structured retry and 17 OpenAPI/TUI passes. Shared CI and final docs-only equivalence are recorded in the linked evidence.
+
+Final runtime/test CI at `be4b22055b299a608b064730cc922508a0b002e6` completed successfully for lint, typecheck and the complete test workflow, including actual Windows runtime. Final registry-only descendants retain the same outside-docs tree; remote/local equality, live ancestry and scoped cleanup are verified in the final execution receipt.

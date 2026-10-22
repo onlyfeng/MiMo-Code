@@ -16,12 +16,12 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-22
-- Upstream: `213365a0a3fd1ec0b171687d85bc453f05d33863`
+- Upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
 - Prior reviewed upstream: `8fd65328d976ae5636b46221264626e71ce0037f`
-- Main behavior (runtime/tests): `4c710d22f6985e1c100e6a5dac2e069d85fb8c7c` (memory paths reminder with legacy placeholder resolution and adapted fork user-part assertions, lossless session database, empty-turn identity reset, voice control default and terminal refusal retry order)
-- Inherited compat behavior: `17cfd7672a3e0b362405274308c4bba26c4a0224` (shared sync inherited; compat request estimation retained without pressure levels; JSON-schema recall suppression retired)
-- Bundled guidance content: `dfd6d5f8a9b25dfadb86cda088cd285aea466a49` (YAML-safe Compose Next source and merge confirmation; `mimocode-docs` prune and voice entries)
-- Prior fork `main` tip: `5db15cfbd85722eeb20346731e5c90e7d0b88d3a`
+- Main behavior (runtime/tests): `3f6ac1542e605d61bc828dffbdaed74dfc51d620` (appended rebuild boundaries, chronological legacy compatibility, receipt-aware recovery, persistent pure-empty retries and normalized durable retry records; bounded read-tool fixture)
+- Inherited compat behavior: `be4b22055b299a608b064730cc922508a0b002e6` (shared rebuild/retry/record behavior inherited; native-search retry kind adapted; capped context/digest, coverage/preflight and full-context actor extensions retained)
+- Bundled guidance content: `fa79aa9295c20b7f34e70818ab435878c3ea955a` (Compose Next stable anchors and rebuild command/config guidance)
+- Prior fork `main` tip: `dda5cdb52ab81655b0e6236401663ab8c5f24ca5`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-22 full sync through `213365a0`](upstream-sync-2026-10-22.md), three capabilities. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
+Latest reviewed synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
 Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
 
@@ -119,6 +119,8 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-22 live advancement: a newly accepted lane input supersedes a failing retry step through the existing claim/consume/task and run-approval boundaries. Recovery keeps its locked parent and does not observe the new-input watcher. Successful cleanup removes retry parts but retains assistant identities referenced by durable first-delivery receipts. Tests cover lower-ID admission, supersession, receipt anchors, recovery and retained authority.
 
 - 2026-10-21 synchronization: upstream `88673c41` deletes `recall-reminder.test.ts`, its only consumer of the `actor` hint, and moves the `hasActorTool` predicate cases into `test/tool/actor-subagent-gating.test.ts` with upstream's "an unresolvable agent keeps the tool" case. The fork keeps PR #53's fail-closed result: that moved case asserts `hasActorTool(undefined) === false`, and `ToolRegistry.available` remains the only production caller.
 
@@ -890,6 +892,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-10-22 synchronization validation: `.github/actions/setup-bun/action.yml` exposes npm's bundled `node-gyp` on a job-temporary PATH before locked installation. A runner may execute the trusted tree-sitter-powershell native install script even though the CLI uses its WASM asset. Repeated CI ENOENT established that no build executable was available; this setup reuses the existing npm dependency without adding installs, changing the lockfile, widening trust or altering product module resolution.
+
 - 2026-10-14 synchronization: upstream `002cb4c9` adds `abortSignal` to `Question.ask`'s input and passes `ctx.abort` from the question and plan tools. It replaces the fork's second-argument signal; the POLICY-01 lifecycle (closed-generation admission, captured publisher, single `Rejected` through `dismiss`) is unchanged, and an abort now dismisses and then awaits the request so a reply already in flight wins. The detached `Bus.publish` helper now ignores an interrupt-only exit from instance disposal (see the FC-007 note). Evidence: `test/question/question.test.ts`, `test/question/lifecycle.test.ts`, `test/cli/tui/question-lifecycle.test.tsx`, `test/tool/plan.test.ts`.
 
 - 2026-10-13 format alignment, second pass: the first pass only reverted hunks that were formatting in their entirety and only looked at `packages/cli/src`. This pass covers every modified `ts`/`tsx`/`md` file outside `docs/` (273, including the 143 modified test files) and reaches formatting noise inside mixed hunks: a three-way merge of ours = upstream bytes, base = `prettier(upstream)`, theirs = `prettier(fork)` keeps upstream's bytes wherever the fork only reformatted, after which only the hunks whose restored block is a contiguous substring of the upstream file are kept, and files the merge cannot stitch fall back to the single-hunk test at `-U0` granularity. Two guards: the result must be Prettier-equivalent to the fork file, and a hunk whose first line changes indentation is never restored, because upstream's indentation of a block only fits upstream's nesting (upstream's own `prompt.ts` skill-mention block is mis-indented, and the fork keeps its corrected form rather than inherit that). Outcome: 24 files, 433 fewer changed lines and 274 fewer hunks against upstream `b258d28f` (3061 → 2787), `test/mcp/host.test.ts` byte-identical to upstream again, and the realigned `prompt-effect.test.ts` diff drops from 370 hunks to 168 with two restored lines. The remaining difference is semantic: over the same 273 files the raw diff (39.6K changed lines) is already smaller than the Prettier-normalized diff of the two trees (40.2K), and the per-file excess that remains (648 lines in `session/prompt.ts`, under 100 anywhere else) sits where the fork changed code that upstream itself keeps un-formatted, which no byte-level revert can remove. Changed test files pass locally except one `actor-subagent-gating` case that fails identically on the untouched tree whenever `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS` is inherited from an enclosing MiMoCode session, and passes with it unset.
@@ -1565,6 +1569,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
 
+- 2026-10-22 live advancement: pure-empty InvalidOutputError uses the persistent server live-step budget, with explicit bounded overrides and cancellation still effective. The retrySafe/tool-residue/non-length/non-structured guards remain; reasoning-only output keeps bounded actor-scoped continuation and atomic provenance. Request and stream retries persist per-actor records, while global status and RetryAttempt stay main-only; ephemeral/quiet MaxMode scopes remain isolated. Summary retry/fallback ownership remains under FD-010/011/012.
+
 - 2026-10-21 synchronization: upstream `8fd65328` checks `retryConstraint(error) === "terminal"` before the `exhausted`/`unavailable` capacity heuristic in `decide`. HTTP403 membership and subscription-quota refusals and HTTP402 balance refusals now make one request and settle as an assistant API error instead of persistent server recovery. The fork had the same order, so the moved line is the whole change. Budget resolution, scope isolation and main-only publication are unchanged. Upstream `a7440d13` also changes the empty-attempt cleanup that the 2026-10-20 bullet below describes: the assistant identity is kept and only its parts are removed (FC-009). Evidence: `title-first-turn.test.ts` TP-REFUSAL-01, `retry.test.ts`, `test/error/host-registry.test.ts`.
 
 - 2026-10-20 post-sync correction: the processor's stream retry callback now
@@ -1850,6 +1856,8 @@ logged`, and the peer `success`/`failure` variants of
   regressions.
 
 ## FC-017 — faithful and bounded history previews
+
+- 2026-10-22 live advancement: new retry records expose phase/scope/kind/message/next and both timestamps. Historical schema-valid error-based retry rows normalize at hydration, import and replay boundaries without weakening the public schema or editing shipped SQL. Legacy message and response content remain searchable through bounded NUL-safe projections; export redacts the resulting message. Replay normalizes the original event object before storage and publication. Reverse-ID and UTF8 tie-break tests enforce parent chronology and actor/session isolation.
 
 - 2026-10-14 synchronization: upstream `6ba6a625` makes the shipped `20261011000000_history_fts_kind` and `20261012000000_history_cjk_unigram` migrations replay-safe (`CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`) and routes `Database.Client()` through `migrateReplaySafe`. Adopted unchanged: both migrations are upstream-owned and were byte-identical to upstream, the edits change no schema, and drizzle selects migrations by journal name, so the AGENTS.md rule against editing shipped migrations (which protects applied journals) is not engaged. FC-017's projection, media and preview bounds are untouched. Evidence: `test/history/fts-kind-idempotent.test.ts`, `test/history/fts-kind-boot.e2e.test.ts` and every other `test/history/` file.
 

@@ -15,12 +15,12 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-22
-- Upstream: `213365a0a3fd1ec0b171687d85bc453f05d33863`
+- Upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
 - Prior reviewed upstream: `8fd65328d976ae5636b46221264626e71ce0037f`
-- Main behavior (runtime/tests): `4c710d22f6985e1c100e6a5dac2e069d85fb8c7c` (memory paths reminder with legacy placeholder resolution and adapted fork user-part assertions, lossless session database, empty-turn identity reset, voice control default and terminal refusal retry order)
-- Inherited compat behavior: `17cfd7672a3e0b362405274308c4bba26c4a0224` (shared sync inherited; compat request estimation retained without pressure levels; JSON-schema recall suppression retired)
-- Bundled guidance content: `dfd6d5f8a9b25dfadb86cda088cd285aea466a49` (YAML-safe Compose Next source and merge confirmation; `mimocode-docs` prune and voice entries)
-- Prior fork `main` tip: `5db15cfbd85722eeb20346731e5c90e7d0b88d3a`
+- Main behavior (runtime/tests): `3f6ac1542e605d61bc828dffbdaed74dfc51d620` (appended rebuild boundaries, chronological legacy compatibility, receipt-aware recovery, persistent pure-empty retries and normalized durable retry records; bounded read-tool fixture)
+- Inherited compat behavior: `be4b22055b299a608b064730cc922508a0b002e6` (shared rebuild/retry/record behavior inherited; native-search retry kind adapted; capped context/digest, coverage/preflight and full-context actor extensions retained)
+- Bundled guidance content: `fa79aa9295c20b7f34e70818ab435878c3ea955a` (Compose Next stable anchors and rebuild command/config guidance)
+- Prior fork `main` tip: `dda5cdb52ab81655b0e6236401663ab8c5f24ca5`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,7 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-22 full sync through `213365a0`](upstream-sync-2026-10-22.md), three capabilities. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
+Latest reviewed synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
 Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
 
@@ -110,6 +110,8 @@ not change their implementation. The preceding review is retained in the
 | FD-012 | compaction retry on an empty step                                                     | Extends upstream: retries a genuinely empty step, once by default                                                                               | Preserve the configurable non-negative limit (default 1, 0 disables) and empty-step scope                                                                                 |
 
 ## FD-001 — run approval must not toggle shared delete state
+
+- 2026-10-22 live advancement: superseding a failing retry does not directly execute accepted input. The existing lane claim, owned task selection and RunApproval handoff select its authority on the next loop; recovery does not enable this watcher. Checkpoint/compaction and reasoning-only continuations retain their atomic source/task/run boundaries.
 
 - 2026-10-20 synchronization: durable queue acceptance grants no run approval. A received input becomes the request source only when its lane owns and consumes it; an unrelated accepted user closes the previous approval scope when selected. Checkpoint, compaction and bounded continuations retain authority only through the existing owned commit path. Queue scheduling and long-lived MCP bridges cannot lend a former caller's scope. The checkpoint and compaction real-tool permission regressions retain both correlation assertions and distinct continuation parents.
 

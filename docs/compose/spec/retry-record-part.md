@@ -7,6 +7,20 @@ source: https://github.com/XiaomiMiMo/MiMo-Code/pull/2703
 
 # Retry Record Survives Until The Turn Succeeds
 
+## Fork integration
+
+Fork `main` and `dev/compat` select completed user turns by persisted parent
+chronology, with UTF8 ID comparison only for equal timestamps, rather than by an
+ID range. Successful cleanup removes retry parts while retaining assistant
+identities referenced by durable delivery receipts. Historical error-based retry
+parts normalize on read/import/replay and keep bounded, NUL-safe searchable
+content; the public schema remains the new shape. Recovery keeps its locked
+parent and does not enable the new-input supersession watcher. Actor records
+remain local while global retry diagnostics remain main-only.
+See [FC-001](../../fork-capabilities.md#fc-001--linearized-actor-generations-and-persistent-peer-lifecycle),
+[FC-017](../../fork-capabilities.md#fc-017--faithful-and-bounded-history-previews)
+and [the synchronization record](../../upstream-sync-2026-10-22.md).
+
 ## Report
 
 **What was built** — Every retry of an assistant step (request ladder, stream policy, auto-resume after tools) upserts one `retry` part on that assistant message, for the main agent and every subagent. The part carries the attempt count, phase, scope, kind, reason, hostCode and next-attempt time. It survives retry cleanup and empty-turn resets, and a record on a dropped empty step moves to the next step of the same user turn. It is removed only at the run loop's success exits (final answer, structured-output capture) for the user turns the run completed; failed, aborted, interrupted and compaction-stopped turns keep it. It never reaches the model. History indexing and export read the new shape. While a step is failing (a retry was recorded and no attempt has produced output since), a newer input in the actor's inbox lane supersedes the step: the retry wait or the hanging attempt ends, the step keeps only its record, and the run loop claims the input at its next step within the same run.
