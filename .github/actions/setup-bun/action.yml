@@ -16,6 +16,16 @@ runs:
         restore-keys: |
           ${{ runner.os }}-bun-
 
+    - name: Expose bundled native build tool
+      shell: bash
+      run: |
+        set -euo pipefail
+        node_gyp="$(npm root -g)/npm/node_modules/node-gyp/bin/node-gyp.js"
+        test -x "$node_gyp"
+        native_tools="$(mktemp -d "$RUNNER_TEMP/mimocode-native-tools.XXXXXX")"
+        ln -s "$node_gyp" "$native_tools/node-gyp"
+        echo "$native_tools" >> "$GITHUB_PATH"
+
     - name: Install dependencies
       run: bun ci
       shell: bash
