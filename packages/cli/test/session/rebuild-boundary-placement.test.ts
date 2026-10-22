@@ -48,7 +48,7 @@ function config(origin: string, extra: Partial<Config.Info> = {}): Partial<Confi
         },
       },
     },
-    agent: { build: { model: "test/model" } },
+    agent: { build: { model: "test/model", ...extra.agent?.build } },
     permission: { read: "allow" },
     lsp: false,
     formatter: false,
@@ -186,6 +186,7 @@ describe("rebuild boundary placement", () => {
         await using tmp = await tmpdir({
           git: true,
           config: config(server.origin, {
+            agent: { build: { prompt: "Rebuild boundary integration fixture.", tool_allowlist: ["read"] } },
             compaction: { reserved: 100, max_context: 40_000 },
             checkpoint: { thresholds: [], reserved: 100 },
           }),
