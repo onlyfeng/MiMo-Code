@@ -1266,12 +1266,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           .get(),
       )
       if (!row) return
-      return {
+      return MessageV2.normalizeRetryPart({
         ...row.data,
         id: row.id,
         sessionID: row.session_id,
         messageID: row.message_id,
-      } as MessageV2.Part
+      }) as MessageV2.Part
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {

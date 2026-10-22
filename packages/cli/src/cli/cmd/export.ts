@@ -85,6 +85,7 @@ function filepart(part: MessageV2.FilePart): MessageV2.FilePart {
 }
 
 function part(part: MessageV2.Part): MessageV2.Part {
+  part = MessageV2.normalizeRetryPart(part) as MessageV2.Part
   switch (part.type) {
     case "text":
       return {
@@ -145,7 +146,7 @@ function part(part: MessageV2.Part): MessageV2.Part {
                   },
       }
     case "retry":
-      return { ...part, error: redactError(part.error, part.id) }
+      return { ...part, message: redact("retry-message", part.id, part.message) }
     case "patch":
       return {
         ...part,
