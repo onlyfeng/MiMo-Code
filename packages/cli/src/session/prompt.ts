@@ -52,9 +52,9 @@ import { InstallationVersion } from "@/installation/version"
 import type { JSONObject, JSONSchema7 } from "@ai-sdk/provider"
 import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
+import { isBoundaryUser, isRebuildBoundary } from "./tail-digest"
 import { SessionCompaction } from "./compaction"
 import { SessionModelSelection } from "./model-selection"
-import { computeLastMessageInfo } from "./last-message-info"
 import { classifyRequestOverflow, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
@@ -1167,10 +1167,11 @@ export const layer = Layer.effect(
 
     // Shared rebuild-from-checkpoint step used by BOTH the automatic overflow
     // path in runLoop and the manual `/rebuild` command, so the two can never
-    // drift in logic or boundary conditions. Inserts a checkpoint boundary
-    // marker (never deletes DB messages) at the current watermark so the next
-    // runLoop iteration rebuilds context from the on-disk checkpoint while the
-    // live message tail after the watermark is preserved verbatim. Does NOT
+    // drift in logic or boundary conditions. Appends a checkpoint boundary
+    // marker (never deletes DB messages) after the newest message so the next
+    // runLoop iteration rebuilds context from the on-disk checkpoint; the tail
+    // after the watermark reaches the model only through the boundary's
+    // Recent activity and Recent user input sections. Does NOT
     // block on an in-flight writer (same policy as the auto path — a slightly
     // stale checkpoint now beats a fresh one that never arrives). Returns true
     // iff a boundary was inserted (i.e. a usable checkpoint existed); callers
@@ -1192,26 +1193,14 @@ export const layer = Layer.effect(
         .pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!boundary) return false
 
-      // The processor may have committed its completed assistant after the
-      // loop snapshot, or the writer may have been awaited since that snapshot.
-      // Freeze the actual insert-time tail so recovery covers those committed
-      // rows instead of immediately rebuilding again for their stale usage.
-      const messages = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
-      const boundaryMsg = messages.find((m) => m.info.id === boundary)
       const inserted = yield* checkpoint
         .insertRebuildBoundary({
           sessionID: input.sessionID,
           boundary,
-          lastMessageInfo: computeLastMessageInfo(messages.map((m) => m.info)),
-          // Freeze the digest range at insert time: only this tail is eligible
-          // for activity-log collapse. Auto rebuild mid-tool-loop keeps later
-          // tool rounds live; manual rebuild digests the whole idle tail.
-          digestUpTo: messages.at(-1)?.info.id,
           agentID: input.agentID,
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
           task_id: input.task_id,
-          boundaryCreatedAt: boundaryMsg?.info.time.created,
         })
         .pipe(Effect.catch(() => Effect.succeed(false)))
 
@@ -4457,8 +4446,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       // [SR-R21 D16f] Trailing user with no following assistant: explicit Resume starts the next
       // turn from that user. Source (manual/notification/synthetic/noReply) is irrelevant — Resume
-      // is the user's intent to run now.
-      const last = msgs.at(-1)
+      // is the user's intent to run now. A rebuild boundary is not that user; the unanswered user
+      // it carries is.
+      const last = msgs.findLast((m) => !isRebuildBoundary(m))
       if (last?.info.role === "user") {
         candidates.push({
           kind: "parent-user",
@@ -5624,6 +5614,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
         let unprocessedPrompt = (claimOwner?.receipts.length ?? 0) > 0
         const deliveredPrompts = new Set<MessageID>()
+        let rebuildTail: SessionCheckpoint.RebuildTail | undefined
         const recordDelivery = Effect.fn("SessionPrompt.recordDelivery")(function* (
           messageID: MessageID,
           msgs: MessageV2.WithParts[],
@@ -5783,6 +5774,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             preflightOverflowRecovery = undefined
           }
 
+          msgs = SessionCheckpoint.withEndedInputs(sessionID, msgs)
+
+          // A rebuild boundary is appended after its tail, so the user message and
+          // steps of the turn it interrupted sit outside the window. Turn state
+          // (resume parent, last user, last assistant) is read from the window with
+          // that tail restored in front of the later messages; the model still
+          // receives `msgs`. The tail before a boundary does not change, so it is
+          // read once per boundary.
+          const newestUser = msgs.findLast((msg) => msg.info.role === "user")
+          if (newestUser && isBoundaryUser(newestUser) && rebuildTail?.boundary !== newestUser.info.id)
+            rebuildTail = SessionCheckpoint.readRebuildTail(sessionID, msgs)
+          const turnMsgs =
+            newestUser && isBoundaryUser(newestUser) ? SessionCheckpoint.withRebuildTail(msgs, rebuildTail) : msgs
+
           let lastUser: MessageV2.User | undefined
           let lastAssistant: MessageV2.Assistant | undefined
           let lastFinished: MessageV2.Assistant | undefined
@@ -5791,26 +5796,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // The locked parent must still be the last user — a later user would
           // enter the model context while parent stays old. Later assistants are allowed only when
           // plan did not require strict tail (empty-shell siblings); trailing-user is strict.
+          // A boundary parent carries its tail's unanswered users, so it is checked against the window.
           const lockParentOnStep0 = step === 0 && parentUserID !== undefined
           if (lockParentOnStep0) {
-            const lockedIdx = msgs.findIndex((m) => m.info.role === "user" && m.info.id === parentUserID)
+            const lockMsgs = newestUser?.info.id === parentUserID ? msgs : turnMsgs
+            const lockedIdx = lockMsgs.findIndex((m) => m.info.role === "user" && m.info.id === parentUserID)
             if (lockedIdx < 0) {
               throw new Error(
                 `Resume parent user ${parentUserID} is no longer in session slice ${sessionID}`,
               )
             }
-            const laterUser = msgs.slice(lockedIdx + 1).some((m) => m.info.role === "user")
+            const laterUser = lockMsgs.slice(lockedIdx + 1).some((m) => m.info.role === "user")
             if (laterUser) {
               throw new Error(
                 `Resume parent user ${parentUserID} is no longer the last user in ${sessionID}`,
               )
             }
-            if (strictParentTail && msgs.slice(lockedIdx + 1).some((m) => m.info.role === "assistant")) {
+            if (strictParentTail && lockMsgs.slice(lockedIdx + 1).some((m) => m.info.role === "assistant")) {
               throw new Error(
                 `Resume parent user ${parentUserID} is no longer the slice tail in ${sessionID}`,
               )
             }
-            const locked = msgs[lockedIdx]!
+            const locked = lockMsgs[lockedIdx]!
             if (locked.info.role !== "user") {
               throw new Error(
                 `Resume parent user ${parentUserID} is no longer in session slice ${sessionID}`,
@@ -5818,8 +5825,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
             lastUser = locked.info
           }
-          for (let i = msgs.length - 1; i >= 0; i--) {
-            const msg = msgs[i]
+          for (let i = turnMsgs.length - 1; i >= 0; i--) {
+            const msg = turnMsgs[i]
             if (!lastUser && msg.info.role === "user") lastUser = msg.info
             if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
             if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
@@ -5911,7 +5918,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }
 
-          const lastAssistantMsg = msgs.findLast(
+          const lastAssistantMsg = turnMsgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
           )
           // Some providers return "stop" even when the assistant message contains tool calls.
@@ -6315,11 +6322,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 if (crop.omitted.length > 0) {
                   msgs = crop.kept as typeof msgs
                   // Persist span on the EXISTING parent user (turn-recovery
-                  // shape). ignored+synthetic: not sent to the model, not a
-                  // user-visible bubble, but extractAllCrops still reads it.
+                  // shape), or on the rebuild boundary standing in for it when
+                  // the parent lies in the boundary's tail, so the window that
+                  // extractAllCrops reads holds it. ignored+synthetic: not sent
+                  // to the model, not a user-visible bubble.
+                  const parentMsg =
+                    msgs.findLast((message) => message.info.id === lastUser.id) ??
+                    msgs.findLast((message) => message.info.role === "user")!
                   const spanPart: MessageV2.TextPart = {
                     id: PartID.ascending(),
-                    messageID: lastUser.id,
+                    messageID: parentMsg.info.id,
                     sessionID,
                     type: "text",
                     synthetic: true,
@@ -6328,8 +6340,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     metadata: cropMetadata(span),
                   }
                   yield* sessions.updatePart(spanPart)
-                  const parentMsg = msgs.findLast((message) => message.info.id === lastUser.id)
-                  if (parentMsg) parentMsg.parts.push(spanPart)
+                  parentMsg.parts.push(spanPart)
                   loopStreakCropped = true
                   yield* slog.info("loop streak: cropped from request", {
                     spanFrom: span.fromId,
@@ -6703,7 +6714,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     }),
                   )
                   if (structuredOutput) forkTools.StructuredOutput = structuredOutput
-                  const queryParts = msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
+                  const queryParts = turnMsgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
                   const query = userQueryText(queryParts)
                   const preQuery = {
                     cancel: undefined as boolean | undefined,
@@ -7105,7 +7116,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
 
                 const queryParts =
-                  msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
+                  turnMsgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
                 const query = userQueryText(queryParts)
                 const preQuery = {
                   cancel: undefined as boolean | undefined,
@@ -7646,9 +7657,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // inserts the legitimate rebuild BOUNDARY (a role:"user" message carrying
       // a `checkpoint` part, via rebuildFromCheckpoint → insertRebuildBoundary)
       // and then lets the session settle — WITHOUT fabricating a second,
-      // standalone user turn. The auto path (~prompt.ts:3205/3778) `continue`s
-      // the runLoop because it has a PENDING user message to answer; a manual
-      // /rebuild is a user-initiated maintenance action with NO pending
+      // standalone user turn. The auto paths in runLoop `continue` the loop,
+      // which then judges the interrupted turn from the boundary's tail: a
+      // finished turn ends there, an unfinished tool loop takes its next step.
+      // A manual /rebuild is a user-initiated maintenance action with NO pending
       // question, so after inserting the boundary it simply returns to idle
       // (no model turn, no auto-reply).
       //
@@ -7685,7 +7697,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const rebuildFailedMsg =
           "A checkpoint was written but the context could not be rebuilt from it. Context is unchanged and nothing was compacted — retry /rebuild, or report this if it repeats."
         const rebuiltMsg =
-          "Context rebuilt from the latest checkpoint. Recent messages are preserved; earlier context is now summarized."
+          "Context rebuilt from the latest checkpoint. Earlier context is now summarized, and recent activity is listed in its place."
 
         // Set busy status so the TUI shows a spinner while we wait on the
         // writer (cases 2/3) or assemble context (case 1).

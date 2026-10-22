@@ -282,7 +282,7 @@ describe("collapseCheckpointTail", () => {
   })
 
   test("collapses a same-ms tail message that sorts before the boundary's synthetic time", () => {
-    // Production stamps the boundary at watermark+1ms, so a tail message
+    // Legacy boundaries stamped the boundary at watermark+1ms, so a tail message
     // sharing the watermark's millisecond sorts BEFORE the boundary. A full
     // history still carries the exact covered row, which anchors the range.
     const collapsed = collapseCheckpointTail([
@@ -364,6 +364,18 @@ describe("collapseCheckpointTail", () => {
         info: assistantInfo("a1", "u0", 10),
         parts: [completedTool("a1", "p1", "read", { path: "a.ts" }, "BODY")],
       },
+    ]
+    expect(collapseCheckpointTail(msgs)).toBe(msgs)
+  })
+
+  test("a boundary created after its digestUpTo message is left verbatim", () => {
+    const boundary = boundaryUser("msg_cp", "msg_02", ['- read(path="a.ts")'])
+    const msgs: MessageV2.WithParts[] = [
+      {
+        info: assistantInfo("msg_02", "msg_u1", 10),
+        parts: [completedTool("msg_02", "p1", "read", { path: "a.ts" }, "SAME_WINDOW_BODY")],
+      },
+      { ...boundary, info: userInfo("msg_cp", 20) },
     ]
     expect(collapseCheckpointTail(msgs)).toBe(msgs)
   })
@@ -536,7 +548,6 @@ describe("SessionCheckpoint.renderRebuildContext", () => {
             digestUpTo: tailID,
           })
 
-          expect(rendered.hasActivity).toBe(true)
           expect(rendered.text).toContain("TAIL_SENTINEL")
           expect(rendered.text).not.toContain("PRIOR_SHOULD_NOT_APPEAR")
         }),

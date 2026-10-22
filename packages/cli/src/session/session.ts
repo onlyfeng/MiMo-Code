@@ -1035,6 +1035,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                       eq(MessageTable.session_id, input.sessionID),
                       eq(MessageTable.agent_id, input.actorID),
                       visibleToConversation,
+                      sql`NOT EXISTS (SELECT 1 FROM ${PartTable}
+                        WHERE ${PartTable.message_id} = ${MessageTable.id}
+                          AND json_extract(${PartTable.data}, '$.type') = 'checkpoint')`,
                       sql`json_extract(${MessageTable.data}, '$.role') IN ('user', 'assistant')`,
                     ),
                   )
@@ -1049,6 +1052,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
                       eq(MessageTable.session_id, input.sessionID),
                       eq(MessageTable.agent_id, input.actorID),
                       visibleToConversation,
+                      sql`NOT EXISTS (SELECT 1 FROM ${PartTable}
+                        WHERE ${PartTable.message_id} = ${MessageTable.id}
+                          AND json_extract(${PartTable.data}, '$.type') = 'checkpoint')`,
                       sql`json_extract(${MessageTable.data}, '$.role') = 'user'`,
                     ),
                   )

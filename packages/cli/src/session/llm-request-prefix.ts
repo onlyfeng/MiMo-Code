@@ -75,9 +75,10 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   skillCatalogInSystem?: boolean
   prompt?: PromptConfig
   /**
-   * Collapse post-checkpoint rebuild tails into an activity log. Enable for the
-   * main-agent runLoop; leave off for checkpoint-writer fork capture so the
-   * writer still sees full-fidelity recent history.
+   * Collapse the tail of a legacy rebuild boundary (one stamped before the
+   * tail it digests) into its activity log. Enable for the main-agent runLoop;
+   * leave off for checkpoint-writer fork capture so the writer still sees
+   * full-fidelity recent history.
    */
   collapseCheckpointTail?: boolean
 }) {

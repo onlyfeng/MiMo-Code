@@ -317,13 +317,20 @@ export const CheckpointPart = PartBase.extend({
   checkpointNumber: z.number(),
   coveredUpTo: MessageID.zod,
   /**
-   * Last message that already existed when this rebuild boundary was inserted.
-   * Post-rebuild activity-log collapse digests only messages after the
-   * checkpoint up to (and including) this id; anything newer stays live so a
-   * mid-turn tool loop is not folded into the log on the next request.
-   * Optional: older boundaries predate the field and skip collapse.
+   * Last tail message before the unanswered user messages at its end; the
+   * boundary's Recent activity digest covers (coveredUpTo, digestUpTo].
+   * Optional: absent when the tail has no such message and on older
+   * boundaries.
    */
   digestUpTo: MessageID.zod.optional(),
+  /**
+   * Inputs the inbox still held undelivered when this boundary was inserted.
+   * They are not part of the tail; one whose receipt later ends without
+   * delivery is placed after the boundary.
+   */
+  deferredInputs: MessageID.zod.array().optional(),
+  /** New boundaries end the model window tail; absent on backdated legacy records. */
+  placement: z.literal("after-tail").optional(),
 }).meta({
   ref: "CheckpointPart",
 })
@@ -1716,7 +1723,7 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
     // from coveredUpTo instead of trusting the marker's physical row order.
     // coveredUpTo has defined this seam since the first persisted checkpoint
     // format, including markers created before the source discriminator.
-    if (boundary.type !== "checkpoint") break
+    if (boundary.type !== "checkpoint" || boundary.placement === "after-tail") break
     rebuild = { marker: msg, coveredUpTo: boundary.coveredUpTo }
   }
 

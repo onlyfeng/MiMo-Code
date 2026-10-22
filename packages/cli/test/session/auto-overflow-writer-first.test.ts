@@ -453,6 +453,16 @@ describe("Auto context overflow: write a checkpoint before degrading to compacti
                 }
                 expect(writerCalls).toBe(rebuilds)
                 expect(llm.calls).toBe(3)
+                if (rebuilds) {
+                  const boundaryIndex = after.findIndex((m) => m.info.id === checkpoints[0]!.info.id)
+                  expect(after[boundaryIndex - 1]?.parts.some((p) => p.type === "text" && p.text === "high-usage reply")).toBe(
+                    true,
+                  )
+                  const marker = checkpoints[0]!.parts.find((p) => p.type === "checkpoint")
+                  if (marker?.type !== "checkpoint") throw new Error("expected a checkpoint part")
+                  expect(marker.digestUpTo).toBe(after[boundaryIndex - 1]!.info.id)
+                  expect(after[boundaryIndex + 1]?.parts.some((p) => p.type === "text" && p.text === "continue after the automatic rebuild")).toBe(true)
+                }
                 expect(
                   after.some((m) => m.parts.some((p) => p.type === "text" && p.text === "reply after rebuild")),
                 ).toBe(true)

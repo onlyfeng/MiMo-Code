@@ -45,8 +45,12 @@ function toolLine(part: ToolPart): string {
   return `- ${call}`
 }
 
-function isBoundaryUser(msg: WithParts): boolean {
+export function isBoundaryUser(msg: WithParts): boolean {
   return msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint" || p.type === "compaction")
+}
+
+export function isRebuildBoundary(msg: WithParts): boolean {
+  return msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint")
 }
 
 function digestLines(tail: readonly WithParts[]): { lines: string[]; interrupted: boolean } {
@@ -55,8 +59,8 @@ function digestLines(tail: readonly WithParts[]): { lines: string[]; interrupted
     // Never re-digest a prior rebuild/compaction boundary — that folds the
     // previous dump into itself on a second rebuild.
     if (isBoundaryUser(msg)) continue
-    // User-role messages always stay live after collapse (see
-    // collapseCheckpointTail); do not also log them.
+    // Tail user messages are quoted in the boundary's Recent user input
+    // section (and stay live after a legacy boundary); do not also log them.
     if (msg.info.role === "user") continue
     for (const part of msg.parts) {
       if (part.type === "text" && !part.ignored && !part.synthetic) {
@@ -104,7 +108,7 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
 }
 
 /**
- * Drop assistant messages in the exact chronological interval ending at
+ * Drop legacy-boundary assistant messages in the exact chronological interval ending at
  * digestUpTo. The activity list itself is already in the boundary's rebuild
  * context (written at insert time), so this only removes the now-redundant
  * verbatim tool/assistant tail. Post-insert messages stay live.
@@ -126,7 +130,7 @@ export function collapseCheckpointTail(msgs: readonly WithParts[]): WithParts[] 
   if (boundary < 0) return msgs as WithParts[]
 
   const part = checkpointPart(msgs[boundary])
-  if (!part?.digestUpTo) return msgs as WithParts[]
+  if (!part?.digestUpTo || part.placement === "after-tail") return msgs as WithParts[]
 
   const digest = msgs.findIndex((m) => m.info.id === part.digestUpTo)
   const covered = msgs.findIndex((m) => m.info.id === part.coveredUpTo)

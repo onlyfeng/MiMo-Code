@@ -186,7 +186,6 @@ describe("SessionCheckpoint.insertRebuildBoundary", () => {
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const ssn = yield* SessionNs.Service
-        const cp = yield* SessionCheckpoint.Service
         const info = yield* ssn.create({})
         const boundaryTime = 1_700_000_000_000
 
@@ -239,16 +238,24 @@ describe("SessionCheckpoint.insertRebuildBoundary", () => {
           await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
           await fs.writeFile(checkpointPath(info.id), "# Session checkpoint\n\n## §1 Active intent\nKeep the live turn.\n")
         })
-        expect(
-          yield* cp.insertRebuildBoundary({
-            sessionID: info.id,
-            boundary: boundary.id,
-            digestUpTo: active.id,
-            agent: "build",
-            model: { providerID: "anthropic", modelID: "claude" },
-            boundaryCreatedAt: boundaryTime,
-          }),
-        ).toBe(true)
+        // Persist a legacy backdated boundary: current inserts append after the tail.
+        const legacy = yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: info.id,
+          agent: "build",
+          model: ref,
+          time: { created: boundaryTime + 1 },
+        })
+        yield* ssn.updatePart({
+          id: PartID.ascending(), messageID: legacy.id, sessionID: info.id,
+          type: "checkpoint", checkpointDir: "", checkpointNumber: 0,
+          coveredUpTo: boundary.id, digestUpTo: active.id,
+        })
+        yield* ssn.updatePart({
+          id: PartID.ascending(), messageID: legacy.id, sessionID: info.id,
+          type: "text", synthetic: true, text: "# Recent activity\nassistant work",
+        })
 
         const future = yield* ssn.updateMessage({
           id: MessageID.make("msg_04_future"),
