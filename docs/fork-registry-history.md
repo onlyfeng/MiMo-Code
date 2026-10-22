@@ -3349,3 +3349,7 @@ requires the subsequent exact-SHA CI and remote ancestry checks.
 
 - The [four-capability synchronization record](upstream-sync-2026-10-20-c1527b91.md) closes source validation for the full `4e58a801..cf8c09d5` range. Main `7e3b1ae712ce9ff96342b1a4fd9f85acd8d03ee4` and compat `6a02b3d3a89ecfaf36e4ec0cb77af79479384001` each have successful exact-SHA lint/typecheck/test; all applicable test jobs pass, including compat Windows. These runs supersede the intermediate C01–C03 publication evidence for the added bundled guidance.
 - All nine FD, seventeen FC and eleven DC owners remain active; the compat production overlay retains its fifty-two paths. Runtime/test and bundled-guidance snapshots are unchanged by this documentation closure. Final docs-only descendant equivalence, refreshed remote tips/ancestry, preserved user state and scoped cleanup are independently checked in the execution receipt. The linked record also adjudicates PR #170’s ancestry comment against actual local and GitHub commit parents; its discussion remains unresolved in the UI.
+
+## 2026-10-22 — upstream `213365a0`
+
+Three-capability full sync: appended rebuild boundaries with explicit placement and legacy chronological compatibility; receipt-aware writer/turn restoration and atomic recovery settlement; stable Compose Next anchors and spec provenance. No owner retires. See [sync evidence](upstream-sync-2026-10-22.md) for immutable baselines, validation and publication.

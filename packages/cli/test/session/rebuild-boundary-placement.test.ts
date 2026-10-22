@@ -284,6 +284,7 @@ describe("rebuild boundary placement", () => {
                 expect(answered.info.role).toBe("assistant")
 
                 const unanswered = yield* prompt.prompt({
+                  messageID: MessageID.make("msg_000_unanswered"),
                   sessionID: session.id,
                   agent: "build",
                   noReply: true,
