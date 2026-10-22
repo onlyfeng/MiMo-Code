@@ -126,7 +126,6 @@ export function collapseCheckpointTail(msgs: readonly WithParts[]): WithParts[] 
   if (!part?.digestUpTo || part.placement === "after-tail") return msgs as WithParts[]
 
   const digest = msgs.findIndex((m) => m.info.id === part.digestUpTo)
-  if (digest < 0 || msgs[boundary].info.time.created >= msgs[digest].info.time.created) return msgs as WithParts[]
   const covered = msgs.findIndex((m) => m.info.id === part.coveredUpTo)
   const start = covered < 0 ? boundary + 1 : covered + 1
   if (digest < start) return msgs as WithParts[]
