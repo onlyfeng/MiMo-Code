@@ -15,13 +15,13 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-22
-- Upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
-- Prior reviewed upstream: `8fd65328d976ae5636b46221264626e71ce0037f`
-- Main behavior (runtime/tests): `3f6ac1542e605d61bc828dffbdaed74dfc51d620` (appended rebuild boundaries, chronological legacy compatibility, receipt-aware recovery, persistent pure-empty retries and normalized durable retry records; bounded read-tool fixture)
-- Inherited compat behavior: `be4b22055b299a608b064730cc922508a0b002e6` (shared rebuild/retry/record behavior inherited; native-search retry kind adapted; capped context/digest, coverage/preflight and full-context actor extensions retained)
-- Bundled guidance content: `fa79aa9295c20b7f34e70818ab435878c3ea955a` (Compose Next stable anchors and rebuild command/config guidance)
-- Prior fork `main` tip: `dda5cdb52ab81655b0e6236401663ab8c5f24ca5`
+- Last reviewed: 2026-10-26
+- Upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
+- Prior reviewed upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
+- Main behavior (runtime/tests): `33f43f4d200fb7609c9d281e7f06f285960b79b7` (env opt-in agent-CLI skills without PATH probes in extraction or the environment prompt, declared model npm without the MiMo pin, 0.1.16 and the external FDS release default; fork PPTX guidance regression kept)
+- Inherited compat behavior: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9` (shared skill, npm and release behavior inherited; config `@ai-sdk/xai` Responses routing and available-skills cap retained)
+- Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
+- Prior fork `main` tip: `06fda781992309ec8e68518b5b08f0c5dd0378bc`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
+Latest reviewed synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
 Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
 
@@ -651,6 +653,8 @@ not change their implementation. The preceding review is retained in the
   authority still satisfy FD-005 and FD-006.
 
 ## FC-005 — permission-consistent skill discovery and invocation
+
+- 2026-10-26 synchronization: upstream `18adffc9` replaces binary-presence gating of bundled skill extraction (`REQUIRED_COMMANDS`, `isBuiltinSkillInstalled`) with `AGENT_CLI_SKILL_NAMES` and `shouldExtractBuiltinSkill`: `claude-code`, `codex` and `grok-build` extract only when `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` is true, and `MIMOCODE_DISABLE_OFFICIAL_SKILLS` still removes the office/media set. This changes only the extracted set; listing, search, loading and the frozen catalog keep their shared permission gates. An isolated `debug skill` run lists the three skills only with the selector set. Evidence: `test/skill/builtin.test.ts`, `test/skill/bundle-discovery.test.ts`.
 
 - Status: active
 - Canonical owner: fork `main` skill/session runtime
@@ -1424,6 +1428,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-26 synchronization: adopt upstream `18adffc9` unchanged. The `claude-code`, `codex` and `grok-build` descriptions now say to load only on explicit authorization and to confirm the binary first; their host-only `agents/openai.yaml` files are deleted, and the `mimocode-docs` discovery row names the opt-in selector. The fork's PPTX guidance regression in `test/skill/builtin.test.ts` is kept beside upstream's new cases.
+
 - 2026-10-21 synchronization: adopt upstream `12a59e90` unchanged. Compose Next spec `source` takes a branch name, PR URL or MR URL, so the frontmatter stays valid YAML; fill-ins use `{{}}`, S labels move onto Design H3s, `covers` and the Journey log are optional, and any merge needs its own confirmation. Bundled `mimocode-docs` drops `compaction.prune` and names `xiaomi/mimo-v2.6-flash` as the voice control default; the fork's compaction-row wording and `auto_worktree` entry in `config.md` are kept.
 
 - 2026-10-21 live synchronization: adopt `cf8c09d5` Compose Next unavailable-input handling, spec `source` tracking and Finish confirmation unchanged. The explicit invocation entry and discovery/permission boundaries remain; this is shipped content, not a runtime schema or bulk spec migration. Content loading/discovery and permission/search tests cover the integration, while behavioral wording is reviewed as guidance.
@@ -1538,6 +1544,8 @@ logged`, and the peer `success`/`failure` variants of
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-012 — fork publication, contribution, and security routing
+
+- 2026-10-26 synchronization: adopt upstream's `0.1.16` across the four workspace manifests and `bun.lock` (`d3c71e33`), and `b8dbe084`'s tag release that builds after typecheck and lint without rerunning unit tests, with `script/fds-upload.ts` defaulting to the external `cnbj1.fds.api.xiaomi.com` endpoint (`MIMO_FDS_ENDPOINT` still overrides). `GH_REPO` remains required and fork-scoped. A fork tag therefore depends on the exact-SHA branch CI of the tagged commit. No publishing stage ran during this sync. FC-019's patched quickjs versions are unchanged by the bump.
 
 - 2026-10-20 synchronization: adopt trusted-publisher `--allow-publish` and a preflight stage before npm/GitHub publication. The preflight checks SDK/plugin/CLI tarball name and version and proves an FDS signed canary write. Keep `GH_REPO` mandatory and scoped to the fork; the upstream-owned npm trust configuration is not authority to publish fork work there. A passing preflight is neither a release rollback transaction nor proof that every later publication stage succeeded. No publishing stage is invoked during synchronization validation.
 

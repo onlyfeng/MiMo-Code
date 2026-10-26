@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-26; live upstream `e37f2c2d..0fe2cbbc`.
+- Starting compat: `5a8382b16be549fc09d3aa1e492a82f78f7f6641`; inherited main runtime/tests: `33f43f4d200fb7609c9d281e7f06f285960b79b7`; reviewed compat runtime/tests: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9`.
+- Scope: C01-C05 in [the shared synchronization record](upstream-sync-2026-10-26.md). Main owns the agent-CLI skill opt-in, the removed `claude` PATH probe, declared model npm, the 0.1.16 release and the release workflow changes.
+- Direct adaptation: DC-PROVIDER-001 keeps its `config provider on @ai-sdk/xai sends Responses requests with its provider options` wire test unchanged beside upstream's renamed npm tests; that test file was the only conflict. With the MiMo pin gone, a MiMo-named id on a config `@ai-sdk/xai` provider now reaches the compat Responses routing instead of `@ai-sdk/openai-compatible`, which matches this owner's declared-SDK rule. DC-CONTEXT-001 keeps the available-skills byte cap in `session/system.ts` next to the removed environment line.
+- Adjacent review: the extracted skill set changes before discovery, so DC-ACTOR-001 frozen catalogs and DC-CONTEXT-001 caps no longer receive the agent-CLI skills merely because a binary is on PATH; neither policy changes. DC-MODEL-001, DC-TUI-001, DC-ACTOR-002, DC-WEBSEARCH-001, DC-WEBFETCH-001, DC-NET-001/002 and DC-PLATFORM-001 have no incoming implementation delta. The non-test overlay path set under `packages/` is identical before and after the merge.
+- Validation: Bun 1.3.14 `bun ci` completes without a lockfile diff; CLI and root typecheck exit 0; root lint has zero errors. The affected skill/provider/system/tool matrix plus `openai-responses-reasoning.test.ts` passes 586/586 across 23 files. Exact-SHA CI is tracked in the shared record.
+- Shared ownership: shared registries/history/report are inherited unchanged from main; this file owns the compat review.
+
+## Previous review record: e37f2c2d synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-22; live upstream `8fd65328..e37f2c2d`.
 - Starting compat: `ac667d4b2db1dce6f893ca6d6944f72ab5f21e61`; inherited main runtime/tests: `3f6ac1542e605d61bc828dffbdaed74dfc51d620`; reviewed compat runtime/tests: `be4b22055b299a608b064730cc922508a0b002e6`.
 - Scope: C01-C05 in [the shared synchronization record](upstream-sync-2026-10-22.md). Main owns appended boundary placement, chronological legacy compatibility, receipt-aware writer/turn restoration, atomic recovery settlement, Compose Next anchors, spec provenance, persistent pure-empty retries and normalized durable retry records.
