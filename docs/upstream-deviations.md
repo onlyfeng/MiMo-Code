@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-22
-- Upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
-- Prior reviewed upstream: `8fd65328d976ae5636b46221264626e71ce0037f`
-- Main behavior (runtime/tests): `3f6ac1542e605d61bc828dffbdaed74dfc51d620` (appended rebuild boundaries, chronological legacy compatibility, receipt-aware recovery, persistent pure-empty retries and normalized durable retry records; bounded read-tool fixture)
-- Inherited compat behavior: `be4b22055b299a608b064730cc922508a0b002e6` (shared rebuild/retry/record behavior inherited; native-search retry kind adapted; capped context/digest, coverage/preflight and full-context actor extensions retained)
-- Bundled guidance content: `fa79aa9295c20b7f34e70818ab435878c3ea955a` (Compose Next stable anchors and rebuild command/config guidance)
-- Prior fork `main` tip: `dda5cdb52ab81655b0e6236401663ab8c5f24ca5`
+- Last reviewed: 2026-10-26
+- Upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
+- Prior reviewed upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
+- Main behavior (runtime/tests): `33f43f4d200fb7609c9d281e7f06f285960b79b7` (env opt-in agent-CLI skills without PATH probes in extraction or the environment prompt, declared model npm without the MiMo pin, 0.1.16 and the external FDS release default; fork PPTX guidance regression kept)
+- Inherited compat behavior: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9` (shared skill, npm and release behavior inherited; config `@ai-sdk/xai` Responses routing and available-skills cap retained)
+- Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
+- Prior fork `main` tip: `06fda781992309ec8e68518b5b08f0c5dd0378bc`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
+Latest reviewed synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating, drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids to `@ai-sdk/openai-compatible` (FD-005 text updated), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
 Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
 
@@ -449,6 +451,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-26 synchronization: upstream `0fe2cbbc` removes `isMimoOrSmartModel` and `resolveModelNpm`, so a MiMo-named id keeps the model or provider `npm` it declares; only an undeclared SDK falls back to `@ai-sdk/openai-compatible`. FD-005 never owned transport after the 2026-09-13 retirement, and the harness, prompt, discovery, toolset and retry identity resolution is unchanged. Upstream `18adffc9` also drops the `claude` PATH probe from the Anthropic environment block in `session/system.ts`; harness-resolved prompt selection there is untouched. Evidence: `test/provider/provider.test.ts`, `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/system.test.ts`.
+
 - 2026-10-20 live catch-up through `4e58a801`: readiness is a non-blocking connection snapshot, not an authorization catalog. Live and prefix capture share actual reminder/search/use evidence, including legacy announcements. Silent `auto` may re-evaluate without that evidence; no auxiliary user-history marker preserves a cache choice. Entry and latest per-server outcomes share one budget and show only request-visible tools. Keep resolved harness identity, frozen membership/schema gates, output/diagnostic escaping and the fixed dispatcher. This narrows the initial empty-catalog sticky description below.
 
 - 2026-10-20 synchronization: adopt `cd72e855`'s fixed `mcp_tool_use` dispatcher, sticky deferral (including an empty catalog) and turn-boundary catalog announcements. Both live resolution and `buildLLMRequestPrefix` use the same resolved harness and history evidence; fetched schemas no longer enter the provider-facing active tool set. Search is a schema/context optimization, not authorization. Keep MCP output tag neutralization and full request/frozen schema gates. New snapshots record the fixed dispatcher plus the authorized hidden implementation pool, with empty loaded membership. Legacy snapshots without the dispatcher may use only the captured active/loaded MCP names intersected with frozen membership and matching live schemas. FD-006 retains authorized hidden Codex direct execution. Evidence: `test/session/llm-request-prefix.test.ts`, MCP cases in `test/session/prompt-effect.test.ts`, `test/session/codex-compact.test.ts` and `test/tool/mcp-tool-search.test.ts`.
@@ -496,9 +500,10 @@ not change their implementation. The preceding review is retained in the
   run-loop, and compaction cache profiles include the optional declaration;
   an absent declaration preserves the original profile key.
   Exact MiMo v2.5 identities win over generic aliases. Transport is no longer a
-  fork concern: upstream pins every MiMo id to `@ai-sdk/openai-compatible`, and
-  the fork adopts that rather than routing a resolved PTC identity to the
-  Responses API. Transport never selects the Codex harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
+  fork concern: the fork adopts upstream's transport, which since `0fe2cbbc`
+  uses the declared model/provider npm (defaulting to
+  `@ai-sdk/openai-compatible`), rather than routing a resolved PTC identity to
+  the Responses API. Transport never selects the Codex harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
   API/family aliases. Request, live-step, and MaxMode retry policy reuse that
   same resolved identity instead of independently reclassifying the model
   between attempts. Xiaomi WebSearch sidecar requests use that resolved
