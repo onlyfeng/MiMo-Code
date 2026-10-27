@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-26
-- Upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
-- Prior reviewed upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
-- Main behavior (runtime/tests): `33f43f4d200fb7609c9d281e7f06f285960b79b7` (env opt-in agent-CLI skills without PATH probes in extraction or the environment prompt, declared model npm without the MiMo pin, 0.1.16 and the external FDS release default; fork PPTX guidance regression kept)
-- Inherited compat behavior: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9` (shared skill, npm and release behavior inherited; config `@ai-sdk/xai` Responses routing and available-skills cap retained)
+- Last reviewed: 2026-10-27
+- Upstream: `d85f355317f1471bf68b5c5a96ab517585e9fdfa`
+- Prior reviewed upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
+- Main behavior (runtime/tests): `f49d577b2c7fa51f8444ef5e00297af68dde2211` (Windows system-tar extraction, explicit MiMo npm wire regression and lighter global workflow concurrency regression; Windows CI executes the launcher suite)
+- Inherited compat behavior: `19ce44bc94fad9208036fc5731940d05e40fbb71` (shared launcher and tests inherited; all eleven DC owners retained)
 - Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `06fda781992309ec8e68518b5b08f0c5dd0378bc`
+- Prior fork `main` tip: `0abaacd194a2e899498886c909573fe6aed322a1`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating, drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids to `@ai-sdk/openai-compatible` (FD-005 text updated), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating, drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids to `@ai-sdk/openai-compatible` (FD-005 text updated), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
