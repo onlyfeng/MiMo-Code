@@ -421,6 +421,12 @@ jobs:
           bun script/verify-windows-runtime.ts 2>&1 | Tee-Object -FilePath ".artifacts/windows-runtime/workflow-runtime.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify Windows launcher extraction
+        working-directory: packages/cli
+        run: |
+          bun test test/installation/launcher.test.ts --timeout 120000 2>&1 | Tee-Object -FilePath ".artifacts/windows-runtime/workflow-launcher.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload Windows runtime evidence
         if: always()
         uses: actions/upload-artifact@v7
