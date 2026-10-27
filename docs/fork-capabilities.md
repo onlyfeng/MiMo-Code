@@ -15,13 +15,13 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-26
-- Upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
-- Prior reviewed upstream: `e37f2c2d01460df19b31d67b8116d6c66fe33db8`
-- Main behavior (runtime/tests): `33f43f4d200fb7609c9d281e7f06f285960b79b7` (env opt-in agent-CLI skills without PATH probes in extraction or the environment prompt, declared model npm without the MiMo pin, 0.1.16 and the external FDS release default; fork PPTX guidance regression kept)
-- Inherited compat behavior: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9` (shared skill, npm and release behavior inherited; config `@ai-sdk/xai` Responses routing and available-skills cap retained)
+- Last reviewed: 2026-10-27
+- Upstream: `d85f355317f1471bf68b5c5a96ab517585e9fdfa`
+- Prior reviewed upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
+- Main behavior (runtime/tests): `f49d577b2c7fa51f8444ef5e00297af68dde2211` (Windows system-tar extraction, explicit MiMo npm wire regression and lighter global workflow concurrency regression; Windows CI executes the launcher suite)
+- Inherited compat behavior: `19ce44bc94fad9208036fc5731940d05e40fbb71` (shared launcher and tests inherited; all eleven DC owners retained)
 - Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `06fda781992309ec8e68518b5b08f0c5dd0378bc`
+- Prior fork `main` tip: `0abaacd194a2e899498886c909573fe6aed322a1`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
 
@@ -896,6 +898,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-10-27 synchronization: adopt the lighter two-child/two-agent global concurrency regression while keeping the existing 60-second two-level-resume budget. The Windows runtime job additionally runs `test/installation/launcher.test.ts` with a 120-second per-test cap and preserves its log in the existing artifact, so the incoming PATH-shadow/system-tar regression executes on Windows rather than only skipping on Linux/macOS. No production workflow semaphore or cleanup boundary changes.
+
 - 2026-10-22 synchronization validation: `.github/actions/setup-bun/action.yml` exposes npm's bundled `node-gyp` on a job-temporary PATH before locked installation. A runner may execute the trusted tree-sitter-powershell native install script even though the CLI uses its WASM asset. Repeated CI ENOENT established that no build executable was available; this setup reuses the existing npm dependency without adding installs, changing the lockfile, widening trust or altering product module resolution.
 
 - 2026-10-14 synchronization: upstream `002cb4c9` adds `abortSignal` to `Question.ask`'s input and passes `ctx.abort` from the question and plan tools. It replaces the fork's second-argument signal; the POLICY-01 lifecycle (closed-generation admission, captured publisher, single `Rejected` through `dismiss`) is unchanged, and an abort now dismisses and then awaits the request so a reply already in flight wins. The detached `Bus.publish` helper now ignores an interrupt-only exit from instance disposal (see the FC-007 note). Evidence: `test/question/question.test.ts`, `test/question/lifecycle.test.ts`, `test/cli/tui/question-lifecycle.test.tsx`, `test/tool/plan.test.ts`.
@@ -1544,6 +1548,8 @@ logged`, and the peer `success`/`failure` variants of
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-012 — fork publication, contribution, and security routing
+
+- 2026-10-27 synchronization: launcher extraction adopts upstream `tarCommand()`: on Windows prefer the existing absolute system tar, then fall back to PATH; other platforms still use PATH tar. Release URL/checksum/cache and staged-run behavior are retained. Adopt the README download links and desktop screenshots while preserving fork routing. See [the four-capability record](upstream-sync-2026-10-27.md).
 
 - 2026-10-26 synchronization: adopt upstream's `0.1.16` across the four workspace manifests and `bun.lock` (`d3c71e33`), and `b8dbe084`'s tag release that builds after typecheck and lint without rerunning unit tests, with `script/fds-upload.ts` defaulting to the external `cnbj1.fds.api.xiaomi.com` endpoint (`MIMO_FDS_ENDPOINT` still overrides). `GH_REPO` remains required and fork-scoped. A fork tag therefore depends on the exact-SHA branch CI of the tagged commit. No publishing stage ran during this sync. FC-019's patched quickjs versions are unchanged by the bump.
 
