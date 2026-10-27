@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-27; live upstream `0fe2cbbc..d85f3553`.
+- Starting compat: `d12b7bed616f271a3a33aba36e4da8cbaf14746d`; inherited main runtime/tests: `f49d577b2c7fa51f8444ef5e00297af68dde2211`; reviewed compat runtime/tests: `19ce44bc94fad9208036fc5731940d05e40fbb71`.
+- Scope: C01-C04 in [the shared synchronization record](upstream-sync-2026-10-27.md). Main owns Windows system-tar launcher extraction, explicit MiMo npm wire coverage, README assets/downloads and the lighter workflow concurrency regression. The inherited Windows CI additionally executes the existing launcher suite on actual Windows.
+- Direct adaptation: none; both merges are clean. Launcher and selected incoming tests match main. DC-PLATFORM-001 retains its separate archive and ripgrep fallbacks. DC-PROVIDER-001 retains xAI Responses routing and SDK options beside the new Anthropic explicit-npm suite. No incoming source changes its implementation.
+- Adjacent review: DC-CONTEXT-001, DC-ACTOR-001/002, DC-MODEL-001, DC-TUI-001, DC-NET-001/002, DC-WEBSEARCH-001 and DC-WEBFETCH-001 retain their contracts. The production overlay path set under `packages/` is identical before and after propagation (54 paths excluding `/test/`); no generated or lockfile delta is introduced.
+- Validation: Bun 1.3.14 locked install, CLI typecheck and lint pass with zero lint errors. The local affected installation/provider/workflow/platform matrix passes 486 tests with three skips and no failures across 14 files. Exact-source-SHA lint/typecheck/test all pass, including all ten test jobs and actual Windows launcher extraction (26/26; the PATH-shadow zip regression executes and passes). Links are in the shared record.
+- Shared ownership: shared registries/history/report are inherited unchanged from main; this file owns the compat review.
+
+## Previous review record: 0fe2cbbc synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-26; live upstream `e37f2c2d..0fe2cbbc`.
 - Starting compat: `5a8382b16be549fc09d3aa1e492a82f78f7f6641`; inherited main runtime/tests: `33f43f4d200fb7609c9d281e7f06f285960b79b7`; reviewed compat runtime/tests: `07dc3d41b0cc199e8b6401c8c2ac7b85f8f90eb9`.
 - Scope: C01-C05 in [the shared synchronization record](upstream-sync-2026-10-26.md). Main owns the agent-CLI skill opt-in, the removed `claude` PATH probe, declared model npm, the 0.1.16 release and the release workflow changes.
