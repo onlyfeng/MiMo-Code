@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-28; live upstream `24546043..ebd06ee2`.
+- Starting compat: `48e52e5cd073e88cdcdf573bb81e831713d81d39`; inherited main runtime/tests: `224410e8544505fa75da185ec3d1f28d91945df9`; reviewed compat runtime/tests: `4fa1d2cb055104509e14e5d64f5629bac6d8ce92`.
+- Scope: C01 (N=1) in [the shared quota synchronization record](upstream-sync-2026-10-28-ebd06ee2.md). Main owns exact quota-exhaustion classification and the scope-specific ordinary429 test adaptation. Compat inherits both without a conflict.
+- Direct adaptation: none. DC-MODEL-001 MaxMode budgets and DC-WEBSEARCH-001 native-search error routing retain their existing behavior; quota/auth failures still do not mark native search unsupported. Shared bounded request versus persistent live-step budgets and main-only status/event publication are unchanged.
+- Adjacent review: DC-ACTOR-001/002, DC-CONTEXT-001, DC-TUI-001, DC-PROVIDER-001, DC-NET-001/002, DC-PLATFORM-001 and DC-WEBFETCH-001 have no incoming implementation delta. The non-test compat overlay path set remains 54 paths.
+- Validation: pinned Bun 1.3.14 bun ci and final CLI typecheck exit 0; lint has zero errors. Final six-file matrix: 219 pass, two existing skips, zero failures and 1,930 assertions. Focused quota tests: 7 pass, 122 filtered, zero failures (overlap). The inherited checkpoint progress fixture correction additionally passes 22/22, including the new fixed-clock isolation regression; no checkpoint runtime policy changes. Repaired exact-SHA lint/typecheck/test all pass on the first attempt, including all ten test jobs and Windows; links are in the shared record.
+- Shared ownership: FD/FC/history/report inherit main unchanged; this file owns the compat review.
+
+## Previous review record: 24546043 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-28; live upstream `d85f3553..24546043`.
 - Starting compat: `e52c587f5221b05502288a2ab68555a714b5d458`; inherited main runtime/tests: `f001dd2be038a3b66ae25ef431c6c594075ced7e`; reviewed compat runtime/tests: `5cee6fc9bcc8710df59ac4187c854e02afa20b09`.
 - Scope: C01 (N=1) in [the shared synchronization record](upstream-sync-2026-10-28.md). Main owns config-driven always-direct MCP exposure, the SDK regeneration and mutable config-array correction. Compat inherits all shared source changes without a conflict.
