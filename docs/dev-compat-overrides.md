@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-29; live upstream `ebd06ee2..3e92e0d8`.
+- Starting compat: `b01a3be82a44f376f94e5810da7f16bb845771cf`; inherited main runtime/tests: `61a589679a10968dfad60280eb4aa2c4993765fd`; reviewed compat runtime/tests: `6bc84001a223e12306d0c39796c24bff2747b3c9`.
+- Scope: C01–C04 (N=4) in [the shared synchronization record](upstream-sync-2026-10-29-3e92e0d8.md). Main owns caller-supplied session ids, Xiaomi credential placement and the family consumers; compat inherits them with one adaptation.
+- Direct adaptation: DC-WEBSEARCH-001 (C03). The sidecar gate and its credential key follow the session model's Xiaomi family provider, configured fallbacks still run next, and family sessions still never reach Exa. The tool gate keeps `NativeWebSearch.exposed` beside the family check. The upstream token-plan sidecar test gains the compat Config/Provider layers; a new regression covers a keyless token-plan session through a fallback and, when it fails, the WEBFETCH hint with zero Exa calls. Reverting the Exa gate, or the gate and key, fails those tests.
+- Adjacent review: DC-TUI-001 display helpers and DC-CONTEXT-001 checkpoint coverage keep their `util/model.ts` code beside `familyDefaultModel` (test import union only). DC-PROVIDER-001 xAI routing and `forceReasoning` merge cleanly beside the family checks in `provider.ts`/`transform.ts`. DC-ACTOR-001/002 and DC-CONTEXT-001 treat session ids as opaque keys, so supplied ids change nothing there. DC-MODEL-001, DC-NET-001/002, DC-PLATFORM-001 and DC-WEBFETCH-001 have no incoming implementation delta. The non-test compat overlay path set remains 54 paths.
+- Validation: pinned Bun 1.3.14 bun ci; final CLI typecheck exits 0 and lint has zero errors. Final 21-file matrix: 667 pass, zero skips, zero failures and 1,850 assertions. The SDK regenerated from compat source equals the merge. Exact-SHA lint/typecheck/test links are in the shared record.
+- Shared ownership: FD/FC/history/report inherit main unchanged; this file owns the compat review.
+
+## Previous review record: ebd06ee2 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-28; live upstream `24546043..ebd06ee2`.
 - Starting compat: `48e52e5cd073e88cdcdf573bb81e831713d81d39`; inherited main runtime/tests: `224410e8544505fa75da185ec3d1f28d91945df9`; reviewed compat runtime/tests: `4fa1d2cb055104509e14e5d64f5629bac6d8ce92`.
 - Scope: C01 (N=1) in [the shared quota synchronization record](upstream-sync-2026-10-28-ebd06ee2.md). Main owns exact quota-exhaustion classification and the scope-specific ordinary429 test adaptation. Compat inherits both without a conflict.
@@ -2429,13 +2440,16 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-WEBSEARCH-001 — provider-native web search and layered fallback
 
+- 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens main's sidecar and tool gate to every `xiaomi`/`xiaomi-*` provider, keyed by the model's own provider. Compat keeps its layered chain and applies the same family gate and key to the sidecar; family sessions still skip Exa after the configured fallbacks. Native search, failure marking, replay and display are unchanged. Evidence: the token-plan sidecar and keyless token-plan fallback cases in `test/tool/websearch.test.ts`, family exposure in `test/tool/registry-toolset.test.ts`.
+
 - Status: active
 - Canonical owner: `dev/compat` web search
 - Added: 2026-10-18 (tenth owner; see the dated record near the top).
 - Base: inherited main exposes the client `websearch` tool only to opencode
-  and xiaomi providers or under `MIMOCODE_ENABLE_EXA` (also set by
-  `MIMOCODE_EXPERIMENTAL`). It routes xiaomi sessions to the Xiaomi
-  `web_search` chat request and everything else to Exa's anonymous MCP. No
+  and Xiaomi family (`xiaomi`, `xiaomi-*`) providers or under
+  `MIMOCODE_ENABLE_EXA` (also set by `MIMOCODE_EXPERIMENTAL`). It routes
+  family sessions to the Xiaomi `web_search` chat request with the model
+  provider's key and everything else to Exa's anonymous MCP. No
   request ever declares a provider-native search tool, although `processor.ts`
   and `message-v2.ts` already persist and replay provider-executed tool parts.
 - Contract:
@@ -2466,10 +2480,10 @@ files remain byte-identical to the accepted main correction.
     marked, and the stored result is the provider's JSON. The Anthropic
     tool-call reorder in `ProviderTransform.message` moves only client tool
     calls, keeping a server call ahead of its own result.
-  - `websearch` tool chain: xiaomi sidecar (xiaomi sessions, unchanged) →
+  - `websearch` tool chain: Xiaomi sidecar (family sessions, unchanged) →
     each resolvable `fallback` entry (`@ai-sdk/openai` model, existing
     variant) as one standalone Responses search returning the answer plus only
-    search-returned sources → Exa (non-xiaomi sessions, unchanged) →
+    search-returned sources → Exa (non-family sessions, unchanged) →
     `WEBFETCH_FALLBACK`. `metadata.servedBy` names the layer. The tool is also
     exposed whenever `websearch` config enables native search or lists a
     fallback.

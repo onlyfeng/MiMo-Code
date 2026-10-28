@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-28
-- Upstream: `ebd06ee2fafad8f20d358aaac68200536ff9be65`
-- Prior reviewed upstream: `245460431c30815f894ba8318bcc98b581938a57`
-- Main behavior (runtime/tests): `224410e8544505fa75da185ec3d1f28d91945df9` (terminal quota exhaustion with scope-specific ordinary rate-limit regression)
-- Inherited compat behavior: `4fa1d2cb055104509e14e5d64f5629bac6d8ce92` (shared classifier inherited; all eleven DC owners retained)
+- Last reviewed: 2026-10-29
+- Upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
+- Prior reviewed upstream: `ebd06ee2fafad8f20d358aaac68200536ff9be65`
+- Main behavior (runtime/tests): `61a589679a10968dfad60280eb4aa2c4993765fd` (caller-supplied session ids and Xiaomi API/token-plan credential split with family consumers)
+- Inherited compat behavior: `6bc84001a223e12306d0c39796c24bff2747b3c9` (shared changes inherited; DC-WEBSEARCH-001 sidecar adapted to the Xiaomi family; all eleven DC owners retained)
 - Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `49c5e2e9ff62b489b999e998f9e8fedae0922bef`
+- Prior fork `main` tip: `ad8387f9093a94c075df22a2c535929ec73bce17`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
 
@@ -456,6 +458,8 @@ not change their implementation. The preceding review is retained in the
 - Upstream relationship: the fork tracks upstream on this surface.
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+
+- 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens the WebSearch sidecar and tool gate from the literal `xiaomi` to `isXiaomiFamilyProvider`. The sidecar authenticates with the model's own provider key and still sends the resolved `model.api.id`, so this contract now covers the whole family. Harness, prompt, discovery, toolset and retry identity resolution read model identity, not the credential provider, and are unchanged; family-wide large-model output defaults and in-house vision ordering select no harness. Evidence: `test/tool/websearch.test.ts` (token-plan sidecar), `test/tool/registry-toolset.test.ts` (family exposure), `test/tool/harness-alias.test.ts`, `test/provider/provider.test.ts`.
 
 - 2026-10-26 synchronization: upstream `0fe2cbbc` removes `isMimoOrSmartModel` and `resolveModelNpm`, so a MiMo-named id keeps the model or provider `npm` it declares; only an undeclared SDK falls back to `@ai-sdk/openai-compatible`. FD-005 never owned transport after the 2026-09-13 retirement, and the harness, prompt, discovery, toolset and retry identity resolution is unchanged. Upstream `18adffc9` also drops the `claude` PATH probe from the Anthropic environment block in `session/system.ts`; harness-resolved prompt selection there is untouched. Evidence: `test/provider/provider.test.ts`, `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/system.test.ts`.
 
