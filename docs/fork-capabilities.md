@@ -15,13 +15,13 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-27
-- Upstream: `d85f355317f1471bf68b5c5a96ab517585e9fdfa`
-- Prior reviewed upstream: `0fe2cbbc33ed90507d053e78475ef93615ed4c51`
-- Main behavior (runtime/tests): `f49d577b2c7fa51f8444ef5e00297af68dde2211` (Windows system-tar extraction, explicit MiMo npm wire regression and lighter global workflow concurrency regression; Windows CI executes the launcher suite)
-- Inherited compat behavior: `19ce44bc94fad9208036fc5731940d05e40fbb71` (shared launcher and tests inherited; all eleven DC owners retained)
+- Last reviewed: 2026-10-28
+- Upstream: `245460431c30815f894ba8318bcc98b581938a57`
+- Prior reviewed upstream: `d85f355317f1471bf68b5c5a96ab517585e9fdfa`
+- Main behavior (runtime/tests): `f001dd2be038a3b66ae25ef431c6c594075ced7e` (config-driven always-direct MCP tools, frozen-authority conflict resolution and regenerated SDK with mutable config arrays)
+- Inherited compat behavior: `5cee6fc9bcc8710df59ac4187c854e02afa20b09` (shared always-direct tools inherited; all eleven DC owners retained)
 - Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `0abaacd194a2e899498886c909573fe6aed322a1`
+- Prior fork `main` tip: `8ff244c76ff0035905ffd491882ef2750a3f081b`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
 
@@ -579,6 +581,8 @@ not change their implementation. The preceding review is retained in the
   history. Reintroducing a gate would require a new explicit behavior decision.
 
 ## FC-004 — MCP configuration and connection lifecycle
+
+- 2026-10-28 synchronization: local and remote MCP config accept optional `alwaysDirectTools`; sanitized server-local names select top-level tools outside deferred search/use, without changing host override precedence, connection lifecycle or startup controls. Config arrays use the existing mutable schema convention so ACP accepts the regenerated SDK types. FD-006 retains execution and frozen authority.
 
 - 2026-10-20 live catch-up through `4e58a801`: optional `MCP.readiness()` reads current configured-server status and tool definitions without awaiting connection settlement or starting a connection. Pending Claude imports, `auto_connect` precedence, ownership and refresh lifetime remain unchanged. The prompt intersects readiness tools with the existing request-authorized search/dispatch catalog, reports latest outcomes at user boundaries and never turns connection readiness into invocation authority. Malformed historical reminder metadata is ignored without erasing an earlier valid state.
 
