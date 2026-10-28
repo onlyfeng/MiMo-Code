@@ -12,7 +12,7 @@ import { checkpointPath, tasksDir, progressPath, metaDir } from "../../src/sessi
 import { SessionID } from "../../src/session/schema"
 
 async function withSessionMemory<T>(fn: (sid: SessionID) => Promise<T>): Promise<T> {
-  const sid = SessionID.ascending()
+  const sid = SessionID.descending()
   try {
     await fs.mkdir(tasksDir(sid), { recursive: true })
     return await fn(sid)
