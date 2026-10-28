@@ -121,6 +121,7 @@ import { builtinSkillRoot, matchDocumentSkills } from "@/skill/builtin/extract"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { ToolRegistry } from "../tool"
 import { MCP } from "../mcp"
+import { HostMcp } from "../mcp/host"
 import { normalizeToolResult } from "../mcp/tool-result"
 import { toolPresentationProgress } from "../mcp/tool-progress"
 import { LSP } from "../lsp"
@@ -200,6 +201,7 @@ import {
   MCP_TOOL_USE_ID,
   McpToolUseParameters,
   checkMcpToolArguments,
+  alwaysDirectMcpToolKeys,
   neutralizeHarnessTags,
   parseMcpToolSearchMode,
   renderMcpEntryReminder,
@@ -2051,6 +2053,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const mcpDispatch = new Map<string, (args: unknown, opts: ToolExecutionOptions) => Promise<unknown>>()
       const execMcpTools: Record<string, AITool> = {}
       const mcpSearchEntries: McpToolSearchEntry[] = []
+      const alwaysDirectTools = new Set<string>()
       const mcpCatalog = { current: createMcpToolSearchCatalog([]) }
       // exec's request-scoped MCP view. Holder object (same pattern as
       // mcpCatalog above): referenced by the context() closure below, filled
@@ -2419,6 +2422,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         mcpTools.map(([key]) => key),
         effectivePermission,
       )
+      const alwaysDirectKeys = alwaysDirectMcpToolKeys({
+        ...(yield* config.get()).mcp,
+        ...HostMcp.get(),
+      })
       for (const [key, item] of mcpTools) {
         const execute = item.execute
         if (!execute) continue
@@ -2445,10 +2452,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           !disabledMcpTools.has(key) &&
           (!agentToolAllowlist || agentToolAllowlist.has(key))
         const searchable = available && (!whitelist || whitelist.has(key))
-        const entry: McpToolSearchEntry | undefined = searchable
+        // Config-declared always-direct tools skip the deferred catalog; they
+        // join activeTools below instead of mcp_tool_use.
+        const alwaysDirect = alwaysDirectKeys.has(key)
+        const entry: McpToolSearchEntry | undefined = searchable && !alwaysDirect
           ? { name: key, description: item.description ?? "", parameters: transformed as unknown as JSONObject }
           : undefined
         if (entry) mcpSearchEntries.push(entry)
+        if (alwaysDirect && searchable && input.model.capabilities.toolcall) alwaysDirectTools.add(key)
         // `batch` is the model-facing tool part this call executes under: the MCP
         // tool itself for a direct call, `mcp_tool_use` for a dispatched one, and
         // undefined for exec guest calls (script-controlled concurrency).
@@ -2490,7 +2501,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 yield* input.processor.completeToolCall(opts.toolCallId, output)
                 return output
               }
-              if (batch === key && deferMcpTools && !useGPTTools && !(legacyFrozenMcp && loadedMcpTools.has(key))) {
+              if (
+                batch === key &&
+                deferMcpTools &&
+                !alwaysDirect &&
+                !useGPTTools &&
+                !(legacyFrozenMcp && loadedMcpTools.has(key))
+              ) {
                 return yield* Effect.fail(
                   new RecoverableError(
                     `The MCP tool "${key}" is deferred and cannot be called directly.` +
@@ -2731,6 +2748,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (!deferMcpTools) mcpCatalog.current.entries.forEach((entry) => activeTools.add(entry.name))
         if (legacyFrozenMcp) loadedMcpTools.forEach((name) => activeTools.add(name))
       }
+      // Config-declared always-direct MCP tools join every toolset (including GPT)
+      // as top-level tools; they are not deferred and must not depend on mcp_tool_use.
+      for (const name of alwaysDirectTools) activeTools.add(name)
 
       // MCP Tool Search keeps full schemas out of the outer model tool list;
       // it is a context-budget optimization, not an authorization boundary.
