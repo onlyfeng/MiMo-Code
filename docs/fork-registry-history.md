@@ -37,6 +37,8 @@ they are never used as an `upstream` or `main behavior` review basis.
 
 | 2026-10-28 | `ebd06ee2fafad8f20d358aaac68200536ff9be65` | Runtime/tests `224410e8544505fa75da185ec3d1f28d91945df9`; inherited compat `4fa1d2cb055104509e14e5d64f5629bac6d8ce92` | 9 | 17 | Incoming range: three paths; one commit | N=1 full sync: stop retrying exact quota exhaustion, preserving host decisions and fork scope-specific ordinary429 budgets. No owner retires; see [record](upstream-sync-2026-10-28-ebd06ee2.md). |
 
+| 2026-10-29 | `3e92e0d8f0308603180ad03dbc67828c94c09ec4` | Runtime/tests `61a589679a10968dfad60280eb4aa2c4993765fd`; inherited compat `6bc84001a223e12306d0c39796c24bff2747b3c9` | 9 | 17 | Incoming range: 27 paths; two commits | N=4 full sync: caller-supplied session ids and the Xiaomi API/token-plan credential split with family consumers; compat adapts the DC-WEBSEARCH-001 sidecar gate and key. No owner retires; see [record](upstream-sync-2026-10-29-3e92e0d8.md). |
+
 ## 2026-08-23 review details
 
 - Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
