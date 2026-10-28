@@ -4987,6 +4987,7 @@ export type SessionListResponse = SessionListResponses[keyof SessionListResponse
 
 export type SessionCreateData = {
   body?: {
+    id?: string
     parentID?: string
     contextFrom?: string
     contextWatermark?: string
