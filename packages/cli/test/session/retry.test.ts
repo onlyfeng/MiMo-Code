@@ -65,15 +65,19 @@ describe("provider-independent quota response", () => {
     ]) expect(decide(candidate, "request").retryable).toBe(true)
   })
 
-  test("ordinary limitation retains persistent rate-limit recovery for all providers", () => {
+  test("ordinary limitation retains scope-specific rate-limit budgets for all providers", () => {
     for (const [provider, message] of [["xiaomi-token-plan-cn", "Too many requests"], ["test", "Too many requests"]]) {
       const error = MessageV2.fromLiveError(new APICallError({
         message, url: "https://example.test", requestBodyValues: {}, statusCode: 429,
         responseBody: JSON.stringify({ error: { code: "429", message, type: "limitation" } }), isRetryable: true,
       }), { providerID: ProviderID.make(provider) })
-      const decision = decide(error, "request")
-      expect(decision).toMatchObject({ retryable: true, kind: "rate_limit" })
-      expect(SessionRetry.budgetFor(SessionRetry.resolve(undefined), decision).mode).toBe("persistent")
+      for (const phase of ["request", "stream"] as const) {
+        const decision = decide(error, phase)
+        expect(decision).toMatchObject({ retryable: true, kind: "rate_limit" })
+        expect(SessionRetry.budgetFor(SessionRetry.resolve(undefined), decision).mode).toBe(
+          phase === "request" ? "bounded" : "persistent",
+        )
+      }
     }
   })
 })
