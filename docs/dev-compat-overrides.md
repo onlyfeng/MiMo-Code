@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-28; live upstream `d85f3553..24546043`.
+- Starting compat: `e52c587f5221b05502288a2ab68555a714b5d458`; inherited main runtime/tests: `f001dd2be038a3b66ae25ef431c6c594075ced7e`; reviewed compat runtime/tests: `5cee6fc9bcc8710df59ac4187c854e02afa20b09`.
+- Scope: C01 (N=1) in [the shared synchronization record](upstream-sync-2026-10-28.md). Main owns config-driven always-direct MCP exposure, the SDK regeneration and mutable config-array correction. Compat inherits all shared source changes without a conflict.
+- Direct adaptation: none. DC-ACTOR-001 retains frozen membership, model and schema authority; DC-CONTEXT-001 retains preflight and content caps on direct and exec paths. The shared direct-call rejection preserves GPT hidden and legacy frozen exceptions alongside always-direct selection.
+- Adjacent review: DC-NET-002 private remote MCP transport and DC-PLATFORM-001 fallbacks are untouched. DC-MODEL-001, DC-TUI-001, DC-WEBSEARCH-001 and DC-PROVIDER-001 selection/routing remain unchanged beside the inherited prompt change; DC-ACTOR-002, DC-NET-001 and DC-WEBFETCH-001 have no incoming implementation delta. The production overlay path set under packages remains identical at 54 paths excluding tests.
+- Validation: pinned Bun 1.3.14 locked install, CLI typecheck and lint pass (zero errors). The affected matrix passes 173/173, filtered MCP/frozen prompt-effect passes 74/74 (175 filtered), and isolated lifecycle passes 34/34. Regenerated SDK has no additional diff. Exact-source-SHA lint/typecheck/test all pass, including all ten test jobs and Windows runtime; links are in the shared record.
+- Shared ownership: FD/FC registries, history and shared report inherit main unchanged; this file owns compat review details.
+
+## Previous review record: d85f3553 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-27; live upstream `0fe2cbbc..d85f3553`.
 - Starting compat: `d12b7bed616f271a3a33aba36e4da8cbaf14746d`; inherited main runtime/tests: `f49d577b2c7fa51f8444ef5e00297af68dde2211`; reviewed compat runtime/tests: `19ce44bc94fad9208036fc5731940d05e40fbb71`.
 - Scope: C01-C04 in [the shared synchronization record](upstream-sync-2026-10-27.md). Main owns Windows system-tar launcher extraction, explicit MiMo npm wire coverage, README assets/downloads and the lighter workflow concurrency regression. The inherited Windows CI additionally executes the existing launcher suite on actual Windows.
