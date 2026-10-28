@@ -16,12 +16,12 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-10-28
-- Upstream: `245460431c30815f894ba8318bcc98b581938a57`
-- Prior reviewed upstream: `d85f355317f1471bf68b5c5a96ab517585e9fdfa`
-- Main behavior (runtime/tests): `f001dd2be038a3b66ae25ef431c6c594075ced7e` (config-driven always-direct MCP tools, frozen-authority conflict resolution and regenerated SDK with mutable config arrays)
-- Inherited compat behavior: `5cee6fc9bcc8710df59ac4187c854e02afa20b09` (shared always-direct tools inherited; all eleven DC owners retained)
+- Upstream: `ebd06ee2fafad8f20d358aaac68200536ff9be65`
+- Prior reviewed upstream: `245460431c30815f894ba8318bcc98b581938a57`
+- Main behavior (runtime/tests): `224410e8544505fa75da185ec3d1f28d91945df9` (terminal quota exhaustion with scope-specific ordinary rate-limit regression)
+- Inherited compat behavior: `4fa1d2cb055104509e14e5d64f5629bac6d8ce92` (shared classifier inherited; all eleven DC owners retained)
 - Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `8ff244c76ff0035905ffd491882ef2750a3f081b`
+- Prior fork `main` tip: `49c5e2e9ff62b489b999e998f9e8fedae0922bef`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
 
@@ -902,6 +904,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
+
 - 2026-10-27 synchronization: adopt the lighter two-child/two-agent global concurrency regression while keeping the existing 60-second two-level-resume budget. The Windows runtime job additionally runs `test/installation/launcher.test.ts` with a 120-second per-test cap and preserves its log in the existing artifact, so the incoming PATH-shadow/system-tar regression executes on Windows rather than only skipping on Linux/macOS. No production workflow semaphore or cleanup boundary changes.
 
 - 2026-10-22 synchronization validation: `.github/actions/setup-bun/action.yml` exposes npm's bundled `node-gyp` on a job-temporary PATH before locked installation. A runner may execute the trusted tree-sitter-powershell native install script even though the CLI uses its WASM asset. Repeated CI ENOENT established that no build executable was available; this setup reuses the existing npm dependency without adding installs, changing the lockfile, widening trust or altering product module resolution.
@@ -1586,6 +1590,8 @@ logged`, and the peer `success`/`failure` variants of
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
+
+- 2026-10-28 quota synchronization: adopt terminal handling for complete HTTP429/code429/type limitation/exact quota exhausted signals in SessionRetry.decide, independent of provider identity and preserved through serialization. Host decisions retain precedence; SDK normalization is unchanged. Adapt the incoming ordinary429 test to the existing bounded request budget and persistent live-step rate-limit budget. Classification and all other retry contracts remain unchanged; see [C01](upstream-sync-2026-10-28-ebd06ee2.md).
 
 - 2026-10-22 live advancement: pure-empty InvalidOutputError uses the persistent server live-step budget, with explicit bounded overrides and cancellation still effective. The retrySafe/tool-residue/non-length/non-structured guards remain; reasoning-only output keeps bounded actor-scoped continuation and atomic provenance. Request and stream retries persist per-actor records, while global status and RetryAttempt stay main-only; ephemeral/quiet MaxMode scopes remain isolated. Summary retry/fallback ownership remains under FD-010/011/012.
 

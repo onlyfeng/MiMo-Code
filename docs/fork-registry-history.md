@@ -35,6 +35,8 @@ they are never used as an `upstream` or `main behavior` review basis.
 
 | 2026-10-28 | `245460431c30815f894ba8318bcc98b581938a57` | Runtime/tests `f001dd2be038a3b66ae25ef431c6c594075ced7e`; inherited compat `5cee6fc9bcc8710df59ac4187c854e02afa20b09` | 9 | 17 | Incoming range: eight paths; one commit | N=1 full sync: config-driven always-direct MCP exposure, retained frozen/GPT direct authority and regenerated SDK. No owner retires; see [record](upstream-sync-2026-10-28.md). |
 
+| 2026-10-28 | `ebd06ee2fafad8f20d358aaac68200536ff9be65` | Runtime/tests `224410e8544505fa75da185ec3d1f28d91945df9`; inherited compat `4fa1d2cb055104509e14e5d64f5629bac6d8ce92` | 9 | 17 | Incoming range: three paths; one commit | N=1 full sync: stop retrying exact quota exhaustion, preserving host decisions and fork scope-specific ordinary429 budgets. No owner retires; see [record](upstream-sync-2026-10-28-ebd06ee2.md). |
+
 ## 2026-08-23 review details
 
 - Prior reviewed upstream: `f57520c08d4d10e64ac035e90ba561e889119c98`
