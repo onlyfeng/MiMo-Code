@@ -11,6 +11,7 @@ import { Auth } from "@/auth"
 import { Config } from "@/config"
 import { Provider, ProviderTransform } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { isXiaomiFamilyProvider } from "@/provider/xiaomi-family"
 import { Log } from "@/util"
 import DESCRIPTION from "./websearch.txt"
 
@@ -119,19 +120,21 @@ export const WebSearchTool = Tool.define(
           const model = (ctx.extra as { model?: Provider.Model })?.model
           const timeout = params.timeout === undefined ? undefined : Math.min(params.timeout * 1000, MAX_TIMEOUT)
 
-          const xiaomi = model?.providerID === "xiaomi"
+          // API and token-plan credentials are stored separately, so the key must
+          // come from the model's own provider rather than a hardcoded `xiaomi`.
+          const gatewayModel = model && isXiaomiFamilyProvider(model.providerID) ? model : undefined
           let served: { output: string; by: string } | undefined
-          if (xiaomi) {
+          if (gatewayModel) {
             const output = yield* Effect.catchCause(
               Effect.gen(function* () {
-                const info = yield* auth.get("xiaomi")
+                const info = yield* auth.get(gatewayModel.providerID)
                 if (!info || info.type !== "api") return undefined
                 return yield* MimoWebsearch.call(
                   http,
-                  model.api.url,
+                  gatewayModel.api.url,
                   info.key,
                   params.query,
-                  model.api.id,
+                  gatewayModel.api.id,
                   timeout ?? "30 seconds",
                 )
               }),
@@ -146,7 +149,7 @@ export const WebSearchTool = Tool.define(
               break
             }
           }
-          if (!served && !xiaomi) {
+          if (!served && !gatewayModel) {
             const output = yield* McpExa.call(
               http,
               "web_search_exa",

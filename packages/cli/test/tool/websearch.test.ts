@@ -110,6 +110,81 @@ describe("tool.websearch", () => {
     })
   })
 
+  test("token-plan sidecar uses its own provider key and API id", async () => {
+    let requested: string | undefined
+    let authorization: string | undefined
+    using server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        requested = ((await req.json()) as { model?: string }).model
+        authorization = req.headers.get("api-key") ?? undefined
+        return new Response(sse(requested ?? ""), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      },
+    })
+
+    const model = ProviderTest.model({
+      id: ModelID.make("mimo-v2.6-pro"),
+      providerID: ProviderID.make("xiaomi-token-plan-cn"),
+      api: {
+        id: "mimo-v2.6-pro",
+        url: server.url.origin,
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+
+    const fakeAuth = Layer.mock(Auth.Service)({
+      get: (providerID: string) =>
+        Effect.succeed(
+          providerID === "xiaomi-token-plan-cn"
+            ? new Auth.Api({ type: "api", key: "test-token-plan-key" })
+            : new Auth.Api({ type: "api", key: "wrong-key" }),
+        ),
+    })
+
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const result = await WebSearchTool.pipe(
+          Effect.flatMap((info) => info.init()),
+          Effect.flatMap((tool) =>
+            tool.execute(
+              { query: "latest mimo release" },
+              {
+                sessionID: SessionID.make("ses_test"),
+                messageID: MessageID.make("message"),
+                callID: "",
+                agent: "build",
+                abort: AbortSignal.any([]),
+                messages: [],
+                extra: { model },
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            ),
+          ),
+          Effect.provide(
+            Layer.mergeAll(
+              FetchHttpClient.layer,
+              Truncate.defaultLayer,
+              Agent.defaultLayer,
+              fakeAuth,
+              Config.defaultLayer,
+              Provider.defaultLayer,
+            ),
+          ),
+          Effect.runPromise,
+        )
+
+        expect(requested).toBe("mimo-v2.6-pro")
+        expect(authorization).toBe("test-token-plan-key")
+        expect(result.output).toContain("https://example.com/result")
+      },
+    })
+  })
+
   describe("fallback", () => {
     type Handler = (body: Record<string, unknown>) => Response
     const responsesBody = (output: unknown[]) => ({
@@ -320,6 +395,36 @@ describe("tool.websearch", () => {
       })
       expect(result.output).toBe("exa says hi")
       expect(result.metadata).toMatchObject({ servedBy: "exa" })
+    })
+
+    test("a keyless token-plan session uses the fallback and never reaches exa", async () => {
+      const family = ProviderTest.model({
+        id: ModelID.make("mimo-v2.6-pro"),
+        providerID: ProviderID.make("xiaomi-token-plan-cn"),
+        api: { id: "mimo-v2.6-pro", url: "http://127.0.0.1:9", npm: "@ai-sdk/openai-compatible" },
+      })
+      let exaCalls = 0
+      const exa = (url: string) => {
+        if (!url.startsWith("https://mcp.exa.ai/")) return undefined
+        exaCalls++
+        return new Response(`data: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "exa says hi" }] } })}\n\n`, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      }
+
+      const served = await run({ handlers: { "test-model": () => json(searched) }, fallback: ["test/test-model"], model: family, exa })
+      expect(served.result.metadata).toMatchObject({ servedBy: "test/test-model" })
+
+      const unserved = await run({
+        handlers: { "test-model": () => json({ error: { message: "boom" } }, 500) },
+        fallback: ["test/test-model"],
+        model: family,
+        exa,
+      })
+      expect(unserved.result.output).toContain("Web search unavailable")
+      expect(unserved.result.metadata).not.toHaveProperty("servedBy")
+      expect(exaCalls).toBe(0)
     })
   })
 })
