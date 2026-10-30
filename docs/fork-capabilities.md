@@ -129,6 +129,7 @@ not change their implementation. The preceding review is retained in the
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
 | FC-017 | History SQLite projection, attachment preview formatting and legacy retry-part reads                      | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds, attachment locators and legacy retry reads       |
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
+| FC-020 | `Tool.define` argument validation of stringified object/array arguments                                   | Fork hardening of upstream's raw-args `parse` in `Tool.wrap`     | Decode only container-typed string failures; execute only fully valid input              |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2013,3 +2014,64 @@ logged`, and the peer `success`/`failure` variants of
   cases pass on a fresh install without the patch; or upstream adopts an
   equivalent patch, which the fork then takes in place of its own. The
   regression cases stay in either case.
+
+## FC-020 — stringified object and array tool arguments are decoded before execute
+
+- Status: active
+- Canonical owner: fork `main` argument validation in the `Tool.define` wrapper
+- Observable contract: `Tool.wrap` validates the raw arguments with the tool's
+  zod schema, and a valid input still reaches `execute` as the raw arguments,
+  not zod's output. When validation fails, each `invalid_type` issue whose
+  `expected` is `object`, `record`, `array` or `tuple`, and whose value at that
+  path is a string, is `JSON.parse`d. The parsed value replaces the string only
+  when it is a JSON object (for `object`/`record`) or array (for
+  `array`/`tuple`). The decoded input reaches `execute` only when the whole input
+  then passes the schema; otherwise the original `ZodError` surfaces unchanged,
+  through `formatValidationError` or `validationErrorMessage`, as a
+  `RecoverableError`. Replacement is copy-on-write: the caller's arguments,
+  which the processor persists as the tool part input and replays to the model,
+  keep the model's original text. A string where the schema wants a string,
+  JSON-looking or not, is never touched. Decoding is one pass: a plain
+  `z.union` (`invalid_union`) and a JSON string nested inside a decoded value
+  are not decoded. Every tool built through `Tool.define` is covered; MCP tools
+  do not pass through it.
+- Motivation: a gz4399 grok model sends cron
+  `{"operation":"{\"action\":\"list\"}"}` and repeats the same shape after each
+  validation error, so neither `schedule` nor `list` ever runs. The
+  schema-side `.meta({ type: "object" })` on the cron/task/actor `operation`
+  envelopes does not stop it. The AI SDK `experimental_repairToolCall` hook in
+  `session/llm.ts` never sees this shape: `prompt.ts` registers tools with
+  `jsonSchema(schema)` and no `validate`, so the zod parse in `Tool.wrap` is
+  the first validation.
+- Upstream relationship: upstream `ee0a93b5` `Tool.wrap` calls
+  `parameters.parse(args)` and executes the raw arguments, and its
+  `ToolCompat.repairToolCall` only remaps keys inside the AI SDK repair hook.
+  This is fork hardening of shared code, not a rejected upstream decision.
+- Retained interaction: `prompt.ts` still classifies `read`/`grep`/`glob` for
+  the tool gate with `item.parameters.safeParse(args)` on the raw arguments.
+  Their schemas have only scalar fields, so the only decodable shape for them
+  is a whole input sent as one JSON string; that call is admitted as `invalid`
+  (barrier-class, no read/search failure exemption) and then executes. This is
+  strictly more conservative and is left unchanged.
+- Watch surfaces: `packages/cli/src/tool/tool.ts` (`wrap`, `parseArgs`,
+  `decodeStringifiedArgs`, `JSON_CONTAINERS`); in
+  `packages/cli/src/session/prompt.ts`, tool registration through `jsonSchema`
+  without `validate` and the `gateTool` classification; the
+  `experimental_repairToolCall` hook in `packages/cli/src/session/llm.ts`; and
+  the `zod` version, since the `invalid_type` code and the `expected` names are
+  zod v4's.
+- Tests/evidence: `packages/cli/test/tool/tool-stringified-args.test.ts` (a
+  stringified discriminated-union envelope, array, record and tuple, and whole
+  input; a JSON-looking string field left alone; a decoded value that fails the
+  schema and a non-JSON string both still rejected) and the "stringified
+  operation envelope" cases in `packages/cli/test/tool/cron.test.ts` (`list` and
+  `schedule`). Mutation-checked: restoring upstream's `parse(args)` and
+  `execute(args)` fails exactly the six decoding cases (envelope, array,
+  record-and-tuple, whole input, cron `list` and `schedule`), each with
+  `expected <container>, received string`, while the three negative and four
+  existing cron cases pass; removing `record` and `tuple` from
+  `JSON_CONTAINERS` fails only the record-and-tuple case.
+- Retirement condition: upstream decodes stringified container arguments
+  before `execute`, or validates and repairs them in the AI SDK, with the same
+  accept-only-when-valid rule and an unchanged persisted input. The regression
+  cases stay in either case.

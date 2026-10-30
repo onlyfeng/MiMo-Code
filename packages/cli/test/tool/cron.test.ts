@@ -79,3 +79,40 @@ describe("cron.execute: schedule sanity warnings", () => {
     expect(out.output).not.toMatch(/rolled|never matches/)
   })
 })
+
+describe("cron.execute: stringified operation envelope", () => {
+  // Some models send `operation` as its JSON text instead of a nested object.
+  const runStringified = async (operation: Record<string, unknown>) => {
+    const info = await runtime.runPromise(CronTool)
+    const def = await runtime.runPromise(info.init())
+    const instanceDir = mkdtempSync(join(tmpdir(), "cron-stringified-"))
+    try {
+      const eff = def.execute(
+        { operation: JSON.stringify(operation) } as unknown as Parameters<typeof def.execute>[0],
+        {
+          sessionID: "ses_stringified_test" as any,
+          messageID: "msg_stringified_test" as any,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {},
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+      return await runtime.runPromise(provideInstance(instanceDir)(eff as Effect.Effect<any>))
+    } finally {
+      rmSync(instanceDir, { recursive: true, force: true })
+    }
+  }
+
+  test("list runs instead of failing validation", async () => {
+    const out = await runStringified({ action: "list" })
+    expect(out.output).toBe("No scheduled jobs.")
+  })
+
+  test("schedule registers the job", async () => {
+    const out = await runStringified({ action: "schedule", cron: "8-59/20 * * * *", prompt: "patrol" })
+    expect(out.output).toMatch(/^Scheduled \S+ \(8-59\/20 \* \* \* \*, recurring\): patrol/)
+  })
+})

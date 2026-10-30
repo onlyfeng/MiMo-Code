@@ -7,6 +7,7 @@ import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { RecoverableError } from "./recoverable"
 import { Agent } from "@/agent/agent"
+import { isRecord } from "@/util/record"
 
 export interface Metadata {
   [key: string]: any
@@ -100,6 +101,81 @@ export function validationErrorMessage(id: string, error: unknown): string {
   return `The ${id} tool was called with invalid arguments: ${error}.\nPlease rewrite the input so it satisfies the expected schema.`
 }
 
+function valueAt(root: unknown, path: readonly PropertyKey[]): unknown {
+  let node = root
+  for (const key of path) {
+    if (typeof key === "symbol") return undefined
+    if (Array.isArray(node)) node = node[Number(key)]
+    else if (isRecord(node)) node = node[key]
+    else return undefined
+  }
+  return node
+}
+
+// Copy-on-write: the original args are persisted as the tool part's input.
+function replaceAt(root: unknown, path: readonly PropertyKey[], value: unknown): unknown {
+  if (path.length === 0) return value
+  const [key, ...rest] = path
+  if (typeof key === "symbol") return root
+  if (Array.isArray(root)) {
+    const copy = [...root]
+    copy[Number(key)] = replaceAt(root[Number(key)], rest, value)
+    return copy
+  }
+  if (!isRecord(root)) return root
+  return { ...root, [key]: replaceAt(root[key], rest, value) }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// zod's `expected` for schemas whose JSON form is an object or an array.
+const JSON_CONTAINERS = new Map<string, (value: unknown) => boolean>([
+  ["object", isRecord],
+  ["record", isRecord],
+  ["array", Array.isArray],
+  ["tuple", Array.isArray],
+])
+
+// Some models emit a nested object or array argument as its JSON text, e.g.
+// {"operation":"{\"action\":\"list\"}"} for the discriminated-union envelopes
+// of cron/task/actor, and then repeat the call unchanged after the validation
+// error. Decode each string zod reports where it expected an object or array.
+function decodeStringifiedArgs(args: unknown, error: z.ZodError): unknown {
+  let decoded = args
+  for (const issue of error.issues) {
+    if (issue.code !== "invalid_type") continue
+    const isContainer = JSON_CONTAINERS.get(issue.expected)
+    if (!isContainer) continue
+    const value = valueAt(decoded, issue.path)
+    if (typeof value !== "string") continue
+    const parsed = parseJson(value)
+    if (!isContainer(parsed)) continue
+    decoded = replaceAt(decoded, issue.path, parsed)
+  }
+  return decoded
+}
+
+function validates<P extends z.ZodType>(parameters: P, value: unknown): value is z.infer<P> {
+  return parameters.safeParse(value).success
+}
+
+// Validates like `parameters.parse` but returns the raw args (not zod's
+// output). Decoded args are accepted only when the whole input then validates;
+// otherwise the original error stands.
+function parseArgs<P extends z.ZodType>(parameters: P, args: z.infer<P>): z.infer<P> {
+  const result = parameters.safeParse(args)
+  if (result.success) return args
+  const decoded = decodeStringifiedArgs(args, result.error)
+  if (decoded !== args && validates(parameters, decoded)) return decoded
+  throw result.error
+}
+
 function wrap<Parameters extends z.ZodType, Result extends Metadata>(
   id: string,
   init: Init<Parameters, Result>,
@@ -118,8 +194,8 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
           ...(ctx.callID ? { "tool.call_id": ctx.callID } : {}),
         }
         return Effect.gen(function* () {
-          yield* Effect.try({
-            try: () => toolInfo.parameters.parse(args),
+          const input = yield* Effect.try({
+            try: () => parseArgs(toolInfo.parameters, args),
             catch: (error) => {
               // Bad arguments are always agent-recoverable: the model sees the
               // message and rewrites the call next turn. Mark it so the TUI
@@ -130,7 +206,7 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
               return new RecoverableError(validationErrorMessage(id, error), { cause: error })
             },
           })
-          const result = yield* execute(args, ctx)
+          const result = yield* execute(input, ctx)
           if (result.metadata.truncated !== undefined) {
             return result
           }
