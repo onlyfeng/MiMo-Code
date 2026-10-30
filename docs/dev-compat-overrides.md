@@ -11,6 +11,15 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-30
+- Upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
+- Main behavior: `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf`
+- Compat behavior: `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841`
+- Review: [2026-10-30 C01–C03 inventory](upstream-sync-2026-10-30.md). Inherit failed/interrupted compaction cleanup, requested model and truthful owned summarize outcomes; keep DC-CONTEXT-001 active-only tool membership/tail sizing and DC-ACTOR-001 preflight. DC-WEBSEARCH-001 drops the Xiaomi sidecar, retains configured native/fallback routes, and permits Exa only when enabled for any provider. Remaining DC owned contracts are unchanged; production overlay remains 54 paths. Final source lint/typecheck/test CI passes, including Windows runtime and launcher; documentation-tip proof and cleanup are tracked in the linked record.
+
+## Previous review record: 3e92e0d8 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-29; live upstream `ebd06ee2..3e92e0d8`.
 - Starting compat: `b01a3be82a44f376f94e5810da7f16bb845771cf`; inherited main runtime/tests: `61a589679a10968dfad60280eb4aa2c4993765fd`; reviewed compat runtime/tests: `6bc84001a223e12306d0c39796c24bff2747b3c9`.
 - Scope: C01–C04 (N=4) in [the shared synchronization record](upstream-sync-2026-10-29-3e92e0d8.md). Main owns caller-supplied session ids, Xiaomi credential placement and the family consumers; compat inherits them with one adaptation.
@@ -2440,18 +2449,17 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-WEBSEARCH-001 — provider-native web search and layered fallback
 
+- 2026-10-30 synchronization: adopt the removal of Xiaomi gateway search (`d0684a3d`) without retiring this owner. No sidecar or provider-specific automatic exposure remains. Keep explicitly configured native search and standalone fallback models; every provider can reach Exa only under `MIMOCODE_ENABLE_EXA` (or the existing experimental alias), and exhausted routes return a no-results/WebFetch hint. Native permission/replay/failure/display contracts remain. Default and Exa-only opt-in runs cover the fallback suite; default registry tests include Xiaomi API/token-plan, OpenAI and OpenCode.
+
 - 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens main's sidecar and tool gate to every `xiaomi`/`xiaomi-*` provider, keyed by the model's own provider. Compat keeps its layered chain and applies the same family gate and key to the sidecar; family sessions still skip Exa after the configured fallbacks. Native search, failure marking, replay and display are unchanged. Evidence: the token-plan sidecar and keyless token-plan fallback cases in `test/tool/websearch.test.ts`, family exposure in `test/tool/registry-toolset.test.ts`.
 
 - Status: active
 - Canonical owner: `dev/compat` web search
 - Added: 2026-10-18 (tenth owner; see the dated record near the top).
-- Base: inherited main exposes the client `websearch` tool only to opencode
-  and Xiaomi family (`xiaomi`, `xiaomi-*`) providers or under
-  `MIMOCODE_ENABLE_EXA` (also set by `MIMOCODE_EXPERIMENTAL`). It routes
-  family sessions to the Xiaomi `web_search` chat request with the model
-  provider's key and everything else to Exa's anonymous MCP. No
-  request ever declares a provider-native search tool, although `processor.ts`
-  and `message-v2.ts` already persist and replay provider-executed tool parts.
+- Base: inherited main exposes built-in `websearch` and `codesearch` only
+  when Exa is explicitly enabled. The client `websearch` tool calls Exa's MCP;
+  it has no Xiaomi gateway branch. Main declares no provider-native search tool,
+  although `processor.ts` and `message-v2.ts` persist provider-executed tool parts.
 - Contract:
   - Config: top-level `websearch.native` (keys `provider` or
     `provider/model`, the latter wins; `true`, `false` or
@@ -2480,13 +2488,13 @@ files remain byte-identical to the accepted main correction.
     marked, and the stored result is the provider's JSON. The Anthropic
     tool-call reorder in `ProviderTransform.message` moves only client tool
     calls, keeping a server call ahead of its own result.
-  - `websearch` tool chain: Xiaomi sidecar (family sessions, unchanged) →
-    each resolvable `fallback` entry (`@ai-sdk/openai` model, existing
-    variant) as one standalone Responses search returning the answer plus only
-    search-returned sources → Exa (non-family sessions, unchanged) →
-    `WEBFETCH_FALLBACK`. `metadata.servedBy` names the layer. The tool is also
-    exposed whenever `websearch` config enables native search or lists a
-    fallback.
+  - `websearch` tool chain: each resolvable `fallback` entry
+    (`@ai-sdk/openai` model, existing variant) as one standalone Responses
+    search returning the answer plus only search-returned sources → Exa only
+    when enabled, for every provider → a no-results/WebFetch hint.
+    `metadata.servedBy` names the serving layer. The tool is also exposed
+    whenever `websearch` config enables native search or lists a fallback;
+    this exposure alone never enables Exa. `codesearch` requires Exa enablement.
   - Display: stored output of a provider `web_search` part is a readable list;
     `providerOutput` keeps the raw result for replay. The TUI renders it as
     `Native Web Search "<query>" (N results)`.
