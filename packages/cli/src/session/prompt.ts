@@ -6154,8 +6154,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 waitForPendingExternalAdmission(sessionID, lastUser.agentID ?? "main"),
             })
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
-            // .Compacted bus subscription inside cron-bridge — see
-            // `compaction.ts:468` publish + `cron-bridge.ts` subscribe pair.
+            // .Compacted bus subscription inside cron-bridge — see the
+            // publish in `SessionCompaction.process` + `cron-bridge.ts` subscribe pair.
             // Covers this user-`/compact` path plus the overflow-boundary
             // path in compaction.create.
             if (result === "stop") break
@@ -8046,12 +8046,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         "main",
         lastAssistant(input.sessionID, "main").pipe(Effect.catchCause(() => Effect.interrupt)),
         Effect.gen(function* () {
-          yield* revert.cleanup(yield* sessions.get(input.sessionID))
+          const current = yield* sessions.get(input.sessionID)
+          yield* provider.getModel(input.providerID, input.modelID)
+          yield* revert.cleanup(current)
           const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
           const lastUser = msgs.findLast((message) => message.info.role === "user")
           const currentAgent =
             lastUser?.info.role === "user" && lastUser.info.agent ? lastUser.info.agent : yield* agents.defaultAgent()
-          yield* compaction.createIfLatest({
+          let boundaryID: MessageID | undefined
+          const created = yield* compaction.createIfLatest({
             sessionID: input.sessionID,
             agent: currentAgent,
             model: { providerID: input.providerID, modelID: input.modelID },
@@ -8059,9 +8062,32 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             agentID: "main",
             task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
             expectedUserID: lastUser?.info.role === "user" ? lastUser.info.id : undefined,
+            onUserCommitted: (message) => { boundaryID = message.id },
           })
-          return yield* runLoop(input.sessionID, "main")
-        }),
+          if (!created || !boundaryID)
+            return yield* Effect.fail(new SessionCompaction.FailedError({
+              sessionID: input.sessionID,
+              message: "Compaction boundary was superseded",
+            }))
+          const boundary = boundaryID
+          const completed = () =>
+            MessageV2.parts(boundary).some((part) => part.type === "compaction" && part.projection)
+          const result = yield* runLoop(input.sessionID, "main").pipe(
+            Effect.ensuring(
+              Effect.suspend(() =>
+                completed() || MessageV2.parts(boundary).length === 0
+                  ? Effect.void
+                  : sessions.removeMessage({ sessionID: input.sessionID, messageID: boundary }),
+              ),
+            ),
+          )
+          if (!completed())
+            return yield* Effect.fail(new SessionCompaction.FailedError({
+              sessionID: input.sessionID,
+              message: "Compaction did not produce a summary",
+            }))
+          return result
+        }).pipe(Effect.orDie),
       )
     })
 

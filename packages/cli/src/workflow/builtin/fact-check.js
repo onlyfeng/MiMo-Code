@@ -147,7 +147,9 @@ const searchPrompt = (line) =>
   "Overall question: \"" + TOPIC + "\"\n\n" +
   "Your line: **" + line.topic + "**" + (line.why ? " — " + line.why : "") + "\n" +
   "Suggested query: `" + line.query + "`\n\n" +
-  "Run `websearch` (refine the query if you can do better) and hand back the 4-6 most useful results.\n" +
+  "Run `websearch` (refine the query if you can do better) and hand back the 4-6 most useful results. " +
+  "If the `websearch` tool is unavailable, use a configured search MCP tool, or DuckDuckGo HTML as fallback: " +
+  "`webfetch` https://html.duckduckgo.com/html/?q=<query> (decode the uddg param for real URLs).\n" +
   "Judge usefulness against the OVERALL question, not just your query. Drop content farms and SEO spam.\n" +
   "Give each result a one-line note on why it matters.\n\nReturn structured output only."
 

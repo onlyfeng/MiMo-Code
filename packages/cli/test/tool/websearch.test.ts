@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import path from "path"
 import { Agent } from "../../src/agent/agent"
-import { Auth } from "../../src/auth"
+import { Flag } from "../../src/flag/flag"
 import { Config } from "../../src/config"
 import { Provider } from "../../src/provider"
 import { Truncate } from "../../src/tool"
@@ -14,177 +14,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { tmpdir } from "../fixture/fixture"
 
-// A git fixture rather than this checkout: an instance rooted in the repository
-// runs config discovery against its .mimocode and installs dependencies there.
-const projectRoot = (await tmpdir({ git: true })).path
-
-const sse = (model: string) => {
-  const frame = {
-    model,
-    choices: [
-      {
-        delta: {
-          annotations: [
-            {
-              type: "url_citation",
-              url: "https://example.com/result",
-              title: "Example",
-              summary: "A search hit",
-              site_name: "Example",
-              publish_time: "2026-01-01",
-            },
-          ],
-        },
-      },
-    ],
-  }
-  return `data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`
-}
-
 describe("tool.websearch", () => {
-  test("xiaomi sidecar uses the session model's API id, not a hardcoded model", async () => {
-    let requested: string | undefined
-    using server = Bun.serve({
-      port: 0,
-      fetch: async (req) => {
-        requested = ((await req.json()) as { model?: string }).model
-        return new Response(sse(requested ?? ""), {
-          status: 200,
-          headers: { "content-type": "text/event-stream" },
-        })
-      },
-    })
-
-    const model = ProviderTest.model({
-      id: ModelID.make("catalog-mimo-pro"),
-      providerID: ProviderID.make("xiaomi"),
-      api: {
-        id: "mimo-v2.5-pro",
-        url: server.url.origin,
-        npm: "@ai-sdk/openai-compatible",
-      },
-    })
-
-    const fakeAuth = Layer.mock(Auth.Service)({
-      get: (providerID: string) =>
-        Effect.succeed(providerID === "xiaomi" ? new Auth.Api({ type: "api", key: "test-key" }) : undefined),
-    })
-
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const result = await WebSearchTool.pipe(
-          Effect.flatMap((info) => info.init()),
-          Effect.flatMap((tool) =>
-            tool.execute(
-              { query: "latest mimo release" },
-              {
-                sessionID: SessionID.make("ses_test"),
-                messageID: MessageID.make("message"),
-                callID: "",
-                agent: "build",
-                abort: AbortSignal.any([]),
-                messages: [],
-                extra: { model },
-                metadata: () => Effect.void,
-                ask: () => Effect.void,
-              },
-            ),
-          ),
-          Effect.provide(
-            Layer.mergeAll(
-              FetchHttpClient.layer,
-              Truncate.defaultLayer,
-              Agent.defaultLayer,
-              fakeAuth,
-              Config.defaultLayer,
-              Provider.defaultLayer,
-            ),
-          ),
-          Effect.runPromise,
-        )
-
-        expect(requested).toBe("mimo-v2.5-pro")
-        expect(result.output).toContain("https://example.com/result")
-      },
-    })
-  })
-
-  test("token-plan sidecar uses its own provider key and API id", async () => {
-    let requested: string | undefined
-    let authorization: string | undefined
-    using server = Bun.serve({
-      port: 0,
-      fetch: async (req) => {
-        requested = ((await req.json()) as { model?: string }).model
-        authorization = req.headers.get("api-key") ?? undefined
-        return new Response(sse(requested ?? ""), {
-          status: 200,
-          headers: { "content-type": "text/event-stream" },
-        })
-      },
-    })
-
-    const model = ProviderTest.model({
-      id: ModelID.make("mimo-v2.6-pro"),
-      providerID: ProviderID.make("xiaomi-token-plan-cn"),
-      api: {
-        id: "mimo-v2.6-pro",
-        url: server.url.origin,
-        npm: "@ai-sdk/openai-compatible",
-      },
-    })
-
-    const fakeAuth = Layer.mock(Auth.Service)({
-      get: (providerID: string) =>
-        Effect.succeed(
-          providerID === "xiaomi-token-plan-cn"
-            ? new Auth.Api({ type: "api", key: "test-token-plan-key" })
-            : new Auth.Api({ type: "api", key: "wrong-key" }),
-        ),
-    })
-
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const result = await WebSearchTool.pipe(
-          Effect.flatMap((info) => info.init()),
-          Effect.flatMap((tool) =>
-            tool.execute(
-              { query: "latest mimo release" },
-              {
-                sessionID: SessionID.make("ses_test"),
-                messageID: MessageID.make("message"),
-                callID: "",
-                agent: "build",
-                abort: AbortSignal.any([]),
-                messages: [],
-                extra: { model },
-                metadata: () => Effect.void,
-                ask: () => Effect.void,
-              },
-            ),
-          ),
-          Effect.provide(
-            Layer.mergeAll(
-              FetchHttpClient.layer,
-              Truncate.defaultLayer,
-              Agent.defaultLayer,
-              fakeAuth,
-              Config.defaultLayer,
-              Provider.defaultLayer,
-            ),
-          ),
-          Effect.runPromise,
-        )
-
-        expect(requested).toBe("mimo-v2.6-pro")
-        expect(authorization).toBe("test-token-plan-key")
-        expect(result.output).toContain("https://example.com/result")
-      },
-    })
-  })
-
   describe("fallback", () => {
     type Handler = (body: Record<string, unknown>) => Response
     const responsesBody = (output: unknown[]) => ({
@@ -322,7 +152,6 @@ describe("tool.websearch", () => {
                 Layer.succeed(FetchHttpClient.Fetch, exaFetch),
                 Truncate.defaultLayer,
                 Agent.defaultLayer,
-                Auth.defaultLayer,
                 Config.defaultLayer,
                 Provider.defaultLayer,
               ),
@@ -381,7 +210,7 @@ describe("tool.websearch", () => {
       expect(result.metadata).toMatchObject({ servedBy: "test/test-second" })
     })
 
-    test("codex failure falls through to exa", async () => {
+    test("codex failure respects Exa opt-in", async () => {
       const { result } = await run({
         handlers: { "test-model": () => json({ error: { message: "boom" } }, 500) },
         fallback: ["test/test-model"],
@@ -393,11 +222,16 @@ describe("tool.websearch", () => {
               })
             : undefined,
       })
-      expect(result.output).toBe("exa says hi")
-      expect(result.metadata).toMatchObject({ servedBy: "exa" })
+      if (Flag.MIMOCODE_ENABLE_EXA) {
+        expect(result.output).toBe("exa says hi")
+        expect(result.metadata).toMatchObject({ servedBy: "exa" })
+      } else {
+        expect(result.output).toContain("Web search returned no results")
+        expect(result.metadata).not.toHaveProperty("servedBy")
+      }
     })
 
-    test("a keyless token-plan session uses the fallback and never reaches exa", async () => {
+    test("a token-plan session uses configured fallbacks and respects Exa opt-in", async () => {
       const family = ProviderTest.model({
         id: ModelID.make("mimo-v2.6-pro"),
         providerID: ProviderID.make("xiaomi-token-plan-cn"),
@@ -422,9 +256,15 @@ describe("tool.websearch", () => {
         model: family,
         exa,
       })
-      expect(unserved.result.output).toContain("Web search unavailable")
-      expect(unserved.result.metadata).not.toHaveProperty("servedBy")
-      expect(exaCalls).toBe(0)
+      if (Flag.MIMOCODE_ENABLE_EXA) {
+        expect(unserved.result.output).toBe("exa says hi")
+        expect(unserved.result.metadata).toMatchObject({ servedBy: "exa" })
+        expect(exaCalls).toBe(1)
+      } else {
+        expect(unserved.result.output).toContain("Web search returned no results")
+        expect(unserved.result.metadata).not.toHaveProperty("servedBy")
+        expect(exaCalls).toBe(0)
+      }
     })
   })
 })

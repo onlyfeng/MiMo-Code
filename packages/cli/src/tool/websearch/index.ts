@@ -4,21 +4,19 @@ import { HttpClient } from "effect/unstable/http"
 import { mergeDeep, pipe } from "remeda"
 import * as Tool from "../tool"
 import * as McpExa from "../mcp-exa"
-import * as MimoWebsearch from "./mimo"
 import * as NativeWebSearch from "./native"
 import * as WebSearchCodex from "./codex"
-import { Auth } from "@/auth"
 import { Config } from "@/config"
 import { Provider, ProviderTransform } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { isXiaomiFamilyProvider } from "@/provider/xiaomi-family"
+import { Flag } from "@/flag/flag"
 import { Log } from "@/util"
 import DESCRIPTION from "./websearch.txt"
 
 const log = Log.create({ service: "websearch" })
 
-const WEBFETCH_FALLBACK =
-  "Web search unavailable. Use `webfetch` with a relevant URL instead, or enable the Web Search plugin at https://platform.xiaomimimo.com/console/plugin."
+const NO_RESULTS =
+  "Web search returned no results. Try a different query, or use `webfetch` with a relevant URL."
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
 const FALLBACK_TIMEOUT = 60 * 1000
 
@@ -54,7 +52,6 @@ export const WebSearchTool = Tool.define(
   "websearch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const auth = yield* Auth.Service
     const config = yield* Config.Service
     const provider = yield* Provider.Service
 
@@ -117,39 +114,17 @@ export const WebSearchTool = Tool.define(
             },
           })
 
-          const model = (ctx.extra as { model?: Provider.Model })?.model
           const timeout = params.timeout === undefined ? undefined : Math.min(params.timeout * 1000, MAX_TIMEOUT)
 
-          // API and token-plan credentials are stored separately, so the key must
-          // come from the model's own provider rather than a hardcoded `xiaomi`.
-          const gatewayModel = model && isXiaomiFamilyProvider(model.providerID) ? model : undefined
           let served: { output: string; by: string } | undefined
-          if (gatewayModel) {
-            const output = yield* Effect.catchCause(
-              Effect.gen(function* () {
-                const info = yield* auth.get(gatewayModel.providerID)
-                if (!info || info.type !== "api") return undefined
-                return yield* MimoWebsearch.call(
-                  http,
-                  gatewayModel.api.url,
-                  info.key,
-                  params.query,
-                  gatewayModel.api.id,
-                  timeout ?? "30 seconds",
-                )
-              }),
-              () => Effect.succeed(undefined),
-            )
-            if (output) served = { output, by: "xiaomi" }
-          }
-          for (const entry of served ? [] : NativeWebSearch.fallbackEntries((yield* config.get()).websearch)) {
+          for (const entry of NativeWebSearch.fallbackEntries((yield* config.get()).websearch)) {
             const output = yield* fallbackSearch(entry, params.query, ctx, fallbackTimeout(timeout))
             if (output) {
               served = { output, by: `${entry.providerID}/${entry.modelID}` }
               break
             }
           }
-          if (!served && !gatewayModel) {
+          if (!served && Flag.MIMOCODE_ENABLE_EXA) {
             const output = yield* McpExa.call(
               http,
               "web_search_exa",
@@ -167,7 +142,7 @@ export const WebSearchTool = Tool.define(
           }
 
           return {
-            output: served?.output ?? WEBFETCH_FALLBACK,
+            output: served?.output ?? NO_RESULTS,
             title: `Web search: ${params.query}`,
             metadata: served ? { servedBy: served.by } : {},
           }
