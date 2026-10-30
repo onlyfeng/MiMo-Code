@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-30
-- Upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
-- Prior reviewed upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
-- Main behavior (runtime/tests): `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf` (compaction cleanup, cancellation-aware owned summarize outcome and explicit search opt-in)
-- Inherited compat behavior: `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841` (shared changes inherited; configured native/fallback search retained with Exa opt-in)
+- Last reviewed: 2026-10-31
+- Upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
+- Prior reviewed upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
+- Main behavior (runtime/tests): `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b` (host execution boundary for MCP/LSP/formatter configuration, legacy TOML and stored-config persistence; includes FC-020)
+- Inherited compat behavior: `f37f9b0ec111c54fb68f7eccb3d0534768f917ea` (shared changes inherited; compat config overlay unchanged)
 - Bundled guidance content: `19362075089580aef8b709de58a5433cbfd6608b` (available search/MCP and DuckDuckGo fallback; explicit Exa/search MCP configuration)
-- Prior fork `main` tip: `4a1c42148765755fba39d80103a76879965b8a7f`
+- Prior fork `main` tip: `a8892c5c5036be2f6fc41fd70e53f42b59760ce9`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
 
