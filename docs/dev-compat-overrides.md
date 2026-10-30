@@ -11,6 +11,17 @@ registry/history commit does not advance either behavior reference below.
 ## Current review record
 
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-10-31; live upstream `ee0a93b5..7bc7dc3a`.
+- Starting compat: `ba60dff21688385113a873e89ef19fc4ed9ad8a1`; inherited main runtime/tests: `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b`; reviewed compat runtime/tests: `f37f9b0ec111c54fb68f7eccb3d0534768f917ea`.
+- Scope: C01–C03 (N=3) in [the shared synchronization record](upstream-sync-2026-10-31.md). Main owns the host execution policy for MCP/LSP/formatter configuration, the FC-004 `mergeClaudeMcp` adaptation and regression, legacy TOML rereads with bounded migration, and stored-config persistence. Compat inherits all of them through a clean merge.
+- Direct adaptation: none. The compat `config.ts` overlay (`websearch`/`webfetch` schema) is identical before and after propagation. Those blocks select models and network routes, not local executables, so the host filter leaves them in place; every other touched path is byte-identical to main.
+- Adjacent review: DC-NET-002 keeps RFC1918 remote MCP admission. `mcp/index.ts` stays byte-identical to main, and the sentinel passes in the isolated `lifecycle` run (34/0). Under the restricted policy, a project-sourced remote MCP entry is dropped before admission, which is a source boundary, not a private-address classifier, so this owner's exit condition is not triggered. DC-WEBSEARCH-001 and DC-WEBFETCH-001 config consumers pass unchanged. DC-ACTOR-001/002, DC-CONTEXT-001, DC-MODEL-001, DC-TUI-001, DC-PROVIDER-001 and DC-PLATFORM-001 have no incoming implementation delta. The production overlay under `packages/` remains the same 54 paths.
+- Validation: pinned Bun 1.3.14 `bun ci`, CLI typecheck exit 0, root lint zero errors. The 25-file shared matrix passes 324 with four existing skips, one todo and zero failures (1,024 assertions); the independent `lifecycle`, `oauth-auto-connect` and `refresh-harness` runs pass 34/4/2. Exact-SHA lint/typecheck/test pass on the first attempt, including all ten test jobs and Windows runtime; links are in the shared record.
+- Shared ownership: FD/FC/history/report inherit main unchanged; this file owns the compat review.
+
+## Previous review record: ee0a93b5 synchronization
+
+- Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-30
 - Upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
 - Main behavior: `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf`
