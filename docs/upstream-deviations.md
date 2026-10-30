@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-29
-- Upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
-- Prior reviewed upstream: `ebd06ee2fafad8f20d358aaac68200536ff9be65`
-- Main behavior (runtime/tests): `61a589679a10968dfad60280eb4aa2c4993765fd` (caller-supplied session ids and Xiaomi API/token-plan credential split with family consumers)
-- Inherited compat behavior: `6bc84001a223e12306d0c39796c24bff2747b3c9` (shared changes inherited; DC-WEBSEARCH-001 sidecar adapted to the Xiaomi family; all eleven DC owners retained)
-- Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `ad8387f9093a94c075df22a2c535929ec73bce17`
+- Last reviewed: 2026-10-30
+- Upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
+- Prior reviewed upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
+- Main behavior (runtime/tests): `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf` (compaction cleanup, cancellation-aware owned summarize outcome and explicit search opt-in)
+- Inherited compat behavior: `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841` (shared changes inherited; configured native/fallback search retained with Exa opt-in)
+- Bundled guidance content: `19362075089580aef8b709de58a5433cbfd6608b` (available search/MCP and DuckDuckGo fallback; explicit Exa/search MCP configuration)
+- Prior fork `main` tip: `4a1c42148765755fba39d80103a76879965b8a7f`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
 
@@ -459,6 +461,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-30 synchronization: Adopt `d0684a3d`: remove the Xiaomi WebSearch sidecar and its resolved-API-id clause. Every provider needs explicit Exa enablement on main; compat additionally exposes configured native/fallback routes under DC-WEBSEARCH-001. Harness/prompt/toolset/retry identity remains active.
+
 - 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens the WebSearch sidecar and tool gate from the literal `xiaomi` to `isXiaomiFamilyProvider`. The sidecar authenticates with the model's own provider key and still sends the resolved `model.api.id`, so this contract now covers the whole family. Harness, prompt, discovery, toolset and retry identity resolution read model identity, not the credential provider, and are unchanged; family-wide large-model output defaults and in-house vision ordering select no harness. Evidence: `test/tool/websearch.test.ts` (token-plan sidecar), `test/tool/registry-toolset.test.ts` (family exposure), `test/tool/harness-alias.test.ts`, `test/provider/provider.test.ts`.
 
 - 2026-10-26 synchronization: upstream `0fe2cbbc` removes `isMimoOrSmartModel` and `resolveModelNpm`, so a MiMo-named id keeps the model or provider `npm` it declares; only an undeclared SDK falls back to `@ai-sdk/openai-compatible`. FD-005 never owned transport after the 2026-09-13 retirement, and the harness, prompt, discovery, toolset and retry identity resolution is unchanged. Upstream `18adffc9` also drops the `claude` PATH probe from the Anthropic environment block in `session/system.ts`; harness-resolved prompt selection there is untouched. Evidence: `test/provider/provider.test.ts`, `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/system.test.ts`.
@@ -516,8 +520,8 @@ not change their implementation. The preceding review is retained in the
   the Responses API. Transport never selects the Codex harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
   API/family aliases. Request, live-step, and MaxMode retry policy reuse that
   same resolved identity instead of independently reclassifying the model
-  between attempts. Xiaomi WebSearch sidecar requests use that resolved
-  model's `model.api.id`; they do not substitute a hard-coded MiMo identity.
+  between attempts. The Xiaomi WebSearch sidecar clause retired on 2026-10-30
+  with upstream `d0684a3d`; harness identity and tool authorization remain active.
 - 2026-09-13 transport retirement: upstream `294328d7`/`b6a1008c`/`cfa07fe8`
   remove the `xiaomi` custom loader and pin any MiMo or `mimo-auto` id to
   `@ai-sdk/openai-compatible`. The fork had extended `usesMimoResponsesApi` into
@@ -912,6 +916,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-010 — a think-only compaction step is recovered, not discarded
 
+- 2026-10-30 synchronization: Adopt `2491aae5` failure/interruption cleanup around the complete compaction effect. Keep reasoning acceptance and rejection of filtered/error output; an unprojected boundary is removed and an interrupted summary is marked aborted. The summarize outcome test exhausts both empty attempts under FD-012.
+
 - 2026-10-20 synchronization: conversation pure-empty retries move to `SessionRetry.policy`; summary assistants remain owned here and by FD-011/FD-012. Keep reasoning-summary acceptance, content-filter/error rejection and the compaction-specific empty retry bound. No compaction owner retires.
 
 - Status: active
@@ -987,6 +993,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-011 — the compaction request keeps tool calls disabled
 
+- 2026-10-30 synchronization: The requested boundary model drives summary/prefix/tail selection. Frozen tool membership and `toolChoice: "none"` remain; cleanup creates no summary-time tool authority.
+
 - Status: active
 - Canonical owner: fork `main` compaction request construction
 - Observable contract: the compaction request is sent with
@@ -1018,6 +1026,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   relaxed to inherit the conversation's `tool_choice`.
 
 ## FD-012 — a compaction step that produced nothing is retried once by default
+
+- 2026-10-30 synchronization: Keep the bounded empty-summary retry. Adapt the incoming HTTP rollback fixture to queue two empty responses, so it tests exhausted rollback instead of the successful retry.
 
 - Status: active
 - Canonical owner: fork `main` compaction retry bound
