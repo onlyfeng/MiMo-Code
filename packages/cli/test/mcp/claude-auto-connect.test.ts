@@ -304,4 +304,47 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
       },
     ),
   )
+
+  // A host-source startup control must not complete a project Claude import's
+  // transport: under the host execution policy that import is never merged.
+  it.live("host execution policy skips a project Claude import despite a host auto_connect control", () =>
+    Effect.gen(function* () {
+      const previousPolicy = process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS
+      const previousDir = process.env.MIMOCODE_CONFIG_DIR
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousPolicy == null) delete process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS
+          else process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS = previousPolicy
+          if (previousDir == null) delete process.env.MIMOCODE_CONFIG_DIR
+          else process.env.MIMOCODE_CONFIG_DIR = previousDir
+        }),
+      )
+      yield* withConfig(
+        (dir) =>
+          Effect.gen(function* () {
+            const mcp = yield* MCP.Service
+            expect(yield* mcp.status()).toEqual({})
+            expect(yield* Effect.promise(() => Bun.file(`${dir}/started`).exists())).toBe(false)
+          }),
+        {
+          init: async (dir) => {
+            await Bun.write(
+              `${dir}/server.mjs`,
+              `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(`${dir}/started`)}, "started");`,
+            )
+            await Bun.write(
+              `${dir}/.claude.json`,
+              JSON.stringify({ mcpServers: { selected: { command: process.execPath, args: [`${dir}/server.mjs`] } } }),
+            )
+            await Bun.write(
+              `${dir}/host/mimocode.json`,
+              JSON.stringify({ mcp: { selected: { auto_connect: true } } }),
+            )
+            process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS = "1"
+            process.env.MIMOCODE_CONFIG_DIR = `${dir}/host`
+          },
+        },
+      )
+    }),
+  )
 }
