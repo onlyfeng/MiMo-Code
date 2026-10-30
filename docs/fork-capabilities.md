@@ -2034,7 +2034,12 @@ logged`, and the peer `success`/`failure` variants of
   JSON-looking or not, is never touched. Decoding is one pass: a plain
   `z.union` (`invalid_union`) and a JSON string nested inside a decoded value
   are not decoded. Every tool built through `Tool.define` is covered; MCP tools
-  do not pass through it.
+  do not pass through it. On the model-facing path a whole input sent as one
+  JSON string never reaches the wrapper: `SessionProcessor` writes the
+  `tool-call` input into the tool part, `MessageV2.ToolPart` requires that input
+  to be a record, the part update throws, the tool never becomes ready, and the
+  call settles as aborted. Decoding at the root therefore serves only direct
+  callers of `execute`.
 - Motivation: a gz4399 grok model sends cron
   `{"operation":"{\"action\":\"list\"}"}` and repeats the same shape after each
   validation error, so neither `schedule` nor `list` ever runs. The
@@ -2047,17 +2052,24 @@ logged`, and the peer `success`/`failure` variants of
   `parameters.parse(args)` and executes the raw arguments, and its
   `ToolCompat.repairToolCall` only remaps keys inside the AI SDK repair hook.
   This is fork hardening of shared code, not a rejected upstream decision.
-- Retained interaction: `prompt.ts` still classifies `read`/`grep`/`glob` for
-  the tool gate with `item.parameters.safeParse(args)` on the raw arguments.
-  Their schemas have only scalar fields, so the only decodable shape for them
-  is a whole input sent as one JSON string; that call is admitted as `invalid`
-  (barrier-class, no read/search failure exemption) and then executes. This is
-  strictly more conservative and is left unchanged.
+- Raw-argument readers: three checks in `prompt.ts` still read the raw
+  arguments: the tool-gate classification of `read`/`grep`/`glob`
+  (`item.parameters.safeParse(args)`), the workflow `operation === "run"`
+  failure cascade, and the write/edit `file_path` extension reload. On
+  reachable inputs they agree with the decoded input, because decoding only
+  replaces a string where zod expected an object or array. The top-level
+  scalars these checks read are never changed, and the `read`/`grep`/`glob`
+  schemas have no container field. Only a whole input sent as one string could
+  differ, and it cannot reach `execute` (above). If `MessageV2.ToolPart` ever
+  accepts a non-object input, or one of these checks starts reading a container
+  field, it must read the decoded input instead.
 - Watch surfaces: `packages/cli/src/tool/tool.ts` (`wrap`, `parseArgs`,
   `decodeStringifiedArgs`, `JSON_CONTAINERS`); in
   `packages/cli/src/session/prompt.ts`, tool registration through `jsonSchema`
-  without `validate` and the `gateTool` classification; the
-  `experimental_repairToolCall` hook in `packages/cli/src/session/llm.ts`; and
+  without `validate` and the three raw-argument checks above; the
+  `experimental_repairToolCall` hook in `packages/cli/src/session/llm.ts`; the
+  `tool-call` handling in `packages/cli/src/session/processor.ts` and the
+  `ToolPart` input schema in `packages/cli/src/session/message-v2.ts`; and
   the `zod` version, since the `invalid_type` code and the `expected` names are
   zod v4's.
 - Tests/evidence: `packages/cli/test/tool/tool-stringified-args.test.ts` (a
@@ -2070,7 +2082,12 @@ logged`, and the peer `success`/`failure` variants of
   record-and-tuple, whole input, cron `list` and `schedule`), each with
   `expected <container>, received string`, while the three negative and four
   existing cron cases pass; removing `record` and `tuple` from
-  `JSON_CONTAINERS` fails only the record-and-tuple case.
+  `JSON_CONTAINERS` fails only the record-and-tuple case. A prompt-loop probe
+  (TestLLMServer, a `write` into `.mimocode/skill/`) was not kept as a test.
+  Sent as an object, the call completed and the extension reload surfaced the
+  skill. Sent as one JSON string, the part ended `error` "Tool execution
+  aborted" with `input: {}` and `inputComplete: false`, and no file was
+  written.
 - Retirement condition: upstream decodes stringified container arguments
   before `execute`, or validates and repairs them in the AI SDK, with the same
   accept-only-when-valid rule and an unchanged persisted input. The regression
