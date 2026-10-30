@@ -6,11 +6,17 @@ import { join } from "path"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "../../src/tool"
 import { CronTool } from "../../src/tool/cron"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
-import { provideInstance } from "../fixture/fixture"
+import { SessionID, MessageID } from "../../src/session/schema"
+import { provideInstance, provideTmpdirInstance } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 
 const runtime = ManagedRuntime.make(
   Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer, SchedulerDefaultLayer),
+)
+const it = testEffect(
+  Layer.mergeAll(CrossSpawnSpawner.defaultLayer, Truncate.defaultLayer, Agent.defaultLayer, SchedulerDefaultLayer),
 )
 
 describe("cron.execute: schedule sanity warnings", () => {
@@ -82,37 +88,37 @@ describe("cron.execute: schedule sanity warnings", () => {
 
 describe("cron.execute: stringified operation envelope", () => {
   // Some models send `operation` as its JSON text instead of a nested object.
-  const runStringified = async (operation: Record<string, unknown>) => {
-    const info = await runtime.runPromise(CronTool)
-    const def = await runtime.runPromise(info.init())
-    const instanceDir = mkdtempSync(join(tmpdir(), "cron-stringified-"))
-    try {
-      const eff = def.execute(
-        { operation: JSON.stringify(operation) } as unknown as Parameters<typeof def.execute>[0],
-        {
-          sessionID: "ses_stringified_test" as any,
-          messageID: "msg_stringified_test" as any,
-          agent: "build",
-          abort: new AbortController().signal,
-          extra: {},
-          messages: [],
-          metadata: () => Effect.void,
-          ask: () => Effect.void,
-        },
-      )
-      return await runtime.runPromise(provideInstance(instanceDir)(eff as Effect.Effect<any>))
-    } finally {
-      rmSync(instanceDir, { recursive: true, force: true })
-    }
-  }
+  const runStringified = (operation: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const info = yield* CronTool
+      const def = yield* info.init()
+      return yield* def.execute({ operation: JSON.stringify(operation) } as unknown as Parameters<typeof def.execute>[0], {
+        sessionID: SessionID.make("ses_stringified_test"),
+        messageID: MessageID.make(""),
+        callID: "",
+        agent: "build",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      })
+    })
 
-  test("list runs instead of failing validation", async () => {
-    const out = await runStringified({ action: "list" })
-    expect(out.output).toBe("No scheduled jobs.")
-  })
+  it.live("list runs instead of failing validation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const out = yield* runStringified({ action: "list" })
+        expect(out.output).toBe("No scheduled jobs.")
+      }),
+    ),
+  )
 
-  test("schedule registers the job", async () => {
-    const out = await runStringified({ action: "schedule", cron: "8-59/20 * * * *", prompt: "patrol" })
-    expect(out.output).toMatch(/^Scheduled \S+ \(8-59\/20 \* \* \* \*, recurring\): patrol/)
-  })
+  it.live("schedule registers the job", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const out = yield* runStringified({ action: "schedule", cron: "8-59/20 * * * *", prompt: "patrol" })
+        expect(out.output).toMatch(/^Scheduled \S+ \(8-59\/20 \* \* \* \*, recurring\): patrol/)
+      }),
+    ),
+  )
 })
