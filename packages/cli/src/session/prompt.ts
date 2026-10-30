@@ -170,6 +170,7 @@ import { Shell } from "@/shell/shell"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Truncate } from "@/tool"
 import { decodeDataUrl } from "@/util/data-url"
+import { isRecord } from "@/util/record"
 import { Process } from "@/util"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Scope, Context } from "effect"
 import { EffectLogger } from "@/effect"
@@ -641,6 +642,19 @@ const log = Log.create({ service: "session.prompt" })
 // tools and skills need the write/edit-triggered registry reload.
 function isExtensionPath(filePath: string): boolean {
   return /\/\.mimocode\/(tools?|skills?)\//.test(filePath)
+}
+
+// The AI SDK's parsed tool-call input is what the processor persists and what
+// execute receives, so decode stringified object/array arguments there
+// (FC-020): the stored part, its later readers and Tool.wrap then share one
+// input. Invalid input passes through unchanged for Tool.wrap to report.
+function decodedInputSchema(schema: JSONSchema7, parameters: z.ZodType) {
+  return jsonSchema(schema, {
+    validate: (value) => {
+      const parsed = Tool.safeParseArgs(parameters, value)
+      return { success: true, value: parsed.success ? parsed.data : value }
+    },
+  })
 }
 const elog = EffectLogger.create({ service: "session.prompt" })
 
@@ -2333,7 +2347,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input.processor.registerTool(item.id)
         tools[item.id] = tool({
           description: item.description,
-          inputSchema: jsonSchema(schema),
+          inputSchema: decodedInputSchema(schema, item.parameters),
           execute(args, options) {
             // Invalid arguments never receive the read/search failure exemption.
             const gateTool =
@@ -2418,7 +2432,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 if (item.id === "bash" && typeof output.metadata.exit === "number" && output.metadata.exit !== 0) {
                   gate.fail(gateTool)
                 }
-                if (item.id === "workflow" && args.operation === "run" && output.metadata.status === "failed") {
+                if (item.id === "workflow" && isRecord(args) && args.operation === "run" && output.metadata.status === "failed") {
                   gate.fail(gateTool)
                 }
                 if (
@@ -6767,7 +6781,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           {
                             ...live,
                             description: frozen.description,
-                            inputSchema: frozen.inputSchema,
+                            // Frozen bytes, with the live decoding of stringified arguments.
+                            inputSchema: jsonSchema(asSchema(frozen.inputSchema).jsonSchema, {
+                              validate: asSchema(live.inputSchema).validate,
+                            }),
                             nativeInputSchema: SessionPrefixSnapshot.nativeSchema(frozen),
                           } as SessionPrefixSnapshot.NativeTool,
                         ],
