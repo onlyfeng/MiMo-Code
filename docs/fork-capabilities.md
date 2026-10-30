@@ -129,7 +129,7 @@ not change their implementation. The preceding review is retained in the
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
 | FC-017 | History SQLite projection, attachment preview formatting and legacy retry-part reads                      | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds, attachment locators and legacy retry reads       |
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
-| FC-020 | `Tool.define` argument validation of stringified object/array arguments                                   | Fork hardening of upstream's raw-args `parse` in `Tool.wrap`     | Decode only container-typed string failures; execute only fully valid input              |
+| FC-020 | Stringified object/array tool arguments: AI SDK tool-call parse and `Tool.define` validation              | Fork hardening of upstream's raw tool-call input                 | Decode only container-typed string failures; persist and execute one input               |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2015,80 +2015,96 @@ logged`, and the peer `success`/`failure` variants of
   equivalent patch, which the fork then takes in place of its own. The
   regression cases stay in either case.
 
-## FC-020 — stringified object and array tool arguments are decoded before execute
+## FC-020 — stringified object and array tool arguments are decoded
 
 - Status: active
-- Canonical owner: fork `main` argument validation in the `Tool.define` wrapper
-- Observable contract: `Tool.wrap` validates the raw arguments with the tool's
-  zod schema, and a valid input still reaches `execute` as the raw arguments,
+- Canonical owner: fork `main` tool-argument decoding, shared by the AI SDK
+  tool-call parse in `prompt.ts` and the `Tool.define` wrapper
+- Observable contract: one rule, `Tool.safeParseArgs`, validates the arguments
+  with the tool's zod schema and returns a valid input as the raw arguments,
   not zod's output. When validation fails, each `invalid_type` issue whose
   `expected` is `object`, `record`, `array` or `tuple`, and whose value at that
   path is a string, is `JSON.parse`d. The parsed value replaces the string only
   when it is a JSON object (for `object`/`record`) or array (for
-  `array`/`tuple`). The decoded input reaches `execute` only when the whole input
-  then passes the schema; otherwise the original `ZodError` surfaces unchanged,
-  through `formatValidationError` or `validationErrorMessage`, as a
-  `RecoverableError`. Replacement is copy-on-write: the caller's arguments,
-  which the processor persists as the tool part input and replays to the model,
-  keep the model's original text. A string where the schema wants a string,
-  JSON-looking or not, is never touched. Decoding is one pass: a plain
-  `z.union` (`invalid_union`) and a JSON string nested inside a decoded value
-  are not decoded. Every tool built through `Tool.define` is covered; MCP tools
-  do not pass through it. On the model-facing path a whole input sent as one
-  JSON string never reaches the wrapper: `SessionProcessor` writes the
-  `tool-call` input into the tool part, `MessageV2.ToolPart` requires that input
-  to be a record, the part update throws, the tool never becomes ready, and the
-  call settles as aborted. Decoding at the root therefore serves only direct
-  callers of `execute`.
+  `array`/`tuple`). The decoded input is accepted only when the whole input then
+  passes the schema; otherwise the original `ZodError` stands. Replacement is
+  copy-on-write. A string where the schema wants a string, JSON-looking or not,
+  is never touched. Decoding is one pass: a plain `z.union` (`invalid_union`)
+  and a JSON string nested inside a decoded value are not decoded. The rule
+  applies in two places:
+  - Model-facing path: `prompt.ts` registers every `Tool.define` tool with
+    `jsonSchema(schema, { validate })` (`decodedInputSchema`). The `validate`
+    returns the decoded input when the rule accepts it and the input unchanged
+    otherwise; it never fails. The AI SDK takes that value as the tool-call
+    input, so the persisted part input sees the decoded input, and so does the
+    replay to the model. The same holds for the doom-loop comparison, the
+    post-execution checks (gate classification, workflow failure cascade,
+    write/edit extension reload) and `execute`. A whole input sent as one JSON
+    string is decoded at the root as well. It therefore persists and runs,
+    instead of failing the `MessageV2.ToolPart` record check and settling as
+    aborted. Invalid input still reaches `Tool.wrap`, which reports it as
+    before, and `experimental_repairToolCall` still fires only for JSON-parse
+    and unknown-tool errors. A fork turn keeps the frozen schema bytes and takes
+    the live `validate`. MCP tools, `StructuredOutput` and schema-only tool sets
+    (prefix capture, snapshot restore for compaction) do not carry it.
+  - `Tool.wrap` validates through the same rule and passes the decoded input to
+    `execute`, so a direct caller, such as a nested `exec` guest call, also runs
+    decoded. A nested call's sub-part keeps the guest's value, and FD-006's
+    native actor parse in `tool-script.ts` still rejects a stringified actor
+    envelope first.
 - Motivation: a gz4399 grok model sends cron
   `{"operation":"{\"action\":\"list\"}"}` and repeats the same shape after each
   validation error, so neither `schedule` nor `list` ever runs. The
   schema-side `.meta({ type: "object" })` on the cron/task/actor `operation`
-  envelopes does not stop it. The AI SDK `experimental_repairToolCall` hook in
-  `session/llm.ts` never sees this shape: `prompt.ts` registers tools with
-  `jsonSchema(schema)` and no `validate`, so the zod parse in `Tool.wrap` is
-  the first validation.
-- Upstream relationship: upstream `ee0a93b5` `Tool.wrap` calls
-  `parameters.parse(args)` and executes the raw arguments, and its
-  `ToolCompat.repairToolCall` only remaps keys inside the AI SDK repair hook.
-  This is fork hardening of shared code, not a rejected upstream decision.
-- Raw-argument readers: three checks in `prompt.ts` still read the raw
-  arguments: the tool-gate classification of `read`/`grep`/`glob`
-  (`item.parameters.safeParse(args)`), the workflow `operation === "run"`
-  failure cascade, and the write/edit `file_path` extension reload. On
-  reachable inputs they agree with the decoded input, because decoding only
-  replaces a string where zod expected an object or array. The top-level
-  scalars these checks read are never changed, and the `read`/`grep`/`glob`
-  schemas have no container field. Only a whole input sent as one string could
-  differ, and it cannot reach `execute` (above). If `MessageV2.ToolPart` ever
-  accepts a non-object input, or one of these checks starts reading a container
-  field, it must read the decoded input instead.
-- Watch surfaces: `packages/cli/src/tool/tool.ts` (`wrap`, `parseArgs`,
-  `decodeStringifiedArgs`, `JSON_CONTAINERS`); in
-  `packages/cli/src/session/prompt.ts`, tool registration through `jsonSchema`
-  without `validate` and the three raw-argument checks above; the
-  `experimental_repairToolCall` hook in `packages/cli/src/session/llm.ts`; the
-  `tool-call` handling in `packages/cli/src/session/processor.ts` and the
-  `ToolPart` input schema in `packages/cli/src/session/message-v2.ts`; and
-  the `zod` version, since the `invalid_type` code and the `expected` names are
-  zod v4's.
+  envelopes does not stop it. Without a `validate` the AI SDK repair hook never
+  sees the shape, so the zod parse in `Tool.wrap` was the first validation. A
+  first version decoded only there and persisted the model's text. Readers of
+  the persisted input then saw the string; for example, the TUI question panel
+  iterated the characters of `questions`.
+- Upstream relationship: upstream `ee0a93b5` registers tools with
+  `jsonSchema(schema)`, and its `Tool.wrap` calls `parameters.parse(args)` and
+  executes the raw arguments. Its `ToolCompat.repairToolCall` only remaps keys
+  inside the AI SDK repair hook; the repaired input is persisted the same way
+  this decoded input is. This is fork hardening of shared code, not a rejected
+  upstream decision.
+- Watch surfaces: `packages/cli/src/tool/tool.ts` (`safeParseArgs`,
+  `parseArgs`, `wrap`, `decodeStringifiedArgs`, `JSON_CONTAINERS`); in
+  `packages/cli/src/session/prompt.ts`, `decodedInputSchema`, tool registration
+  and the fork-turn rebuild that takes `inputSchema` from the frozen tool; the
+  AI SDK's use of a schema's `validate` result as the parsed tool-call input
+  (`safeValidateTypes` in `@ai-sdk/provider-utils`); the
+  `experimental_repairToolCall` hook in `packages/cli/src/session/llm.ts`;
+  `SessionPrefixSnapshot.toolsHash`, which must keep ignoring the
+  function-valued `validate`; and the `zod` version, since the `invalid_type`
+  code and the `expected` names are zod v4's.
 - Tests/evidence: `packages/cli/test/tool/tool-stringified-args.test.ts` (a
   stringified discriminated-union envelope, array, record and tuple, and whole
   input; a JSON-looking string field left alone; a decoded value that fails the
   schema and a non-JSON string both still rejected) and the "stringified
   operation envelope" cases in `packages/cli/test/tool/cron.test.ts` (`list` and
-  `schedule`). Mutation-checked: restoring upstream's `parse(args)` and
-  `execute(args)` fails exactly the six decoding cases (envelope, array,
-  record-and-tuple, whole input, cron `list` and `schedule`), each with
-  `expected <container>, received string`, while the three negative and four
-  existing cron cases pass; removing `record` and `tuple` from
-  `JSON_CONTAINERS` fails only the record-and-tuple case. A prompt-loop probe
-  (TestLLMServer, a `write` into `.mimocode/skill/`) was not kept as a test.
-  Sent as an object, the call completed and the extension reload surfaced the
-  skill. Sent as one JSON string, the part ended `error` "Tool execution
-  aborted" with `input: {}` and `inputComplete: false`, and no file was
-  written.
-- Retirement condition: upstream decodes stringified container arguments
-  before `execute`, or validates and repairs them in the AI SDK, with the same
-  accept-only-when-valid rule and an unchanged persisted input. The regression
-  cases stay in either case.
+  `schedule`) cover `Tool.wrap`. The prompt loop is covered by
+  `packages/cli/test/session/stringified-tool-args.test.ts`, through
+  TestLLMServer:
+  - control: an object `write` into `.mimocode/skill/` completes, and the
+    extension reload surfaces the skill;
+  - the same `write` sent as one JSON string completes, persists the decoded
+    object and reloads;
+  - a cron `operation` sent as JSON text completes with "No scheduled jobs."
+    and persists as an object.
+
+  Mutation-checked:
+  - restoring upstream's `parse(args)` and `execute(args)` in `Tool.wrap` fails
+    exactly the six unit decoding cases (envelope, array, record-and-tuple,
+    whole input, cron `list` and `schedule`), each with
+    `expected <container>, received string`, while the three negative and four
+    existing cron cases pass;
+  - removing `record` and `tuple` from `JSON_CONTAINERS` fails only the
+    record-and-tuple case;
+  - registering tools with plain `jsonSchema(schema)` fails the whole-string
+    `write` (part `error`, "Tool execution aborted") and the cron case
+    (executed, but the persisted `operation` is the string), while the control
+    passes.
+- Retirement condition: upstream decodes stringified container arguments where
+  the AI SDK parses tool calls, with the same accept-only-when-valid rule, so
+  that the persisted input and `execute` agree. The regression cases stay in
+  either case.

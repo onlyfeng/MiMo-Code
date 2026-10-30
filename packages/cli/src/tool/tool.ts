@@ -165,15 +165,25 @@ function validates<P extends z.ZodType>(parameters: P, value: unknown): value is
   return parameters.safeParse(value).success
 }
 
-// Validates like `parameters.parse` but returns the raw args (not zod's
-// output). Decoded args are accepted only when the whole input then validates;
-// otherwise the original error stands.
-function parseArgs<P extends z.ZodType>(parameters: P, args: z.infer<P>): z.infer<P> {
+// Validates like `parameters.safeParse`, but `data` is the raw args (not zod's
+// output), decoded where decodeStringifiedArgs could repair them. Decoded args
+// are accepted only when the whole input then validates; otherwise the
+// original error stands.
+export function safeParseArgs<P extends z.ZodType>(
+  parameters: P,
+  args: z.infer<P>,
+): { success: true; data: z.infer<P> } | { success: false; error: z.ZodError } {
   const result = parameters.safeParse(args)
-  if (result.success) return args
+  if (result.success) return { success: true, data: args }
   const decoded = decodeStringifiedArgs(args, result.error)
-  if (decoded !== args && validates(parameters, decoded)) return decoded
-  throw result.error
+  if (decoded !== args && validates(parameters, decoded)) return { success: true, data: decoded }
+  return { success: false, error: result.error }
+}
+
+function parseArgs<P extends z.ZodType>(parameters: P, args: z.infer<P>): z.infer<P> {
+  const parsed = safeParseArgs(parameters, args)
+  if (!parsed.success) throw parsed.error
+  return parsed.data
 }
 
 function wrap<Parameters extends z.ZodType, Result extends Metadata>(
