@@ -3985,6 +3985,41 @@ it.live(
   30_000,
 )
 
+it.live("boundary observation preserves pending user visibility during compaction admission", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({ title: "Observed boundary admission" })
+      yield* seedUserTurn({ sessionID: chat.id, model: ref, text: "previous user" })
+      const first = (yield* sessions.messages({ sessionID: chat.id })).at(-1)!.info.id
+      yield* seedUserTurn({ sessionID: chat.id, model: ref, text: "pending user" })
+      const pending = (yield* sessions.messages({ sessionID: chat.id })).at(-1)!.info.id
+      Database.use((db) => db.insert(InboxTable).values({
+        id: "test-pending-input",
+        receiver_session_id: chat.id,
+        receiver_actor_id: "main",
+        input_message_id: pending,
+        state: "accepted",
+        created_at: Date.now(),
+        time_updated: Date.now(),
+      }).run())
+      let observed: MessageID | undefined
+      const input = {
+        sessionID: chat.id, agent: "build", model: ref, auto: false,
+        onCreated: (messageID: MessageID) => { observed = messageID },
+      }
+      expect(yield* compaction.createIfLatest({ ...input, expectedUserID: first })).toBe(false)
+      expect(observed).toBeUndefined()
+      expect(yield* compaction.createIfLatest({ ...input, expectedUserID: pending })).toBe(true)
+      expect(observed).toBeDefined()
+      expect(MessageV2.get({ sessionID: chat.id, messageID: observed! }).parts.map((part) => part.type))
+        .toEqual(["compaction"])
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 it.live("does not create an automatic compaction boundary from a stale user snapshot", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* () {
