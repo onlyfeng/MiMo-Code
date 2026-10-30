@@ -127,7 +127,7 @@ not change their implementation. The preceding review is retained in the
 | FC-014 | `.cursor/environment.json` Cloud Agent dev environment                                                    | Fork-only infra absent from upstream                             | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream           |
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
-| FC-017 | History SQLite projection and attachment preview formatting                                               | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds and original attachment locators                  |
+| FC-017 | History SQLite projection, attachment preview formatting and legacy retry-part reads                      | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds, attachment locators and legacy retry reads       |
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -1446,6 +1446,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-30 registry correction: upstream `2b993ac9` removed the actor shell invocation format on 2026-09-24, including `actor.shell.txt`, its tokenizer/help, heredoc flag-placement errors and the `actor.shell` tests; FC-018 retired with them. Those references leave the observable contract, watch surfaces and Tests/evidence. JSON Actor guidance in `actor.txt` remains. No behavior or content changes.
+
 - 2026-10-30 synchronization: Adopt available search/MCP wording, explicit Exa/search MCP setup, and DuckDuckGo HTML through WebFetch when no search tool is available. Permission/discovery and workflow lifetime contracts remain unchanged; prompt text is content evidence, not a live search-provider availability claim.
 
 - 2026-10-26 synchronization: adopt upstream `18adffc9` unchanged. The `claude-code`, `codex` and `grok-build` descriptions now say to load only on explicit authorization and to confirm the binary first; their host-only `agents/openai.yaml` files are deleted, and the `mimocode-docs` discovery row names the opt-in selector. The fork's PPTX guidance regression in `test/skill/builtin.test.ts` is kept beside upstream's new cases.
@@ -1472,9 +1474,8 @@ logged`, and the peer `success`/`failure` variants of
   guest before the next build turn. Ordinary subagent restrictions and the
   current request pool still constrain these calls; guidance grants no tools
   outside that pool. Built-in skill keys match `mimocode-docs`; no shipped prompt
-  carries repository-specific branch or CI reminders; actor heredoc
-  errors explain flag placement; PDF CJK guidance uses project-controlled
-  fonts, explicit TTC face indexes, and language-matched runtime-supported CID
+  carries repository-specific branch or CI reminders; PDF CJK guidance uses
+  project-controlled fonts, explicit TTC face indexes, and language-matched runtime-supported CID
   fallbacks. Model and
   bundled-skill path guidance describes the fixed instance cwd and directs
   cross-directory work through absolute paths or explicit `workdir`; it does
@@ -1498,10 +1499,9 @@ logged`, and the peer `success`/`failure` variants of
 - Watch surfaces: `packages/cli/src/session/prompt/default.txt`,
   `packages/cli/src/tool/actor.ts`,
   `packages/cli/src/tool/actor.txt`,
-  `packages/cli/src/tool/actor.shell.txt`,
   `packages/cli/src/skill/builtin/.bundle/mimocode-docs/`,
   `packages/cli/src/skill/builtin/.bundle/compose-next/SKILL.md`,
-  MiniMax/GPT prompt text, actor shell tokenizer/help, TUI skill i18n, and
+  MiniMax/GPT prompt text, TUI skill i18n, and
   bundled `pdf-official` and `mimocode-docs` content.
 - POLICY-01 content carriers: `docs/codex-compact-tools.md`,
   `packages/cli/src/agent/prompt/generate-gpt.txt`,
@@ -1519,7 +1519,7 @@ logged`, and the peer `success`/`failure` variants of
   TUI startup, attach reuse, in-memory ordinary API authentication and explicit
   Bearer model access. Content snapshot: `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Tests/evidence: session system, including the actionable task/actor guidance
-  regression, actor-shell, skill-description,
+  regression, skill-description,
   `packages/cli/test/skill/mimocode-docs.test.ts` at the main runtime/test
   SHA, plus bundled-content review at the separate guidance content SHA.
   `packages/cli/test/skill/builtin.test.ts`
@@ -1893,6 +1893,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-017 — faithful and bounded history previews
 
+- 2026-10-30 registry correction: the legacy retry-part normalization adopted on 2026-10-22 (below) joins the observable contract, watch surfaces, Tests/evidence and retirement condition. `packages/cli/src/session/retry-record.ts` and its read-boundary callers were already fork-different, but no entry named them, so a path-based sync review could not find them. No behavior changes.
+
 - 2026-10-22 live advancement: new retry records expose phase/scope/kind/message/next and both timestamps. Historical schema-valid error-based retry rows normalize at hydration, import and replay boundaries without weakening the public schema or editing shipped SQL. Legacy message and response content remain searchable through bounded NUL-safe projections; export redacts the resulting message. Replay normalizes the original event object before storage and publication. Reverse-ID and UTF8 tie-break tests enforce parent chronology and actor/session isolation.
 
 - 2026-10-14 synchronization: upstream `6ba6a625` makes the shipped `20261011000000_history_fts_kind` and `20261012000000_history_cjk_unigram` migrations replay-safe (`CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`) and routes `Database.Client()` through `migrateReplaySafe`. Adopted unchanged: both migrations are upstream-owned and were byte-identical to upstream, the edits change no schema, and drizzle selects migrations by journal name, so the AGENTS.md rule against editing shipped migrations (which protects applied journals) is not engaged. FC-017's projection, media and preview bounds are untouched. Evidence: `test/history/fts-kind-idempotent.test.ts`, `test/history/fts-kind-boot.e2e.test.ts` and every other `test/history/` file.
@@ -1905,11 +1907,12 @@ logged`, and the peer `success`/`failure` variants of
 - Canonical owner: fork `main` history projection; inherited unchanged by `dev/compat`.
 - Observable contract: SQLite projection keeps JSON escapes until final parsing so NUL-containing strings survive old SQLite. Individual preview fields are selected by a 4,000-byte decoded-value check; the complete projected attachment metadata list is checked against 4,000 bytes of serialized JSON. Both decisions occur in SQLite before crossing the driver boundary. Escaping and multiple fields add JSON bytes: this is not a 4,000-byte bound on a field's serialized representation, the whole driver row, SQLite's internal materialization cost or complete `history get` results. Inline data URLs are omitted from previews, while original attachment positions/locators and raw stored data remain unchanged.
 - An oversized attachment list produces a structural omission notice, never a fabricated `tool:0` attachment. A real attachment whose MIME equals the notice text remains an attachment because its URL key distinguishes the shape, including a null URL after data removal.
-- Upstream relationship: adopts uniform indexing, transactional import and resumable one-time migration; retains NUL-fidelity and SQL-preview/locator corrections. Startup after completed migration does not promise repair of later missed asynchronous index writes.
-- Watch surfaces: `packages/cli/src/history/projection.ts`, `packages/cli/src/history/media.ts`, `packages/cli/src/history/service.ts` and `packages/cli/src/history/import.ts`. Read actual producers/callers when upstream reorganizes these paths; the two current fork-different production files are `projection.ts` and `media.ts`.
-- Tests/evidence: `packages/cli/test/history/` NUL/projection/media/attachment-around tests and the C05 record in [selected synchronization](upstream-sync-2026-09-15-5198ff54.md). The accepted final history run has 68 passes, five upstream benchmark skips, and 625 assertions; this audit does not rerun or relabel that evidence.
+- Legacy retry rows: `normalizeRetryPart` (`session/retry-record.ts`) maps a historical error-based `retry` part without a string `message` to the strict public `RetryPart`: the joined error message and response body, `phase: "stream"`, `scope: "live-step"`, `kind: "unknown"`, attempt 0 when absent, and `next`/`time.updated` at the created time. It runs at every read boundary: part hydration (`message-v2.ts`, `session.ts`), sync replay before storage and publication (`projectors.ts`), session import and export, and history extraction. Current-shape and unrecognized values pass through unchanged; the public schema is not widened and shipped SQL is not edited. Export then redacts the normalized message like any other retry part.
+- Upstream relationship: adopts uniform indexing, transactional import and resumable one-time migration; retains NUL-fidelity and SQL-preview/locator corrections. Startup after completed migration does not promise repair of later missed asynchronous index writes. Upstream ships the strict durable `RetryPart` schema with no legacy-row normalization or migration.
+- Watch surfaces: `packages/cli/src/history/projection.ts`, `packages/cli/src/history/media.ts`, `packages/cli/src/history/service.ts`, `packages/cli/src/history/import.ts` and `packages/cli/src/history/extract.ts`; for legacy retry reads, `packages/cli/src/session/retry-record.ts`, `packages/cli/src/session/message-v2.ts`, `packages/cli/src/session/session.ts`, `packages/cli/src/session/projectors.ts`, `packages/cli/src/cli/cmd/import.ts` and `packages/cli/src/cli/cmd/export.ts`. Read actual producers/callers when upstream reorganizes these paths. The fork-different production files are `projection.ts`, `media.ts` and `extract.ts` under `history/`, plus every listed retry-read file; `retry-record.ts` exists only in the fork.
+- Tests/evidence: `packages/cli/test/history/` NUL/projection/media/attachment-around tests and the C05 record in [selected synchronization](upstream-sync-2026-09-15-5198ff54.md). The accepted final history run has 68 passes, five upstream benchmark skips, and 625 assertions; this audit does not rerun or relabel that evidence. Legacy retry reads: `packages/cli/test/session/retry-record-chronology.test.ts` covers the strict public schema, search/export/re-import of persisted legacy parts, and the normalized replay event/log shape.
 - Review basis: upstream `5198ff540efb5ca9fff2baa64555324d43a721b9`, main runtime/test behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd` (history fixes already present at `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`).
-- Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting.
+- Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting. The legacy retry normalization retires separately, once upstream normalizes or migrates error-based retry rows at the same read boundaries.
 
 ## FC-018 — explicit empty values in actor shell flags (retired)
 
