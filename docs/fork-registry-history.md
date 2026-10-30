@@ -3364,3 +3364,7 @@ Three-capability full sync: appended rebuild boundaries with explicit placement 
 ## 2026-10-30 full synchronization through ee0a93b5
 
 Selected upstream `ee0a93b5dff36f689e28957b2e4377159a9a9731`; main behavior `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf`; compat behavior `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841`. Range `3e92e0d8..ee0a93b5`, three commits and 21 upstream paths. C01–C03 (N=3): failure/interruption-safe compaction and truthful owned summarize outcomes, removed Xiaomi sidecar with explicit Exa gating, and research search/MCP/DuckDuckGo guidance. No FD/FC owner retires; only FD-005's sidecar clause retires. All eleven compat DC owners remain. See [the capability inventory and evidence](upstream-sync-2026-10-30.md).
+
+## 2026-10-31 full synchronization through 7bc7dc3a
+
+Selected upstream `7bc7dc3a9150b3606973164d076b602b5e064690`; main behavior `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b`; compat behavior `f37f9b0ec111c54fb68f7eccb3d0534768f917ea`. Range `ee0a93b5..7bc7dc3a`, twelve commits (upstream PR #2737) and nine net paths; its checkpoint and CI commits are reverted inside the range and tree-neutral. C01–C03 (N=3): host execution boundary for MCP/LSP/formatter configuration, legacy TOML reread and bounded migration, and stored-config persistence for `Config.update`. FC-004 adapts the `mergeClaudeMcp` conflict and gains a regression; no FD/FC/DC owner retires. See [the capability inventory and evidence](upstream-sync-2026-10-31.md).
