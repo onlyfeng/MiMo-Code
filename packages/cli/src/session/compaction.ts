@@ -330,6 +330,8 @@ export interface Interface {
     agentID?: string
     task_id?: string
     expectedUserID: MessageID | undefined
+    /** Observe boundary identity without changing queue visibility or turn ownership. */
+    onCreated?: (messageID: MessageID) => void
     /** Internal receipt; never inferred by scanning hook messages. */
     onUserCommitted?: (message: MessageV2.User) => void
   }) => Effect.Effect<boolean>
@@ -1051,6 +1053,7 @@ export const layer: Layer.Layer<
         parts: [next.part],
       })
       if (!created) return false
+      input.onCreated?.(next.message.id)
       input.onUserCommitted?.(next.message)
       yield* publish(input)
       return true
