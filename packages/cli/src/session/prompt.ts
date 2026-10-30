@@ -8064,7 +8064,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             agentID: "main",
             task_id: lastUser?.info.role === "user" ? lastUser.info.task_id : undefined,
             expectedUserID: lastUser?.info.role === "user" ? lastUser.info.id : undefined,
-            onUserCommitted: (message) => { boundaryID = message.id },
+            onCreated: (messageID) => { boundaryID = messageID },
           })
           if (!created)
             return yield* Effect.fail(new SessionCompaction.FailedError({
