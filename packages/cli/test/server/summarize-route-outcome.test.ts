@@ -120,6 +120,23 @@ describe("POST /session/:id/summarize reports the real outcome", () => {
       expect(await http.compactionParts(session.id)).toEqual([])
     }), 30_000)
 
+  test("a cancelled compaction fails instead of returning the previous assistant", () =>
+    fixture(async (http, llm) => {
+      const session = await http.session()
+      await http.seed(session.id)
+      await Effect.runPromise(llm.hang)
+
+      const summarizing = http.post(`/session/${session.id}/summarize`, model)
+      await Effect.runPromise(llm.wait(1))
+      const aborted = await http.post(`/session/${session.id}/abort`, {})
+      expect(aborted.status).toBe(200)
+      const response = await summarizing
+
+      expect(response.status).toBe(500)
+      expect(((await response.json()) as { name: string }).name).toBe("SessionCompactionFailedError")
+      expect(await http.compactionParts(session.id)).toEqual([])
+    }), 30_000)
+
   test("a completed compaction answers true", () =>
     fixture(async (http, llm) => {
       const session = await http.session()

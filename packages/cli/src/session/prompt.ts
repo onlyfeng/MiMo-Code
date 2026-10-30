@@ -8041,7 +8041,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const startSummarize = Effect.fn("SessionPrompt.startSummarize")(function* (input: SummarizeInput) {
-      return yield* state.startRunning(
+      let boundaryID: MessageID | undefined
+      const completed = () => boundaryID != null &&
+        MessageV2.parts(boundaryID).some((part) => part.type === "compaction" && part.projection)
+      const completion = yield* state.startRunning(
         input.sessionID,
         "main",
         lastAssistant(input.sessionID, "main").pipe(Effect.catchCause(() => Effect.interrupt)),
@@ -8053,7 +8056,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const lastUser = msgs.findLast((message) => message.info.role === "user")
           const currentAgent =
             lastUser?.info.role === "user" && lastUser.info.agent ? lastUser.info.agent : yield* agents.defaultAgent()
-          let boundaryID: MessageID | undefined
           const created = yield* compaction.createIfLatest({
             sessionID: input.sessionID,
             agent: currentAgent,
@@ -8064,31 +8066,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             expectedUserID: lastUser?.info.role === "user" ? lastUser.info.id : undefined,
             onUserCommitted: (message) => { boundaryID = message.id },
           })
-          if (!created || !boundaryID)
+          if (!created)
             return yield* Effect.fail(new SessionCompaction.FailedError({
               sessionID: input.sessionID,
               message: "Compaction boundary was superseded",
             }))
-          const boundary = boundaryID
-          const completed = () =>
-            MessageV2.parts(boundary).some((part) => part.type === "compaction" && part.projection)
-          const result = yield* runLoop(input.sessionID, "main").pipe(
-            Effect.ensuring(
-              Effect.suspend(() =>
-                completed() || MessageV2.parts(boundary).length === 0
-                  ? Effect.void
-                  : sessions.removeMessage({ sessionID: input.sessionID, messageID: boundary }),
-              ),
-            ),
-          )
-          if (!completed())
-            return yield* Effect.fail(new SessionCompaction.FailedError({
-              sessionID: input.sessionID,
-              message: "Compaction did not produce a summary",
-            }))
-          return result
-        }).pipe(Effect.orDie),
+          return yield* runLoop(input.sessionID, "main")
+        }).pipe(
+          Effect.ensuring(Effect.suspend(() =>
+            boundaryID == null || completed() || MessageV2.parts(boundaryID).length === 0
+              ? Effect.void
+              : sessions.removeMessage({ sessionID: input.sessionID, messageID: boundaryID }),
+          )),
+          Effect.orDie,
+        ),
       )
+      // Cancellation can return the runner's previous assistant without finishing
+      // the work above. Check the projection after that completion path as well.
+      return completion.pipe(Effect.tap(() => completed()
+        ? Effect.void
+        : Effect.fail(new SessionCompaction.FailedError({
+            sessionID: input.sessionID,
+            message: "Compaction did not produce a summary",
+          })).pipe(Effect.orDie),
+      ))
     })
 
     // A pending permission or question still belongs to the interrupted turn.
