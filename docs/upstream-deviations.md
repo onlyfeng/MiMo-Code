@@ -461,6 +461,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-10-30 registry correction: the synchronization below left two sidecar-era references in this entry. `packages/cli/src/tool/websearch/index.ts` leaves the watch surfaces: main's file is identical to upstream and resolves no model identity. The local-SSE `test/tool/websearch.test.ts` evidence leaves Tests/evidence: upstream `d0684a3d` deleted that test with the sidecar. No behavior changes.
+
 - 2026-10-30 synchronization: Adopt `d0684a3d`: remove the Xiaomi WebSearch sidecar and its resolved-API-id clause. Every provider needs explicit Exa enablement on main; compat additionally exposes configured native/fallback routes under DC-WEBSEARCH-001. Harness/prompt/toolset/retry identity remains active.
 
 - 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens the WebSearch sidecar and tool gate from the literal `xiaomi` to `isXiaomiFamilyProvider`. The sidecar authenticates with the model's own provider key and still sends the resolved `model.api.id`, so this contract now covers the whole family. Harness, prompt, discovery, toolset and retry identity resolution read model identity, not the credential provider, and are unchanged; family-wide large-model output defaults and in-house vision ordering select no harness. Evidence: `test/tool/websearch.test.ts` (token-plan sidecar), `test/tool/registry-toolset.test.ts` (family exposure), `test/tool/harness-alias.test.ts`, `test/provider/provider.test.ts`.
@@ -548,7 +550,6 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `packages/cli/src/tool/registry.ts`,
   `packages/cli/src/tool/tool-script-ref.ts`,
   `packages/cli/src/tool/tool-script.ts`,
-  `packages/cli/src/tool/websearch/index.ts`,
   `packages/cli/src/agent/agent.ts`, and
   `packages/cli/src/server/routes/instance/experimental.ts`.
 - Tests/evidence: `packages/cli/test/flag/codex-mode-flag.test.ts`,
@@ -557,9 +558,7 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `packages/cli/test/provider/provider.test.ts`, and
   `packages/cli/test/tool/tool-script.test.ts` regressions cover explicit
   unset/true/false behavior, direct GPT IDs, API/family aliases, MiMo conflicts,
-  explicit session precedence, and retry reuse. The local-SSE
-  `packages/cli/test/tool/websearch.test.ts` regression binds the Xiaomi
-  sidecar request to the resolved API model ID.
+  explicit session precedence, and retry reuse.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
