@@ -15,13 +15,13 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-29
-- Upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
-- Prior reviewed upstream: `ebd06ee2fafad8f20d358aaac68200536ff9be65`
-- Main behavior (runtime/tests): `61a589679a10968dfad60280eb4aa2c4993765fd` (caller-supplied session ids and Xiaomi API/token-plan credential split with family consumers)
-- Inherited compat behavior: `6bc84001a223e12306d0c39796c24bff2747b3c9` (shared changes inherited; DC-WEBSEARCH-001 sidecar adapted to the Xiaomi family; all eleven DC owners retained)
-- Bundled guidance content: `33f43f4d200fb7609c9d281e7f06f285960b79b7` (agent-CLI skill descriptions and the `mimocode-docs` opt-in discovery row)
-- Prior fork `main` tip: `ad8387f9093a94c075df22a2c535929ec73bce17`
+- Last reviewed: 2026-10-30
+- Upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
+- Prior reviewed upstream: `3e92e0d8f0308603180ad03dbc67828c94c09ec4`
+- Main behavior (runtime/tests): `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf` (compaction cleanup, cancellation-aware owned summarize outcome and explicit search opt-in)
+- Inherited compat behavior: `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841` (shared changes inherited; configured native/fallback search retained with Exa opt-in)
+- Bundled guidance content: `19362075089580aef8b709de58a5433cbfd6608b` (available search/MCP and DuckDuckGo fallback; explicit Exa/search MCP configuration)
+- Prior fork `main` tip: `4a1c42148765755fba39d80103a76879965b8a7f`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
 
@@ -129,6 +131,8 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
 
 - 2026-10-22 live advancement: a newly accepted lane input supersedes a failing retry step through the existing claim/consume/task and run-approval boundaries. Recovery keeps its locked parent and does not observe the new-input watcher. Successful cleanup removes retry parts but retains assistant identities referenced by durable first-delivery receipts. Tests cover lower-ID admission, supersession, receipt anchors, recovery and retained authority.
 
@@ -1442,6 +1446,8 @@ logged`, and the peer `success`/`failure` variants of
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-10-30 synchronization: Adopt available search/MCP wording, explicit Exa/search MCP setup, and DuckDuckGo HTML through WebFetch when no search tool is available. Permission/discovery and workflow lifetime contracts remain unchanged; prompt text is content evidence, not a live search-provider availability claim.
+
 - 2026-10-26 synchronization: adopt upstream `18adffc9` unchanged. The `claude-code`, `codex` and `grok-build` descriptions now say to load only on explicit authorization and to confirm the binary first; their host-only `agents/openai.yaml` files are deleted, and the `mimocode-docs` discovery row names the opt-in selector. The fork's PPTX guidance regression in `test/skill/builtin.test.ts` is kept beside upstream's new cases.
 
 - 2026-10-21 synchronization: adopt upstream `12a59e90` unchanged. Compose Next spec `source` takes a branch name, PR URL or MR URL, so the frontmatter stays valid YAML; fill-ins use `{{}}`, S labels move onto Design H3s, `covers` and the Journey log are optional, and any merge needs its own confirmation. Bundled `mimocode-docs` drops `compaction.prune` and names `xiaomi/mimo-v2.6-flash` as the voice control default; the fork's compaction-row wording and `auto_worktree` entry in `config.md` are kept.
@@ -1713,6 +1719,8 @@ logged`, and the peer `success`/`failure` variants of
   `package.json`.
 
 ## FC-015 — bounded compaction context and upstream ratio trigger
+
+- 2026-10-30 synchronization: Adopt boundary-model summary selection and failed/interrupted cleanup without changing chronological tails, pending external admission or frozen-prefix sizing. Compat retains active-only frozen tool membership and its tail budget under DC-CONTEXT-001.
 
 - 2026-10-21 synchronization: upstream `6f83cd0e` stops rewriting persisted parts to shrink context. Turn-end prune and `stripNonEssential`, `SessionCompaction.prune`, rebuild-time microcompact, `Overflow.pressureLevel`/`contextPressureLevel`, the `compaction.prune` key and `MIMOCODE_DISABLE_PRUNE` are removed; a config that still sets `compaction.prune` loads with one warning. Adopted unchanged; the fork's `observedToolParts` protection inside `SessionCompaction.prune` retires with that function. Rows already marked `time.compacted` still project the cleared placeholder. Checkpoint thresholds keep resolving against `usable()`, and the ratio trigger, bounded projection, frozen prefix and `toolChoice: "none"` are unchanged. The fork keeps `auto_worktree` in `normalizeLoadedConfig`; only the prune hunk is taken from that conflict. Evidence: `test/session/turn-end-lossless.test.ts`, `rebuild-boundary-lossless.test.ts`, `legacy-compacted-row.test.ts`, `overflow.test.ts`, `test/config/config.test.ts`.
 

@@ -3360,3 +3360,7 @@ requires the subsequent exact-SHA CI and remote ancestry checks.
 ## 2026-10-22 — upstream `213365a0`
 
 Three-capability full sync: appended rebuild boundaries with explicit placement and legacy chronological compatibility; receipt-aware writer/turn restoration and atomic recovery settlement; stable Compose Next anchors and spec provenance. No owner retires. See [sync evidence](upstream-sync-2026-10-22.md) for immutable baselines, validation and publication.
+
+## 2026-10-30 full synchronization through ee0a93b5
+
+Selected upstream `ee0a93b5dff36f689e28957b2e4377159a9a9731`; main behavior `f9ef3fcc5c4d8256f4805ea60897911f1753b6bf`; compat behavior `cd1fdc8de0b6eba7363dde88a4ea1bc191e04841`. Range `3e92e0d8..ee0a93b5`, three commits and 21 upstream paths. C01–C03 (N=3): failure/interruption-safe compaction and truthful owned summarize outcomes, removed Xiaomi sidecar with explicit Exa gating, and research search/MCP/DuckDuckGo guidance. No FD/FC owner retires; only FD-005's sidecar clause retires. All eleven compat DC owners remain. See [the capability inventory and evidence](upstream-sync-2026-10-30.md).
