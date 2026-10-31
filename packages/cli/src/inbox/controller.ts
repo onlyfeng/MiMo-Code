@@ -757,7 +757,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     // A wake stays until its lane's run settles, so an owner that exits first
     // leaves it for the next owner of the session.
     const startWoken = Effect.gen(function* () {
-      if (!schedulerRef.current) return
+      // Like the lane scheduler, wakes go to the process's current controller only.
+      if (!schedulerRef.current || inboxControllerRef.current !== impl) return
       const wakes = yield* Effect.sync(() => Database.use((db) => SessionOwner.listWakes(db)))
       for (const wake of wakes) {
         // Remote input must reach a turn already waiting on this lane, as local input would.
@@ -773,7 +774,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             log.warn("inbox wake clear failed", { sessionID: wake.sessionID, agentID: wake.agentID, error: String(error) })
           }
         }
-        const kicked = yield* inSessionInstance(wake.sessionID, maybeKick(wake, true, settled)).pipe(Effect.catchCause((cause) =>
+        // Reconcile a session this process has not run yet before its first
+        // woken lane claims input; a later first prompt then leaves that run alone.
+        const run = reconcileOnBoot(wake.sessionID).pipe(Effect.andThen(maybeKick(wake, true, settled)))
+        const kicked = yield* inSessionInstance(wake.sessionID, run).pipe(Effect.catchCause((cause) =>
           Effect.sync(() => {
             log.warn("inbox wake failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) })
             return false

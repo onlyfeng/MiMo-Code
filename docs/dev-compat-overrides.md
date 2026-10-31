@@ -2713,7 +2713,11 @@ files remain byte-identical to the accepted main correction.
     controller looks at the wakes for its own sessions every 1–1.5 s, kicks the
     lane in the session's own instance, and clears the wake only after that
     run settles (unless it was rung again since), so an owner that exits first
-    leaves it for the next owner. A wake also releases the owner's
+    leaves it for the next owner. Before the first woken lane of a session it
+    has not run yet, the controller runs that session's `reconcileOnBoot`, so a
+    later first prompt cannot cancel the woken run's claims as crashed work.
+    Only the process's current controller (`inboxControllerRef`) takes wakes,
+    as only the current scheduler runs lanes. A wake also releases the owner's
     `observeInput` waiters, so remote input reaches an actor wait or retry
     backoff as local input does. An adoptable lane in a process without a
     scheduler waits for its next run, as before.

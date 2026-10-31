@@ -117,9 +117,13 @@ Each process's inbox controller polls about once a second (1–1.5 s, jittered) 
 wakes on sessions it owns. It kicks each lane inside the session's own instance
 and clears the wake only after that run settles, unless another process rang it
 again in the meantime. If the owner exits mid-run, the wake survives for the next
-owner. Each wake also releases the owner's `observeInput` waiters, so input from
-another process reaches an actor wait or a retry backoff the way local input
-does. The query joins two small tables and is usually empty.
+owner. Before the first woken lane of a session this process has not run yet,
+it runs that session's `reconcileOnBoot`. Otherwise a later first prompt would
+reconcile then and cancel the woken run's claimed receipts as crashed work. Only
+the process's current controller takes wakes, matching the current lane
+scheduler. Each wake also releases the owner's `observeInput` waiters, so input
+from another process reaches an actor wait or a retry backoff the way local
+input does. The query joins two small tables and is usually empty.
 
 The `actor send` result for another session says where the message will run:
 

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, mock } from "bun:test"
-import { Deferred, Effect, Fiber, Layer } from "effect"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock } from "bun:test"
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect"
 import { Bus } from "../../src/bus"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { InboxController } from "../../src/inbox"
-import { InboxLaneStateTable, InboxWakeTable } from "../../src/inbox/inbox.sql"
+import { InboxLaneStateTable, InboxTable, InboxWakeTable } from "../../src/inbox/inbox.sql"
 import { schedulerRef } from "../../src/inbox/scheduler"
 import type { Lane } from "../../src/inbox/schema"
 import { Instance } from "../../src/project/instance"
@@ -35,6 +35,17 @@ afterEach(async () => {
 
 const it = testEffect(Layer.mergeAll(Session.defaultLayer, CrossSpawnSpawner.defaultLayer, Bus.layer, InboxController.defaultLayer))
 
+// A controller built earlier in this process and never disposed, like the global
+// AppRuntime one other test files start. Wakes must still go to the current one.
+let stale: ManagedRuntime.ManagedRuntime<InboxController.Service, never> | undefined
+beforeAll(async () => {
+  stale = ManagedRuntime.make(InboxController.defaultLayer)
+  await stale.runPromise(InboxController.Service.use(() => Effect.void))
+})
+afterAll(async () => {
+  await stale?.dispose()
+})
+
 function input(sessionID: SessionID) {
   const id = MessageID.ascending()
   const message: MessageV2.User = {
@@ -63,10 +74,11 @@ describe("inbox delivery across processes", () => {
     expect(owner(session.id)).toBeUndefined()
     expect(wakes(session.id)).toHaveLength(1)
 
-    // Opening the session claims it; the wake poller then starts the lane here.
+    // Opening the session claims it; the wake poller then starts the lane here
+    // (its first-run reconciliation may start the same lane as well).
     Database.use((db) => SessionOwner.claim(db, session.id))
-    for (let waited = 0; kicked(session.id) === 0 && waited < 5_000; waited += 50) yield* Effect.sleep(50)
-    expect(kicked(session.id)).toBe(1)
+    for (let waited = 0; (kicked(session.id) === 0 || wakes(session.id).length > 0) && waited < 5_000; waited += 50) yield* Effect.sleep(50)
+    expect(kicked(session.id)).toBeGreaterThan(0)
     expect(wakes(session.id)).toHaveLength(0)
   })), 30_000)
 
@@ -112,6 +124,26 @@ describe("inbox delivery across processes", () => {
     yield* Deferred.succeed(release, undefined)
     yield* until(() => wakes(session.id).length === 0)
     expect(wakes(session.id)).toHaveLength(0)
+  })), 30_000)
+
+  it.live("a reopened session is reconciled before its woken lane runs, so a first prompt cannot cancel that run", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    const receipt = yield* tq.accept({ ...input(session.id), adoptReceiver: false })
+    const release = yield* Deferred.make<void>()
+    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+    // The woken run claims the receipt and is still working on it.
+    kick.mockImplementation(() => Effect.sync(() => Database.use((db) => db.update(InboxTable).set({ state: "claimed", run_id: 1 })
+      .where(eq(InboxTable.id, receipt.id)).run())).pipe(Effect.andThen(Deferred.await(release))))
+
+    // Opening the session in this process: the poller starts the queued input.
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    yield* until(() => kicked(session.id) > 0)
+    expect((yield* tq.getReceipt(receipt.id)).state).toBe("claimed")
+
+    // The user's first prompt reconciles the session; the live claim must survive it.
+    yield* tq.reconcileOnBoot(session.id)
+    expect((yield* tq.getReceipt(receipt.id)).state).toBe("claimed")
   })), 30_000)
 
   it.live("input another process accepted wakes this process's input waiters", provideTmpdirInstance(() => Effect.gen(function* () {
