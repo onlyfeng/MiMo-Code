@@ -3375,6 +3375,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return full?.variants?.[model.variant] ? model.variant : undefined
     })
 
+    // createUserMessage's agent-variant rule: an agent's configured variant
+    // applies only on the agent's own model. A caller that resolves a continued
+    // variant itself checks this first so the agent keeps precedence (FC-023).
+    const agentVariant = Effect.fnUntraced(function* (
+      ag: Pick<Agent.Info, "model" | "modelRef" | "variant">,
+      model: { providerID: ProviderID; modelID: ModelID },
+    ) {
+      if (!ag.variant) return undefined
+      const agentModel = ag.modelRef
+        ? yield* provider
+            .resolveModelRef(ag.modelRef)
+            .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
+        : ag.model
+      if (!agentModel || agentModel.providerID !== model.providerID || agentModel.modelID !== model.modelID)
+        return undefined
+      const full = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
+      return full?.variants?.[ag.variant] ? ag.variant : undefined
+    })
+
     const acceptsIntoInbox = (input: PromptInput) => input.noReply !== true
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
@@ -7790,8 +7809,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ? Provider.parseModel(input.model)
           : yield* fallbackModel()
         : taskModel
+      const userAgentInfo = fallback && userModel === fallback ? yield* agents.get(userAgent) : undefined
       const userVariant =
-        input.variant ?? (fallback && userModel === fallback ? yield* continuedVariant(fallback) : undefined)
+        input.variant ??
+        (fallback && userModel === fallback
+          ? ((userAgentInfo ? yield* agentVariant(userAgentInfo, fallback) : undefined) ??
+            (yield* continuedVariant(fallback)))
+          : undefined)
       if (isSubtask) {
         if (!(yield* agents.get(userAgent))) {
           const error = new NamedError.Unknown({ message: `Agent not found: "${userAgent}".` })

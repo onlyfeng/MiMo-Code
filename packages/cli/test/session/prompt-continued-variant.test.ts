@@ -21,10 +21,11 @@ const it = testEffect(makeLayer())
 // FC-023: a prompt that names no model continues the session's last model, and
 // with it the variant that turn ran at. Cron fires, inbox deliveries and actor
 // notifications all reach the session this way.
-function config(url: string) {
+function config(url: string, extra: Record<string, unknown> = {}) {
   const base = providerCfg(url)
   return {
     ...base,
+    ...extra,
     command: { example: { template: "Reply with ok." } },
     provider: {
       ...base.provider,
@@ -175,6 +176,33 @@ describe("session.prompt continued variant", () => {
           expect(userModel(users[1])).toEqual({ ...ref, variant: "max" })
         }),
         { git: true, config },
+      ),
+  )
+
+  it.live(
+    "a command on the agent's own model keeps the agent's variant ahead of the continued one",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          yield* llm.text("ok")
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const session = yield* sessions.create({ title: "command agent variant" })
+          yield* seed(session.id, "max")
+
+          yield* prompt.command({ sessionID: session.id, command: "example", arguments: "", agent: "build" })
+
+          const users = (yield* sessions.messages({ sessionID: session.id })).filter(
+            (message) => message.info.role === "user",
+          )
+          expect(users).toHaveLength(2)
+          expect(userModel(users[1])).toEqual({ ...ref, variant: "low" })
+        }),
+        {
+          git: true,
+          config: (url) =>
+            config(url, { agent: { build: { model: `${ref.providerID}/${ref.modelID}`, variant: "low" } } }),
+        },
       ),
   )
 })

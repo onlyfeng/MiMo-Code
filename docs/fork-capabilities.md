@@ -2258,7 +2258,8 @@ logged`, and the peer `success`/`failure` variants of
   - A prompt that names a model without a variant still gets that model's
     default. The agent-variant rule is unchanged.
   - A command whose model comes from the same fallback passes the continued
-    variant to its prompt.
+    variant to its prompt, unless the agent-variant rule applies: an agent
+    variant on the agent's own model still wins.
   - A shell run's user message keeps the previous user message's variant when
     it runs on that message's model. The shell API has no variant field, and
     later model-less turns continue this message.
@@ -2275,7 +2276,7 @@ logged`, and the peer `success`/`failure` variants of
   Fork fix of shared code. `dev/compat` applies the same rule in its shared
   model-selection resolver (DC-TUI-001).
 - Watch surfaces: `previousModel`, `lastModel`, `continuedVariant`,
-  `createUserMessage`, `shell` and `command` in
+  `agentVariant`, `createUserMessage`, `shell` and `command` in
   `packages/cli/src/session/prompt.ts`; `resolveDrainSeed` in
   `packages/cli/src/inbox/inbox.ts`; `injectScheduledPrompt`; the session sync
   in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`.
@@ -2284,7 +2285,8 @@ logged`, and the peer `success`/`failure` variants of
     keeps its default;
   - a variant the model no longer offers is not continued;
   - a shell run on the same model keeps `max` for the next fire;
-  - a command without a model keeps `max`.
+  - a command without a model keeps `max`;
+  - a command whose agent sets `low` on that same model keeps `low`.
 
   Reverting any one site fails its case. Inheriting whenever the model matches
   the previous turn fails the named-model case.
