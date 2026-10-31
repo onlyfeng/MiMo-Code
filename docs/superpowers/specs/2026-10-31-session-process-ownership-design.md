@@ -93,7 +93,10 @@ The `session_owner` table records `session_id`, `instance_id`, `pid` and
   continue there.
 - **Opening a window.** A TUI started with `-s <session>` (without `--fork`)
   claims that session through the worker's `claimSession` RPC. Queued input then
-  starts without waiting for a keystroke.
+  starts without waiting for a keystroke. The claim applies the same instance
+  check as a prompt from that window: a session stored for another directory or
+  workspace is not claimed. Otherwise woken input could run outside the
+  directory the window was started and trusted in.
 
 ### Delivery
 

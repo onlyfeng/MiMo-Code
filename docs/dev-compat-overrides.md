@@ -2734,7 +2734,9 @@ files remain byte-identical to the accepted main correction.
     and internal flows (child notifications, prompts, workflows) keep
     adopting.
   - A TUI started with `-s <id>` without `--fork` claims that session through
-    the worker `claimSession` RPC, so queued input starts without a keystroke.
+    the worker `claimSession` RPC (`ExecutionOwnership.claimOpened`), so queued
+    input starts without a keystroke, but only when the window's directory and
+    workspace own the session; a session from another project is not claimed.
   - `sweepAbandonedZombies` skips actors whose instance is alive; the registry
     layer takes the liveness lock before it writes rows naming the process.
 - Delta: windows still running an older binary neither claim nor honour

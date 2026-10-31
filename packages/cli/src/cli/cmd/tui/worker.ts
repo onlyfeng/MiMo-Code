@@ -15,7 +15,8 @@ import { ensureProcessMetadata } from "@/util/mimo-process"
 import { serverAuthHeader } from "@/server/auth"
 import { createWorkerListener, type WorkerListenerInput } from "./worker-listener"
 import { Database } from "@/storage"
-import { SessionOwner } from "@/session/session-owner"
+import { ExecutionOwnership } from "@/session/execution-ownership"
+import { Filesystem } from "@/util"
 import { SessionID } from "@/session/schema"
 
 import { ModelsDev } from "@/provider/models"
@@ -100,10 +101,13 @@ export const rpc = {
     })
   },
   // A window opened on a session runs it when no other live process does, so
-  // input queued for that session starts without waiting for a keystroke.
+  // input queued for that session starts without waiting for a keystroke. The
+  // thread and worker share one directory (the thread chdirs before starting us).
   async claimSession(input: { sessionID: string }) {
-    const owner = Database.use((db) => SessionOwner.claim(db, SessionID.make(input.sessionID)))
+    const directory = Filesystem.resolve(process.cwd())
+    const owner = Database.use((db) => ExecutionOwnership.claimOpened(db, SessionID.make(input.sessionID), { directory }))
     if (owner.kind === "other") Log.Default.info("session is open in another process", { sessionID: input.sessionID, pid: owner.pid })
+    if (owner.kind === "foreign") Log.Default.info("session belongs to another directory; not claimed", { sessionID: input.sessionID, directory })
     return owner
   },
   async reload() {

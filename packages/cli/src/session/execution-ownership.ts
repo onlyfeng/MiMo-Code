@@ -58,4 +58,15 @@ export function claimExecution(db: Database.TxOrDb, sessionID: SessionID, identi
   claimProcess(db, sessionID, identity)
 }
 
+/**
+ * Claim a session a window opens, but only when that window's instance owns it
+ * (directory and workspace), like a prompt from that window. Otherwise woken
+ * input would run in the session's own directory, outside the one the window
+ * was started and trusted in.
+ */
+export function claimOpened(db: Database.TxOrDb, sessionID: SessionID, identity: Identity): SessionOwner.Status | { readonly kind: "foreign" } {
+  if (!isOwned(db, sessionID, identity)) return { kind: "foreign" }
+  return SessionOwner.claim(db, sessionID)
+}
+
 export * as ExecutionOwnership from "./execution-ownership"

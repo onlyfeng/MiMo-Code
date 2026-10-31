@@ -110,6 +110,18 @@ describe("execution ownership", () => {
     })), 30000)
   }
 
+  it.live("a window claims the session it opens only when its instance owns that session", provideTmpdirInstance((directory) => Effect.gen(function* () {
+    const session = yield* (yield* Session.Service).create({})
+    const owner = () => Database.use((db) => db.select().from(SessionOwnerTable).where(eq(SessionOwnerTable.session_id, session.id)).get())
+
+    // Opened from another project directory: no claim, so no woken input runs outside it.
+    expect(Database.use((db) => ExecutionOwnership.claimOpened(db, session.id, { directory: `${directory}/elsewhere` }))).toEqual({ kind: "foreign" })
+    expect(owner()).toBeUndefined()
+
+    expect(Database.use((db) => ExecutionOwnership.claimOpened(db, session.id, { directory }))).toEqual({ kind: "self" })
+    expect(owner()?.instance_id).toBe(ProcessLiveness.INSTANCE_ID)
+  })), 30000)
+
   for (const entry of ["start", "startOwned", "ensureRunning", "ensureExclusive", "startShell", "startRunning"] as const) {
     it.live(`${entry} refuses a session another live process runs and adopts it once that process is gone`, provideTmpdirInstance(() => Effect.gen(function* () {
       const session = yield* (yield* Session.Service).create({})
