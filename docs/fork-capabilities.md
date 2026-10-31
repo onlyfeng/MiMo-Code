@@ -133,6 +133,7 @@ not change their implementation. The preceding review is retained in the
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 | FC-020 | Stringified object/array tool arguments: AI SDK tool-call parse and `Tool.define` validation              | Fork hardening of upstream's raw tool-call input                 | Decode only container-typed string failures; persist and execute one input               |
 | FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
+| FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2210,3 +2211,34 @@ logged`, and the peer `success`/`failure` variants of
   upstream gives the writer a step budget. The regression cases stay in every
   case.
 
+## FC-022 — cloned loggers keep their own tags
+
+- Status: active
+- Canonical owner: fork `main` logger construction in
+  `packages/cli/src/util/log.ts`
+- Observable contract: `Logger.clone()` returns a private logger with a copy of
+  the tags. `tag()` on a clone changes only that clone; the per-service logger
+  `Log.create` hands every other caller is never replaced or mutated by a
+  clone. `Log.create(tags)` itself is unchanged.
+- Motivation: `clone()` called `create({ ...tags })`, and because the tags
+  carry `service`, `create` returned the cached per-service logger. Every
+  `log.clone().tag(...)` therefore mutated one shared object, so concurrent
+  LLM streams and processors wrote each other's `session.id`, `agent` and
+  `messageID`. During the FC-021 incident the logs showed the main session
+  failing with the writer's request body while the database showed those main
+  steps succeeding. `server/proxy.ts` also renamed `Log.Default`'s service to
+  `server-proxy` this way, so every default-logger line in the main process
+  carried that label; after this fix those lines say `service=default`.
+- Upstream relationship: upstream `7bc7dc3a` has the same `clone()`. Fork fix
+  of shared code.
+- Watch surfaces: `create` and `clone` in `packages/cli/src/util/log.ts`, and
+  the clone callers `packages/cli/src/session/llm.ts`,
+  `packages/cli/src/session/processor.ts`, `packages/cli/src/lsp/client.ts` and
+  `packages/cli/src/server/proxy.ts`.
+- Tests/evidence: "cloned loggers keep their own tags" in
+  `packages/cli/test/util/log.test.ts` tags two clones of one service logger,
+  then checks that each line carries its own `session.id` and that the base
+  logger carries none. Restoring `create({ ...tags })` in `clone()` fails it
+  with the other clone's tag on the line.
+- Retirement condition: upstream's `clone()` stops returning the cached
+  per-service logger.
