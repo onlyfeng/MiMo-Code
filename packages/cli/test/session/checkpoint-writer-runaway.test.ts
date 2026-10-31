@@ -219,7 +219,8 @@ describe("checkpoint writer context overflow", () => {
 })
 
 // Four files per segment, each just under the read tool's 50 KB output cap: one
-// segment fits the window, the two segments a stale checkpoint leaves behind do not.
+// segment fits the window (including request preflight, where it runs), the two
+// segments a stale checkpoint leaves behind do not.
 const SEGMENTS = [
   ["a1.txt", "a2.txt", "a3.txt", "a4.txt"],
   ["b1.txt", "b2.txt", "b3.txt", "b4.txt"],
@@ -256,8 +257,8 @@ describe("checkpoint writer fork size", () => {
               textStopResponse(`segment ${segment} done`),
             ]),
             textStopResponse("live reply"),
-            // Past the 50% threshold (45K of the 90K usable window), below the window itself.
-            textStopResponse("large step", { promptTokens: 60_000 }),
+            // Past the 50% threshold (90K of the 180K usable window), below the window itself.
+            textStopResponse("large step", { promptTokens: 100_000 }),
             textStopResponse("ok"),
           ]
           const server = startRoutedLLM({
@@ -305,7 +306,7 @@ describe("checkpoint writer fork size", () => {
                 expect(writer).toContain(BOUNDARY_LABEL)
                 expect(writer).not.toContain("segment body line")
               }),
-            { git: true, config: { ...config(server.origin, 100_000), checkpoint: { thresholds: ["50%"], fork } } },
+            { git: true, config: { ...config(server.origin, 200_000), checkpoint: { thresholds: ["50%"], fork } } },
           )
         }),
       120_000,
