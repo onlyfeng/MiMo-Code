@@ -42,9 +42,19 @@ const WAKE_POLL_JITTER_MS = 500
 // Wakes belong to this process (its instance id), not to one controller, so
 // every controller in the process shares which woken lanes are running.
 const wakingLanes = new Set<string>()
-// Input messages another process accepted that this process has announced to
-// its own subscribers, per woken lane.
-const announcedInputs = new Map<string, Set<string>>()
+// Input messages whose events this process has published: its own accepts, and
+// input from other processes it announced. Bounded; a re-announce only repeats
+// an idempotent upsert.
+const shownInputs = new Set<string>()
+const SHOWN_INPUTS_LIMIT = 10_000
+function markShown(messageID: string) {
+  shownInputs.add(messageID)
+  if (shownInputs.size <= SHOWN_INPUTS_LIMIT) return
+  for (const oldest of shownInputs) {
+    shownInputs.delete(oldest)
+    if (shownInputs.size <= SHOWN_INPUTS_LIMIT * 0.8) break
+  }
+}
 
 export class ReceiptNotFound extends Error {
   constructor(readonly receiptId: string) {
@@ -325,6 +335,21 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       return toReceipt(row)
     })
 
+    /**
+     * Publish the message events for input another process wrote, once per
+     * process. The accepting process announced them only to its own bus, so
+     * this process's TUI would otherwise answer input it never shows.
+     */
+    const showInputs = (sessionID: SessionID, messageIDs: readonly (MessageID | undefined)[]) => Effect.sync(() => {
+      for (const messageID of messageIDs) {
+        if (!messageID || shownInputs.has(messageID)) continue
+        const message = MessageV2.get({ sessionID, messageID })
+        SyncEvent.announce(MessageV2.Event.Updated, { sessionID, info: message.info })
+        for (const part of message.parts) SyncEvent.announce(MessageV2.Event.PartUpdated, { sessionID, part, time: Date.now() })
+        markShown(messageID)
+      }
+    })
+
     /** Release this process's observeInput waiters on a lane; each re-reads the durable revision. */
     const wakeInputWaiters = (lane: Lane) => Effect.gen(function* () {
       const waiters = inputWaiters.get(waiterKey(lane))
@@ -395,6 +420,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       if (written === undefined) return yield* Effect.interrupt
       const receipt = toReceipt(written.row)
       if (written.kind === "inserted") {
+        // commitUserMessageSync announced this message to this process's bus.
+        markShown(input.message.id)
         // Wake observeInput waiters — any accept advances input_revision.
         yield* wakeInputWaiters(input.lane)
         yield* publish(receipt)
@@ -487,6 +514,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           }
         }))
         if (!batch) return undefined
+        // A running turn may take input another process wrote before any wake poll.
+        yield* showInputs(lane.sessionID, batch.receipts.map((receipt) => receipt.inputMessageID)).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => log.warn("inbox input announce failed", { sessionID: lane.sessionID, cause: Cause.pretty(cause) }))))
         for (const receipt of batch.receipts) yield* publish(receipt)
         return batch
       })
@@ -766,29 +796,14 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     // Input written by another process was announced only there. Tell this
     // process's subscribers, so the window that runs the session shows it.
     const announceRemoteInput = (lane: Lane) => Effect.gen(function* () {
-      const key = waiterKey(lane)
-      const known = announcedInputs.get(key) ?? new Set<string>()
       const rows = yield* Effect.sync(() => Database.use((db) => db.select({ messageID: InboxTable.input_message_id })
         .from(InboxTable).where(and(
           eq(InboxTable.receiver_session_id, lane.sessionID), eq(InboxTable.receiver_actor_id, lane.agentID),
           eq(InboxTable.state, "accepted"),
         )).orderBy(sql`${InboxTable}.rowid`).all()))
-      const current = new Set<string>()
-      const fresh: MessageID[] = []
-      for (const row of rows) {
-        if (!row.messageID) continue
-        current.add(row.messageID)
-        if (!known.has(row.messageID)) fresh.push(row.messageID)
-      }
-      announcedInputs.set(key, current)
+      const fresh = rows.flatMap((row) => row.messageID && !shownInputs.has(row.messageID) ? [row.messageID] : [])
       if (fresh.length === 0) return
-      yield* inSessionInstance(lane.sessionID, Effect.sync(() => {
-        for (const messageID of fresh) {
-          const message = MessageV2.get({ sessionID: lane.sessionID, messageID })
-          SyncEvent.announce(MessageV2.Event.Updated, { sessionID: lane.sessionID, info: message.info })
-          for (const part of message.parts) SyncEvent.announce(MessageV2.Event.PartUpdated, { sessionID: lane.sessionID, part, time: Date.now() })
-        }
-      }))
+      yield* inSessionInstance(lane.sessionID, showInputs(lane.sessionID, fresh))
     })
     // A wake stays until its lane's run settles, so an owner that exits first
     // leaves it for the next owner of the session.
@@ -806,7 +821,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         wakingLanes.add(key)
         const settled = () => {
           wakingLanes.delete(key)
-          announcedInputs.delete(key)
           try {
             Database.use((db) => SessionOwner.clearWake(db, wake))
           } catch (error) {

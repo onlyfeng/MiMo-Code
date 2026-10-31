@@ -16,6 +16,8 @@ import { SessionOwner } from "../../src/session/session-owner"
 import { SessionOwnerTable } from "../../src/session/session-owner.sql"
 import { Database, eq, sql } from "../../src/storage"
 import { Log } from "../../src/util"
+import { GlobalBus } from "../../src/bus/global"
+import { SyncEvent } from "../../src/sync"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { startProcessOwner } from "../lib/process-owner"
@@ -172,6 +174,35 @@ describe("inbox delivery across processes", () => {
     yield* until(() => waiting.pollUnsafe() !== undefined)
     expect(waiting.pollUnsafe()).toBeDefined()
     expect(yield* Fiber.join(waiting)).toBe(before + 1)
+  })), 30_000)
+
+  it.live("input another process wrote is shown here even when a running turn claims it before any wake poll", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    const shown: string[] = []
+    const listener = (event: { payload: { type: string; properties?: { info?: { id?: string } } } }) => {
+      if (event.payload.type === "message.updated" && event.payload.properties?.info?.id) shown.push(event.payload.properties.info.id)
+    }
+    GlobalBus.on("event", listener)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+
+    // Another process accepts input: its message is stored, but only its own bus announced it.
+    const remote = input(session.id)
+    SyncEvent.run(MessageV2.Event.Updated, { sessionID: session.id, info: remote.message }, { publish: false })
+    for (const part of remote.parts) SyncEvent.run(MessageV2.Event.PartUpdated, { sessionID: session.id, part, time: Date.now() }, { publish: false })
+    Database.use((db) => {
+      db.insert(InboxTable).values({
+        id: "receipt_remote", receiver_session_id: session.id, receiver_actor_id: "main", type: "text",
+        input_message_id: remote.message.id, state: "accepted", epoch: 0, created_at: Date.now(), time_updated: Date.now(),
+      }).run()
+    })
+    expect(shown).not.toContain(remote.message.id)
+
+    // The running turn takes it first.
+    const claimed = yield* tq.claimNext({ sessionID: session.id, agentID: "main" }, 1)
+    expect(claimed?.receipts.map((receipt) => receipt.id)).toEqual(["receipt_remote"])
+    expect(shown).toContain(remote.message.id)
   })), 30_000)
 
   itLogged.live("a woken lane runs with the controller's logger, not the default console one", provideTmpdirInstance(() => Effect.gen(function* () {

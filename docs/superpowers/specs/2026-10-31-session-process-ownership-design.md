@@ -129,7 +129,10 @@ Events reach a TUI only from its own process, and the default configuration
 records none in the database. The accepting process writes the input message, so
 only that process's bus announces it. When the owner takes a wake, it reads the
 accepted input messages for that lane and announces each one once with
-`SyncEvent.announce`, which publishes bus events without projecting anything. The
+`SyncEvent.announce`, which publishes bus events without projecting anything. A
+turn that is already running may claim such input before the next poll, so a
+claim also announces any input this process has not shown. Local accepts count
+as shown, because their own commit announced them. The
 receiving window then shows the delivered message before the reply. The woken
 lane runs with the controller's own context, so its Effect logs go to the log
 file. A bare runtime would print them over the TUI. The query joins two small tables and is usually empty.
