@@ -132,6 +132,8 @@ not change their implementation. The preceding review is retained in the
 | FC-017 | History SQLite projection, attachment preview formatting and legacy retry-part reads                      | Upstream history with fork fidelity/budget corrections           | Preserve NUL data, SQL metadata bounds, attachment locators and legacy retry reads       |
 | FC-019 | `quickjs-emscripten-core` dependency patch, `patchedDependencies`, sandbox runtime disposal               | Fork patch of the dependency upstream ships unpatched            | Keep the patch until a release refreshes heap views; re-verify it on any version bump    |
 | FC-020 | Stringified object/array tool arguments: AI SDK tool-call parse and `Tool.define` validation              | Fork hardening of upstream's raw tool-call input                 | Decode only container-typed string failures; persist and execute one input               |
+| FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
+| FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -501,6 +503,8 @@ not change their implementation. The preceding review is retained in the
   [the implementation report](audit-followups-2026-09-15.md).
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
+
+- 2026-10-31 (FC-021): the writer's full receipt-aware history is bounded by the usable window. When the projected view exceeds it, the writer forks the parent's own view; the full view is kept whenever it fits.
 
 - 2026-10-22 synchronization: new rebuild parts carry `placement: "after-tail"`; legacy records retain exact chronological seam reconstruction. Model requests use the boundary digest and unanswered text/media, while the writer and logical turn recover full receipt-aware history. Queued inputs are excluded until delivery or terminal settlement. Task provenance, run approval and fail-closed frozen capture remain unchanged. The appended window and legacy collapse are covered by placement, writer-tail, legacy golden, rebuild-unify and tail-digest tests.
 
@@ -2113,3 +2117,128 @@ logged`, and the peer `success`/`failure` variants of
   the AI SDK parses tool calls, with the same accept-only-when-valid rule, so
   that the persisted input and `execute` agree. The regression cases stay in
   either case.
+
+## FC-021 — the checkpoint writer stops, fits the window, and has a step budget
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer bounds — `prompt.ts`
+  (bounded-agent overflow), `checkpoint.ts` and `prune.ts` (writer view sizing),
+  `agent.ts` (writer step budget)
+- Observable contract, three parts:
+  - Bounded-agent overflow. A bounded computation agent (native and hidden:
+    title, summary, checkpoint-writer) has no compaction or rebuild, so when
+    the provider rejects its request as a context overflow, nothing can shrink
+    the next one. That step is settled with a `ContextOverflowError` and the
+    loop ends, on the fork path and on the regular path alike. The actor
+    therefore fails as `kind: "overflow"`, `retryable: false`, and prune arms
+    no final-threshold recovery gate for it. `halt` in `processor.ts` has
+    already published the provider's error, so nothing is published twice.
+  - Writer view sizing. `prune.fireCheckpoints` passes the usable window and
+    the parent's latest provider-reported usage to `tryStartCheckpointWriter`.
+    The writer still reads the newest rebuild boundary's tail at full fidelity
+    unless `used + est(full view) − est(parent view)` exceeds the usable
+    window. In that case it forks the parent's own view
+    (`collapseCheckpointTail(window)`), whose boundary carries the checkpoint
+    and the tail digest, and the watermark is computed on that view, so a
+    successful writer moves the next rebuild's tail start past the old
+    segments. The estimate is the per-part maximum of chars/4 and bytes/3;
+    only the difference between the two views is estimated, the rest is the
+    provider's number. A writer started by `rebuildEnsuringCheckpoint` passes
+    no context and keeps the full view.
+  - Writer step budget. `checkpoint-writer` declares
+    `steps: CHECKPOINT_WRITER_STEPS` (120). At the budget the last step goes
+    out with `toolChoice: "none"` and the MAX_STEPS reminder, so the writer
+    has to answer in text. Each validator re-prompt (`MAX_PRE_REACT` = 3) is a
+    new prompt with its own budget, which bounds a writer at 480 steps. A user
+    `agent.checkpoint-writer.steps` still overrides it.
+- Motivation: on 2026-10-31 local sessions on a 1M-token model kept failing
+  with `maximum context length is 1048576 tokens; the prompt has 1051956
+  tokens`. The failing requests were the checkpoint writer's. Its first
+  request was 996,878 tokens while the parent's own request at the same moment
+  was 723,407: the writer had re-expanded a rebuild tail that spanned every
+  rebuild since the last good checkpoint (2,576 messages). A step truncated at
+  the window edge left an invalid tool call, every later request was
+  1,051,956 tokens, and the writer re-sent it every six seconds for 4,392
+  steps, until the process exited. Because a failed writer leaves the watermark
+  where it was, each failure made the next writer's view larger: another
+  session's writer started at 2,091,097 tokens. Separately, two writers on a
+  third session never stopped calling tools (alternating `task` list and
+  `read`, saying "Stop." in their reasoning), each step about 925K cached
+  tokens, for about 6,000 steps.
+- Upstream relationship: upstream `7bc7dc3a` has all three gaps. Its bounded
+  agents return `"continue"` on a provider-signalled overflow, its writer
+  always takes the full-fidelity tail (documented as a deliberate quality
+  choice in `llm-request-prefix.ts`), and `checkpoint-writer` declares no
+  `steps`. This is fork hardening of shared code; the full-fidelity default is
+  kept whenever it fits.
+- Watch surfaces: in `packages/cli/src/session/prompt.ts`,
+  `isBoundedComputation`, `writeBoundedOverflowError`, both `result ===
+  "overflow"` sites, and `maxSteps`/`isLastStep`; in
+  `packages/cli/src/session/checkpoint.ts`, the view selection in
+  `tryStartCheckpointWriter`, `TryStartCheckpointWriterInput.context`,
+  `estimateViewTokens`, `withRebuildTail`/`readRebuildTail` and
+  `computeBoundary`; `packages/cli/src/session/tail-digest.ts`
+  (`collapseCheckpointTail`); the writer start in
+  `packages/cli/src/session/prune.ts`; the `checkpoint-writer` definition in
+  `packages/cli/src/agent/agent.ts`; `classifyAssistantError` and
+  `MAX_PRE_REACT` in `packages/cli/src/actor/spawn.ts`; the overflow branch of
+  `halt` in `packages/cli/src/session/processor.ts`; and the parent/writer
+  divergence note in `packages/cli/src/session/llm-request-prefix.ts`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-writer-runaway.test.ts`
+  drives real sessions against a content-routed stub that tells writer
+  requests from foreground ones:
+  - a writer whose request is rejected as an overflow settles as a
+    non-retryable `overflow` failure after exactly one request;
+  - a bounded agent prompted directly (no fork context) stops after one
+    rejected request with `ContextOverflowError`;
+  - with every writer failing, two rebuilds on one stale checkpoint leave a
+    tail larger than the window; the next writer, for `fork: true` and
+    `fork: false`, receives the boundary and none of the tail's file content;
+  - a writer whose model never stops calling tools ends after exactly
+    `CHECKPOINT_WRITER_STEPS` requests, the last with `tool_choice: "none"`.
+
+  The full-tail behavior for a tail that fits stays covered by
+  `checkpoint-writer-rebuild-tail.test.ts`. Mutation-checked: disabling the
+  fork-path overflow branch makes the writer re-send 106 times in 20 seconds;
+  disabling the regular-path branch makes the direct prompt re-send 67 times;
+  disabling the view fallback puts the tail's file content back into both
+  fork modes; removing `steps` lets the writer run past 320 requests. Each
+  fails on its assertion, not on a timeout. The legacy boundary (tail inside
+  the window) goes through the same expression via `collapseCheckpointTail`
+  and has no end-to-end case of its own.
+- Retirement condition: per part — upstream stops a bounded agent on a
+  provider-signalled overflow; upstream bounds the writer's view by the window;
+  upstream gives the writer a step budget. The regression cases stay in every
+  case.
+
+## FC-022 — cloned loggers keep their own tags
+
+- Status: active
+- Canonical owner: fork `main` logger construction in
+  `packages/cli/src/util/log.ts`
+- Observable contract: `Logger.clone()` returns a private logger with a copy of
+  the tags. `tag()` on a clone changes only that clone; the per-service logger
+  `Log.create` hands every other caller is never replaced or mutated by a
+  clone. `Log.create(tags)` itself is unchanged.
+- Motivation: `clone()` called `create({ ...tags })`, and because the tags
+  carry `service`, `create` returned the cached per-service logger. Every
+  `log.clone().tag(...)` therefore mutated one shared object, so concurrent
+  LLM streams and processors wrote each other's `session.id`, `agent` and
+  `messageID`. During the FC-021 incident the logs showed the main session
+  failing with the writer's request body while the database showed those main
+  steps succeeding. `server/proxy.ts` also renamed `Log.Default`'s service to
+  `server-proxy` this way, so every default-logger line in the main process
+  carried that label; after this fix those lines say `service=default`.
+- Upstream relationship: upstream `7bc7dc3a` has the same `clone()`. Fork fix
+  of shared code.
+- Watch surfaces: `create` and `clone` in `packages/cli/src/util/log.ts`, and
+  the clone callers `packages/cli/src/session/llm.ts`,
+  `packages/cli/src/session/processor.ts`, `packages/cli/src/lsp/client.ts` and
+  `packages/cli/src/server/proxy.ts`.
+- Tests/evidence: "cloned loggers keep their own tags" in
+  `packages/cli/test/util/log.test.ts` tags two clones of one service logger,
+  then checks that each line carries its own `session.id` and that the base
+  logger carries none. Restoring `create({ ...tags })` in `clone()` fails it
+  with the other clone's tag on the line.
+- Retirement condition: upstream's `clone()` stops returning the cached
+  per-service logger.
