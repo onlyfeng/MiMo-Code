@@ -334,6 +334,12 @@ export const TuiThreadCommand = cmd({
           if (external) throw new Error(server.error)
           UI.error(`Failed to start model API: ${server.error}`)
         }
+        // --fork continues in a new session, which is claimed when it first runs.
+        if (args.session && !args.fork) {
+          client.call("claimSession", { sessionID: args.session }).catch((error) => {
+            Log.Default.warn("session claim failed", { error: errorMessage(error) })
+          })
+        }
         const transport =
           external && server.ok
             ? { url: server.url, headers: server.headers, fetch: undefined, events: undefined }

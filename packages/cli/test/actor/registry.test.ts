@@ -8,6 +8,8 @@ import { SessionID } from "../../src/session/schema"
 import { Database, eq, and } from "../../src/storage"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
+import { startProcessOwner } from "../lib/process-owner"
+import { ProcessLiveness } from "../../src/session/process-liveness"
 
 void Log.init({ print: false })
 
@@ -905,6 +907,38 @@ describe("ActorRegistry", () => {
   })
 
   describe("zombie sweep on init", () => {
+    test("leaves a quiet actor alone while the process that runs it is alive", async () => {
+      await using tmp = await tmpdir({ git: true })
+      await using owner = await startProcessOwner(ProcessLiveness.directory())
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const rt = ManagedRuntime.make(Layer.mergeAll(Session.defaultLayer))
+          try {
+            const stale = Date.now() - 11 * 60 * 1000
+            const row = (sessionID: SessionID, actorID: string, instanceID: string) => Database.use((db) => db.insert(ActorRegistryTable).values({
+              session_id: sessionID, actor_id: actorID, mode: "subagent", parent_actor_id: null, status: "running",
+              last_outcome: null, result_message_id: null, lifecycle: "ephemeral", agent: "explore", description: "quiet child",
+              context_mode: "none", context_watermark: null, background: true, tools: null, last_turn_time: stale, turn_count: 1,
+              last_activity_time: stale, last_error: null, instance_id: instanceID, time_completed: null, time_created: stale, time_updated: stale,
+            }).run())
+            const live = await rt.runPromise(Session.Service.use((svc) => svc.create()))
+            const gone = await rt.runPromise(Session.Service.use((svc) => svc.create()))
+            row(live.id, "busy-1", owner.instanceID)
+            row(gone.id, "crashed-1", "00000000-0000-4000-8000-000000000000")
+
+            sweepAbandonedZombies()
+            const status = (sessionID: SessionID, actorID: string) => Database.use((db) => db.select({ status: ActorRegistryTable.status })
+              .from(ActorRegistryTable).where(and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID))).get())?.status
+            expect(status(live.id, "busy-1")).toBe("running")
+            expect(status(gone.id, "crashed-1")).toBe("idle")
+          } finally {
+            await rt.dispose()
+          }
+        },
+      })
+    }, 30_000)
+
     test("settles running/pending rows older than the abandon threshold", async () => {
       await using tmp = await tmpdir({ git: true })
       // Create sessions first (FK constraint), then insert zombie/fresh rows

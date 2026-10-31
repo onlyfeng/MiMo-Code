@@ -1,6 +1,6 @@
 import * as Tool from "./tool"
 import { RecoverableError } from "./recoverable"
-import { NotFoundError } from "@/storage"
+import { Database, NotFoundError } from "@/storage"
 import DESCRIPTION from "./actor.txt"
 import DESCRIPTION_CHECKPOINT from "./actor.checkpoint.txt"
 import { withCheckpointDescription, withCheckpointClause } from "./checkpoint-description"
@@ -27,6 +27,7 @@ import { takeUtf8PrefixByBytes, takeUtf8SuffixByBytes } from "@/util/text-trunca
 import { inboxControllerRef } from "@/inbox"
 import { Effect, Deferred } from "effect"
 import { Token } from "../util"
+import { SessionOwner } from "@/session/session-owner"
 
 export interface ActorPromptOps {
   cancel(sessionID: SessionID): void
@@ -35,6 +36,17 @@ export interface ActorPromptOps {
 }
 
 const id = "actor"
+
+/** Where a message to another session will run; it never runs in the sender's process unless that process has it open. */
+function crossSessionDelivery(sessionID: SessionID) {
+  const owner = Database.use((db) => SessionOwner.status(db, sessionID))
+  if (owner.kind === "self") return { delivery: "this_process" as const }
+  if (owner.kind === "other") return { delivery: "queued_for_owner" as const, owner_pid: owner.pid }
+  return {
+    delivery: "receiver_not_open" as const,
+    hint: `Session ${sessionID} is not open in any MiMo window. The message is queued and runs once that session is opened (for example \`mimo -s ${sessionID}\`). Tell the user it needs to be opened.`,
+  }
+}
 
 const actorIdRequiredField = z
   .string()
@@ -415,6 +427,8 @@ export const ActorTool = Tool.define(
             )
           }
           const targetSid = op.to_session_id !== undefined ? SessionID.make(op.to_session_id) : ctx.sessionID
+          // Another session runs in whichever process has it open; never adopt it here.
+          const across = targetSid !== ctx.sessionID
           const sendResult = yield* inboxSvc
             .accept({
               receiverSessionID: targetSid,
@@ -423,6 +437,7 @@ export const ActorTool = Tool.define(
               senderActorID: ctx.extra?.fromExec ? ctx.actorID ?? "main" : ctx.agent ?? "main",
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
+              ...(across ? { adoptReceiver: false } : {}),
             })
             .pipe(
               Effect.catchTag("InboxReceiverNotFound", () =>
@@ -440,9 +455,10 @@ export const ActorTool = Tool.define(
               } as Record<string, any>,
             }
           }
+          const delivery = across ? crossSessionDelivery(targetSid) : undefined
           return {
-            title: `Sent to ${op.to_actor_id}`,
-            output: JSON.stringify(sendResult),
+            title: delivery?.delivery === "receiver_not_open" ? `Queued for ${op.to_actor_id}: session not open` : `Sent to ${op.to_actor_id}`,
+            output: JSON.stringify({ ...sendResult, ...delivery }),
             metadata: {
               inboxID: sendResult.inboxID,
               inputMessageID: sendResult.inputMessageID,

@@ -14,6 +14,9 @@ import { SessionCheckpoint } from "@/session/checkpoint"
 import { ensureProcessMetadata } from "@/util/mimo-process"
 import { serverAuthHeader } from "@/server/auth"
 import { createWorkerListener, type WorkerListenerInput } from "./worker-listener"
+import { Database } from "@/storage"
+import { SessionOwner } from "@/session/session-owner"
+import { SessionID } from "@/session/schema"
 
 import { ModelsDev } from "@/provider/models"
 import { watchModelsCatalogReload } from "@/provider/models-catalog-reload"
@@ -95,6 +98,13 @@ export const rpc = {
         await upgrade().catch(() => {})
       },
     })
+  },
+  // A window opened on a session runs it when no other live process does, so
+  // input queued for that session starts without waiting for a keystroke.
+  async claimSession(input: { sessionID: string }) {
+    const owner = Database.use((db) => SessionOwner.claim(db, SessionID.make(input.sessionID)))
+    if (owner.kind === "other") Log.Default.info("session is open in another process", { sessionID: input.sessionID, pid: owner.pid })
+    return owner
   },
   async reload() {
     await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.invalidate(true)))

@@ -203,7 +203,7 @@ export const layer = Layer.effect(
 
     const ownership = Effect.fn("SessionRunState.ownership")(function* (sessionID: SessionID) {
       const identity = yield* ExecutionOwnership.captureIdentity
-      const check = Effect.sync(() => Database.use((db) => ExecutionOwnership.assertOwnership(db, sessionID, identity)))
+      const check = Effect.sync(() => Database.use((db) => ExecutionOwnership.claimExecution(db, sessionID, identity)))
       yield* check
       return check
     })

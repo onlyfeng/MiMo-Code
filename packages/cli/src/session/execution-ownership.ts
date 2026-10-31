@@ -4,6 +4,7 @@ import type { WorkspaceID } from "@/control-plane/schema"
 import { Database, eq } from "@/storage"
 import type { SessionID } from "./schema"
 import { SessionTable } from "./session.sql"
+import { SessionOwner } from "./session-owner"
 
 export interface Identity {
   readonly directory: string
@@ -14,6 +15,15 @@ export class OwnershipError extends Error {
   constructor(readonly sessionID: SessionID, readonly identity: Identity) {
     super(`Session execution is not owned by the current instance: ${sessionID}`)
     this.name = "OwnershipError"
+  }
+}
+
+/** The session is running in another live process that shares this database. */
+export class OwnedElsewhereError extends OwnershipError {
+  constructor(sessionID: SessionID, identity: Identity, readonly pid: number) {
+    super(sessionID, identity)
+    this.name = "OwnedElsewhereError"
+    this.message = `Session ${sessionID} is open in another MiMo process (pid ${pid}). Continue it in that window, or close that window first.`
   }
 }
 
@@ -34,6 +44,18 @@ export function isOwned(db: Database.TxOrDb, sessionID: SessionID, identity: Ide
 
 export function assertOwnership(db: Database.TxOrDb, sessionID: SessionID, identity: Identity): void {
   if (!isOwned(db, sessionID, identity)) throw new OwnershipError(sessionID, identity)
+}
+
+/** Fail unless this process may run the session; adopts it when no live process owns it. */
+export function claimProcess(db: Database.TxOrDb, sessionID: SessionID, identity: Identity): void {
+  const owner = SessionOwner.claim(db, sessionID)
+  if (owner.kind === "other") throw new OwnedElsewhereError(sessionID, identity, owner.pid)
+}
+
+/** Instance ownership plus process ownership: everything a run needs before it may start. */
+export function claimExecution(db: Database.TxOrDb, sessionID: SessionID, identity: Identity): void {
+  assertOwnership(db, sessionID, identity)
+  claimProcess(db, sessionID, identity)
 }
 
 export * as ExecutionOwnership from "./execution-ownership"
