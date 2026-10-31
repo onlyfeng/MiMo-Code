@@ -46,23 +46,50 @@ function busy(error: unknown) {
     /database (table )?is locked/i.test(error.message)
 }
 
+const COORDINATION = "coordination.db"
+
+/**
+ * Run `fn` holding the directory's coordination lock. Publishing and locking a
+ * new lock file happens under it, and so does deleting one that looked
+ * unlocked, so a starting process's file is never mistaken for a dead one.
+ */
+export function withCoordination<T>(dir: string, fn: () => T): T {
+  mkdirSync(dir, { recursive: true })
+  const client = init(path.join(dir, COORDINATION)).$client
+  try {
+    client.exec("PRAGMA busy_timeout = 5000")
+    client.exec("CREATE TABLE IF NOT EXISTS coordination (id INTEGER PRIMARY KEY)")
+    client.exec("BEGIN EXCLUSIVE")
+    try {
+      return fn()
+    } finally {
+      client.exec("ROLLBACK")
+    }
+  } finally {
+    client.close()
+  }
+}
+
 /** Take this process's liveness lock. Idempotent; call before writing INSTANCE_ID anywhere others read it. */
 export function ensureHeld(dir = directory()): void {
   if (held) return
-  mkdirSync(dir, { recursive: true })
-  const client = init(lockFile(dir, INSTANCE_ID)).$client
-  try {
-    client.exec("PRAGMA busy_timeout = 0")
-    client.exec("PRAGMA journal_mode = DELETE")
-    // After its first write the connection keeps the exclusive lock until it closes.
-    client.exec("PRAGMA locking_mode = EXCLUSIVE")
-    client.exec("CREATE TABLE IF NOT EXISTS instance (pid INTEGER NOT NULL)")
-    client.exec("DELETE FROM instance")
-    client.exec(`INSERT INTO instance (pid) VALUES (${process.pid})`)
-  } catch (error) {
-    client.close()
-    throw error
-  }
+  const client = withCoordination(dir, () => {
+    const client = init(lockFile(dir, INSTANCE_ID)).$client
+    try {
+      // A first probe from another process may hold the new file for an instant.
+      client.exec("PRAGMA busy_timeout = 2000")
+      client.exec("PRAGMA journal_mode = DELETE")
+      // After its first write the connection keeps the exclusive lock until it closes.
+      client.exec("PRAGMA locking_mode = EXCLUSIVE")
+      client.exec("CREATE TABLE IF NOT EXISTS instance (pid INTEGER NOT NULL)")
+      client.exec("DELETE FROM instance")
+      client.exec(`INSERT INTO instance (pid) VALUES (${process.pid})`)
+    } catch (error) {
+      client.close()
+      throw error
+    }
+    return client
+  })
   held = { directory: dir, client }
   sweep(dir)
 }
@@ -72,7 +99,27 @@ export function isAlive(instanceID: string, dir = directory()): boolean {
   if (instanceID === INSTANCE_ID) return true
   if (!ID.test(instanceID)) return false
   const file = lockFile(dir, instanceID)
-  if (!existsSync(file)) return false
+  const first = probe(file)
+  if (first !== "free") return first === "held"
+  // Free outside the coordination lock may mean "still starting": look again
+  // under it, after any starter has locked its file.
+  try {
+    return withCoordination(dir, () => {
+      const again = probe(file)
+      // The id is random per process and never reused, so no live process can
+      // still want this file once its lock is free here.
+      if (again === "free") remove(file)
+      return again === "held"
+    })
+  } catch (error) {
+    // Never declare a process dead on doubt.
+    if (busy(error)) return true
+    throw error
+  }
+}
+
+function probe(file: string): "held" | "free" | "missing" {
+  if (!existsSync(file)) return "missing"
   let client: Client | undefined
   try {
     client = init(file).$client
@@ -80,16 +127,11 @@ export function isAlive(instanceID: string, dir = directory()): boolean {
     client.exec("BEGIN EXCLUSIVE")
     client.exec("ROLLBACK")
   } catch (error) {
-    if (busy(error)) {
-      client?.close()
-      return true
-    }
+    if (busy(error)) return "held"
+  } finally {
+    client?.close()
   }
-  client?.close()
-  // The id is random per process and never reused, so no live process can
-  // still want this file once its lock was free.
-  remove(file)
-  return false
+  return "free"
 }
 
 /** Remove lock files left by processes that are gone. */

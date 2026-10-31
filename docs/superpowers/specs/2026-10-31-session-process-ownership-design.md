@@ -62,6 +62,13 @@ There is no heartbeat and no expiry. The same primitive works under Bun
 connection must stay strongly referenced, because Bun closes an unreachable
 database when it is garbage-collected, and closing it would drop the lock.
 
+A starting process creates and locks its file while holding the directory's
+coordination lock (`coordination.db`, taken with `BEGIN EXCLUSIVE`). A prober
+that finds a file free looks again under the same lock before it deletes the
+file. Without this, a prober could see a starting process's file in the instant
+between its creation and its lock, delete it, and leave that process holding a
+lock on a file nobody can find.
+
 A process takes its lock before it writes its instance id anywhere other
 processes read: on its first session claim, and when the actor registry layer is
 built. A prober never sees a referenced but not-yet-locked id.
@@ -107,8 +114,12 @@ and workflow messages. A cross-session `actor send` passes false, so the sender'
 process never adopts a session that nobody has open.
 
 Each process's inbox controller polls about once a second (1–1.5 s, jittered) for
-wakes on sessions it owns. It removes them and kicks the lane inside the
-session's own instance. The query joins two small tables and is usually empty.
+wakes on sessions it owns. It kicks each lane inside the session's own instance
+and clears the wake only after that run settles, unless another process rang it
+again in the meantime. If the owner exits mid-run, the wake survives for the next
+owner. Each wake also releases the owner's `observeInput` waiters, so input from
+another process reaches an actor wait or a retry backoff the way local input
+does. The query joins two small tables and is usually empty.
 
 The `actor send` result for another session says where the message will run:
 

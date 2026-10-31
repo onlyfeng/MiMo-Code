@@ -1,4 +1,4 @@
-import { and, Database, eq } from "@/storage"
+import { and, Database, eq, lte } from "@/storage"
 import { InboxWakeTable } from "@/inbox/inbox.sql"
 import type { Lane } from "@/inbox/schema"
 import { ProcessLiveness } from "./process-liveness"
@@ -59,20 +59,27 @@ export function claim(db: Database.TxOrDb, sessionID: SessionID): Status {
 
 /** Record that `lane` has input this process accepted but will not run. */
 export function ringWake(db: Database.TxOrDb, lane: Lane): void {
-  db.insert(InboxWakeTable).values({ session_id: lane.sessionID, agent_id: lane.agentID, time_created: Date.now() })
-    .onConflictDoNothing().run()
+  const now = Date.now()
+  db.insert(InboxWakeTable).values({ session_id: lane.sessionID, agent_id: lane.agentID, time_created: now })
+    .onConflictDoUpdate({ target: [InboxWakeTable.session_id, InboxWakeTable.agent_id], set: { time_created: now } }).run()
 }
 
-/** Remove and return the wakes for sessions this process owns. */
-export function takeWakes(db: Database.TxOrDb): Lane[] {
-  const rows = db.select({ sessionID: InboxWakeTable.session_id, agentID: InboxWakeTable.agent_id }).from(InboxWakeTable)
+export type Wake = Lane & { readonly time: number }
+
+/** The wakes for sessions this process owns. They stay until `clearWake`. */
+export function listWakes(db: Database.TxOrDb): Wake[] {
+  return db.select({ sessionID: InboxWakeTable.session_id, agentID: InboxWakeTable.agent_id, time: InboxWakeTable.time_created })
+    .from(InboxWakeTable)
     .innerJoin(SessionOwnerTable, eq(SessionOwnerTable.session_id, InboxWakeTable.session_id))
     .where(eq(SessionOwnerTable.instance_id, ProcessLiveness.INSTANCE_ID)).all()
-  for (const row of rows) {
-    db.delete(InboxWakeTable)
-      .where(and(eq(InboxWakeTable.session_id, row.sessionID), eq(InboxWakeTable.agent_id, row.agentID))).run()
-  }
-  return rows
+}
+
+/** Remove a handled wake unless another process rang it again since. */
+export function clearWake(db: Database.TxOrDb, wake: Wake): void {
+  db.delete(InboxWakeTable).where(and(
+    eq(InboxWakeTable.session_id, wake.sessionID), eq(InboxWakeTable.agent_id, wake.agentID),
+    lte(InboxWakeTable.time_created, wake.time),
+  )).run()
 }
 
 export * as SessionOwner from "./session-owner"

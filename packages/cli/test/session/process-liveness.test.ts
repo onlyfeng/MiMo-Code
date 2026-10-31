@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { ProcessLiveness } from "../../src/session/process-liveness"
@@ -22,6 +22,25 @@ describe("process liveness", () => {
     await owner.kill()
     expect(ProcessLiveness.isAlive(owner.instanceID, locks.directory)).toBe(false)
     expect(existsSync(path.join(locks.directory, `${owner.instanceID}.lock`))).toBe(false)
+  }, 30_000)
+
+  test("a lock file published but not yet locked is not swept away from its starting process", async () => {
+    using locks = lockDirectory()
+    const marker = path.join(locks.directory, "initializing")
+    const child = Bun.spawn([process.execPath, "run", path.join(import.meta.dir, "../fixture/process-liveness-initializer.ts"), locks.directory, marker], {
+      env: { ...process.env }, stdout: "ignore", stderr: "inherit",
+    })
+    try {
+      for (let waited = 0; !existsSync(marker) && waited < 10_000; waited += 20) await Bun.sleep(20)
+      const instanceID = readFileSync(marker, "utf8")
+      // The file is there but unlocked; the probe must wait for the starter, not delete its file.
+      expect(ProcessLiveness.isAlive(instanceID, locks.directory)).toBe(true)
+      expect(existsSync(path.join(locks.directory, `${instanceID}.lock`))).toBe(true)
+      expect(ProcessLiveness.isAlive(instanceID, locks.directory)).toBe(true)
+    } finally {
+      child.kill("SIGKILL")
+      await child.exited
+    }
   }, 30_000)
 
   test("an instance without a lock file, a malformed id, or an unlocked file is not alive", () => {

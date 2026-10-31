@@ -317,15 +317,33 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       return toReceipt(row)
     })
 
+    /** Release this process's observeInput waiters on a lane; each re-reads the durable revision. */
+    const wakeInputWaiters = (lane: Lane) => Effect.gen(function* () {
+      const waiters = inputWaiters.get(waiterKey(lane))
+      if (!waiters) return
+      const rev = Database.use((db) =>
+        db.select().from(InboxLaneStateTable)
+          .where(and(eq(InboxLaneStateTable.session_id, lane.sessionID), eq(InboxLaneStateTable.agent_id, lane.agentID)))
+          .get(),
+      )?.input_revision ?? 0
+      for (const d of [...waiters]) {
+        waiters.delete(d)
+        const done = yield* Deferred.isDone(d)
+        if (done) continue
+        Deferred.doneUnsafe(d, Effect.succeed(rev))
+      }
+      if (waiters.size === 0) inputWaiters.delete(waiterKey(lane))
+    })
+
     /**
      * Fire-and-forget schedule: Controller owns receipts; kick only starts a lease when idle.
      * Only the process that owns the receiver session runs it. Any other process
      * leaves a wake for the owner; `adopt` lets this process take an unowned session.
      */
-    const maybeKick = (lane: Lane, adopt = true) =>
+    const maybeKick = (lane: Lane, adopt = true, onSettled?: () => void) =>
       Effect.gen(function* () {
         const sched = schedulerRef.current
-        if (sched && stopping.has(lane.sessionID)) return
+        if (sched && stopping.has(lane.sessionID)) return false
         const runsHere = yield* Effect.sync(() => Database.use((db) => {
           const owner = adopt && sched ? SessionOwner.claim(db, lane.sessionID) : SessionOwner.status(db, lane.sessionID)
           if (owner.kind === "self") return true
@@ -334,7 +352,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           if (owner.kind === "other" || !adopt) SessionOwner.ringWake(db, lane)
           return false
         }))
-        if (!runsHere || !sched) return
+        if (!runsHere || !sched) return false
         const bridge = yield* EffectBridge.make()
         const directory = yield* InstanceState.directory
         const guard = sched.guard ? yield* sched.guard(lane) : undefined
@@ -343,10 +361,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           (owner) => Effect.sync(() => {
             const work = bridge.promise(sched.kick(lane, guard))
             owner.transferred = true
-            void work.then(owner.release, owner.release)
+            const settle = () => {
+              owner.release()
+              onSettled?.()
+            }
+            void work.then(settle, settle)
           }),
           (owner) => owner.transferred ? Effect.void : Effect.sync(owner.release),
         ).pipe(Effect.uninterruptible)
+        return true
       })
 
     const accept = Effect.fn("Inbox.accept")(function* (input: AcceptInput, guard?: AdmissionGuard) {
@@ -365,21 +388,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       const receipt = toReceipt(written.row)
       if (written.kind === "inserted") {
         // Wake observeInput waiters — any accept advances input_revision.
-        const waiters = inputWaiters.get(waiterKey(input.lane))
-        if (waiters) {
-          const rev = Database.use((db) =>
-            db.select().from(InboxLaneStateTable)
-              .where(and(eq(InboxLaneStateTable.session_id, input.lane.sessionID), eq(InboxLaneStateTable.agent_id, input.lane.agentID)))
-              .get(),
-          )?.input_revision ?? 0
-          for (const d of [...waiters]) {
-            waiters.delete(d)
-            const done = yield* Deferred.isDone(d)
-            if (done) continue
-            Deferred.doneUnsafe(d, Effect.succeed(rev))
-          }
-          if (waiters.size === 0) inputWaiters.delete(waiterKey(input.lane))
-        }
+        yield* wakeInputWaiters(input.lane)
         yield* publish(receipt)
         if (!guard?.deferKick && !input.legacyInboxID) yield* maybeKick(input.lane, input.adoptReceiver)
       } else if (!guard && !input.legacyInboxID && (receipt.state === "accepted" || receipt.state === "claimed")) {
@@ -728,26 +737,46 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     }
     // Start lanes that other processes woke for sessions this process owns.
     // The lane runs in its session's own instance, as an accept there would.
-    const inSessionInstance = (sessionID: SessionID, effect: Effect.Effect<void>) => Effect.gen(function* () {
+    const inSessionInstance = <A>(sessionID: SessionID, effect: Effect.Effect<A>) => Effect.gen(function* () {
       const row = yield* Effect.sync(() => Database.use((db) => db.select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
         .from(SessionTable).where(eq(SessionTable.id, sessionID)).get()))
-      if (!row) return
+      if (!row) return undefined
       const workspace = row.workspaceID ?? undefined
       const instance = yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
         Instance.provide({ directory: row.directory, fn: () => Instance.current }),
       }))
-      yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
+      return yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
         Instance.restore(instance, () => Effect.runPromise(effect.pipe(
           Effect.provideService(InstanceRef, instance), Effect.provideService(WorkspaceRef, workspace),
         ))),
       }))
     })
+    // A wake stays until its lane's run settles, so an owner that exits first
+    // leaves it for the next owner of the session.
+    const waking = new Set<string>()
     const startWoken = Effect.gen(function* () {
       if (!schedulerRef.current) return
-      const lanes = yield* Effect.sync(() => Database.use((db) => SessionOwner.takeWakes(db)))
-      for (const lane of lanes) {
-        yield* inSessionInstance(lane.sessionID, maybeKick(lane)).pipe(Effect.catchCause((cause) =>
-          Effect.sync(() => log.warn("inbox wake failed", { sessionID: lane.sessionID, agentID: lane.agentID, cause: Cause.pretty(cause) }))))
+      const wakes = yield* Effect.sync(() => Database.use((db) => SessionOwner.listWakes(db)))
+      for (const wake of wakes) {
+        // Remote input must reach a turn already waiting on this lane, as local input would.
+        yield* wakeInputWaiters(wake)
+        const key = waiterKey(wake)
+        if (waking.has(key)) continue
+        waking.add(key)
+        const settled = () => {
+          waking.delete(key)
+          try {
+            Database.use((db) => SessionOwner.clearWake(db, wake))
+          } catch (error) {
+            log.warn("inbox wake clear failed", { sessionID: wake.sessionID, agentID: wake.agentID, error: String(error) })
+          }
+        }
+        const kicked = yield* inSessionInstance(wake.sessionID, maybeKick(wake, true, settled)).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            log.warn("inbox wake failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) })
+            return false
+          })))
+        if (!kicked) waking.delete(key)
       }
     })
     yield* Effect.gen(function* () {

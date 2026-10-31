@@ -2697,7 +2697,10 @@ files remain byte-identical to the accepted main correction.
     cannot be taken; a probe that takes it deletes the file. No heartbeat or
     expiry: a paused, sleeping or busy process stays alive, a killed one is
     dead at once. The connection is held strongly, because Bun closes an
-    unreachable database on collection.
+    unreachable database on collection. Publishing and locking a new lock
+    file, and deleting one that probed free, both run under the directory's
+    coordination lock (`coordination.db`); a probe that finds a file free looks
+    again under it, so a starting process's file is never deleted.
   - Ownership (`session_owner`): every `SessionRunState` entry (through
     `claimExecution`, after instance ownership) and `preparePrompt` (before it
     writes) claim the session for the current process. Another live owner
@@ -2707,9 +2710,13 @@ files remain byte-identical to the accepted main correction.
   - Delivery: inbox accepts stay durable everywhere; only the owner kicks the
     lane. When ownership stops a process (another live owner, or input that
     may not adopt an unowned receiver) it writes an `inbox_wake` row. Each
-    controller takes the wakes for its own sessions every 1–1.5 s and kicks the
-    lane in the session's own instance. An adoptable lane in a process without
-    a scheduler waits for its next run, as before.
+    controller looks at the wakes for its own sessions every 1–1.5 s, kicks the
+    lane in the session's own instance, and clears the wake only after that
+    run settles (unless it was rung again since), so an owner that exits first
+    leaves it for the next owner. A wake also releases the owner's
+    `observeInput` waiters, so remote input reaches an actor wait or retry
+    backoff as local input does. An adoptable lane in a process without a
+    scheduler waits for its next run, as before.
   - `actor send` to another session passes `adoptReceiver: false` and reports
     `delivery`: `this_process`, `queued_for_owner` with `owner_pid`, or
     `receiver_not_open` with a hint naming `mimo -s <id>`. Same-session sends

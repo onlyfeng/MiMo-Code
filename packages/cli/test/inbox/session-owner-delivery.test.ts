@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Fiber, Layer } from "effect"
 import { Bus } from "../../src/bus"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { InboxController } from "../../src/inbox"
-import { InboxWakeTable } from "../../src/inbox/inbox.sql"
+import { InboxLaneStateTable, InboxWakeTable } from "../../src/inbox/inbox.sql"
 import { schedulerRef } from "../../src/inbox/scheduler"
 import type { Lane } from "../../src/inbox/schema"
 import { Instance } from "../../src/project/instance"
@@ -14,7 +14,7 @@ import { ProcessLiveness } from "../../src/session/process-liveness"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionOwner } from "../../src/session/session-owner"
 import { SessionOwnerTable } from "../../src/session/session-owner.sql"
-import { Database, eq } from "../../src/storage"
+import { Database, eq, sql } from "../../src/storage"
 import { Log } from "../../src/util"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -83,6 +83,56 @@ describe("inbox delivery across processes", () => {
     expect(kicked(session.id)).toBe(0)
     expect(owner(session.id)?.instance_id).toBe(other.instanceID)
     expect(wakes(session.id)).toHaveLength(1)
+  })), 30_000)
+
+  // What another process leaves behind when it accepts input for a session this process owns.
+  const remoteAccept = (sessionID: SessionID) => Database.use((db) => {
+    db.insert(InboxLaneStateTable).values({ session_id: sessionID, agent_id: "main", input_revision: 1, time_updated: Date.now() })
+      .onConflictDoUpdate({ target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id], set: { input_revision: sql`${InboxLaneStateTable.input_revision} + 1` } }).run()
+    SessionOwner.ringWake(db, { sessionID, agentID: "main" })
+  })
+  const until = (check: () => boolean) => Effect.gen(function* () {
+    for (let waited = 0; !check() && waited < 5_000; waited += 50) yield* Effect.sleep(50)
+  })
+
+  it.live("a wake stays until its lane has run, so an owner that dies first leaves it for the next one", provideTmpdirInstance(() => Effect.gen(function* () {
+    const session = yield* (yield* Session.Service).create({})
+    const release = yield* Deferred.make<void>()
+    kick.mockImplementation(() => Deferred.await(release))
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    remoteAccept(session.id)
+
+    yield* until(() => kicked(session.id) > 0)
+    expect(kicked(session.id)).toBe(1)
+    // The lane is still running: the wake survives, and the poller does not kick again.
+    yield* Effect.sleep(2_000)
+    expect(wakes(session.id)).toHaveLength(1)
+    expect(kicked(session.id)).toBe(1)
+
+    yield* Deferred.succeed(release, undefined)
+    yield* until(() => wakes(session.id).length === 0)
+    expect(wakes(session.id)).toHaveLength(0)
+  })), 30_000)
+
+  it.live("input another process accepted wakes this process's input waiters", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    const release = yield* Deferred.make<void>()
+    // The lane is busy, as in an actor wait; only the waiter can see the new input.
+    kick.mockImplementation(() => Deferred.await(release))
+    yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    const lane = { sessionID: session.id, agentID: "main" }
+    const before = yield* tq.observeInput(lane, -1)
+    const waiting = yield* tq.observeInput(lane, before).pipe(Effect.forkChild)
+    // Let the waiter subscribe first; a poll with nothing new must not release it.
+    yield* Effect.sleep(2_000)
+    expect(waiting.pollUnsafe()).toBeUndefined()
+
+    remoteAccept(session.id)
+    yield* until(() => waiting.pollUnsafe() !== undefined)
+    expect(waiting.pollUnsafe()).toBeDefined()
+    expect(yield* Fiber.join(waiting)).toBe(before + 1)
   })), 30_000)
 
   it.live("without a lane scheduler an adoptable input leaves neither an owner nor a wake", provideTmpdirInstance(() => Effect.gen(function* () {
