@@ -37,6 +37,9 @@ const log = Log.create({ service: "inbox" })
 /** How often a process looks for input that other processes accepted for sessions it runs. */
 const WAKE_POLL_MS = 1_000
 const WAKE_POLL_JITTER_MS = 500
+// Wakes belong to this process (its instance id), not to one controller, so
+// every controller in the process shares which woken lanes are running.
+const wakingLanes = new Set<string>()
 
 export class ReceiptNotFound extends Error {
   constructor(readonly receiptId: string) {
@@ -753,7 +756,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     })
     // A wake stays until its lane's run settles, so an owner that exits first
     // leaves it for the next owner of the session.
-    const waking = new Set<string>()
     const startWoken = Effect.gen(function* () {
       if (!schedulerRef.current) return
       const wakes = yield* Effect.sync(() => Database.use((db) => SessionOwner.listWakes(db)))
@@ -761,10 +763,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         // Remote input must reach a turn already waiting on this lane, as local input would.
         yield* wakeInputWaiters(wake)
         const key = waiterKey(wake)
-        if (waking.has(key)) continue
-        waking.add(key)
+        if (wakingLanes.has(key)) continue
+        wakingLanes.add(key)
         const settled = () => {
-          waking.delete(key)
+          wakingLanes.delete(key)
           try {
             Database.use((db) => SessionOwner.clearWake(db, wake))
           } catch (error) {
@@ -776,7 +778,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             log.warn("inbox wake failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) })
             return false
           })))
-        if (!kicked) waking.delete(key)
+        if (!kicked) wakingLanes.delete(key)
       }
     })
     yield* Effect.gen(function* () {
