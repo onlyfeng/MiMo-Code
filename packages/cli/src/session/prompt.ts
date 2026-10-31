@@ -5494,6 +5494,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           })
         })
 
+        // Bounded computation agents are exempt from context management (no
+        // compaction, no checkpoint rebuild), so nothing can shrink a request the
+        // provider rejected as too large: re-sending it fails identically on every
+        // step. Settle the step on the overflow so the loop stops and the caller
+        // sees a deterministic failure. halt (processor.ts) already published the
+        // provider's error, so this only persists one.
+        const writeBoundedOverflowError = Effect.fn("SessionPrompt.writeBoundedOverflowError")(function* (input: {
+          assistant: MessageV2.Assistant
+          agent: string
+        }) {
+          if (input.assistant.error) return
+          input.assistant.error = new MessageV2.ContextOverflowError({
+            message: `The request exceeds the model's context window, and the ${input.agent} agent has no context management that could shrink it.`,
+          }).toObject()
+          yield* sessions.updateMessage(input.assistant)
+        })
+
         // Partial completion notifications must not renew the remaining children's wait window.
         let subagentWait: { deadline: number; inputRevision: number } | undefined
         let subagentWaitUser: MessageV2.User | undefined
@@ -6629,6 +6646,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     return "break" as const
                   }
 
+                  if (isBoundedComputation && result === "overflow") {
+                    yield* writeBoundedOverflowError({ assistant: handle.message, agent: lastUser.agent })
+                    return "break" as const
+                  }
+
                   const forkClassification = classifyAssistantStep({
                     phase: "after-process",
                     lastUser,
@@ -7041,6 +7063,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   handle.message.structured = structured
                   handle.message.finish = handle.message.finish ?? "stop"
                   yield* sessions.updateMessage(handle.message)
+                  return "break" as const
+                }
+
+                if (isBoundedComputation && result === "overflow") {
+                  yield* writeBoundedOverflowError({ assistant: handle.message, agent: lastUser.agent })
                   return "break" as const
                 }
 
