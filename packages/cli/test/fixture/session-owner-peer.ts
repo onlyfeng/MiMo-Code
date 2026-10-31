@@ -4,6 +4,7 @@
 // - sender: messages that session from its own session with `actor send`.
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { Bus } from "../../src/bus"
+import { GlobalBus } from "../../src/bus/global"
 import { Instance } from "../../src/project/instance"
 import { initProjectors } from "../../src/server/projectors"
 import { Session } from "../../src/session"
@@ -36,6 +37,12 @@ try {
     const bus = yield* Bus.Service
     const sessions = yield* Session.Service
     const busy = new Set<string>()
+    // What this process's TUI would be told about messages, in order.
+    const shown: string[] = []
+    GlobalBus.on("event", (event: { payload: { type: string; properties?: { info?: { role?: string; provenance?: { source?: string } } } } }) => {
+      const info = event.payload.type === "message.updated" ? event.payload.properties?.info : undefined
+      if (info) shown.push(`${info.role}:${info.provenance?.source ?? "local"}`)
+    })
     yield* bus.subscribeCallback(SessionStatus.Event.Status, (event) => {
       if (event.properties.status.type === "busy") busy.add(event.properties.sessionID)
     })
@@ -52,7 +59,7 @@ try {
           message.parts.some((part) => part.type === "text" && part.text === "task done"))) break
         yield* Effect.sleep(100)
       }
-      yield* Effect.promise(() => send({ kind: "ran", pid: process.pid, busy: [...busy] }))
+      yield* Effect.promise(() => send({ kind: "ran", pid: process.pid, busy: [...busy], shown }))
     } else {
       const coordinator = yield* sessions.create({ title: "coordinator" })
       const def = yield* (yield* ActorTool).init()

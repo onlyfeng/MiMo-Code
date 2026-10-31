@@ -123,7 +123,16 @@ reconcile then and cancel the woken run's claimed receipts as crashed work. Only
 the process's current controller takes wakes, matching the current lane
 scheduler. Each wake also releases the owner's `observeInput` waiters, so input
 from another process reaches an actor wait or a retry backoff the way local
-input does. The query joins two small tables and is usually empty.
+input does.
+
+Events reach a TUI only from its own process, and the default configuration
+records none in the database. The accepting process writes the input message, so
+only that process's bus announces it. When the owner takes a wake, it reads the
+accepted input messages for that lane and announces each one once with
+`SyncEvent.announce`, which publishes bus events without projecting anything. The
+receiving window then shows the delivered message before the reply. The woken
+lane runs with the controller's own context, so its Effect logs go to the log
+file. A bare runtime would print them over the TUI. The query joins two small tables and is usually empty.
 
 The `actor send` result for another session says where the message will run:
 

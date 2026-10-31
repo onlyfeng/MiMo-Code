@@ -256,6 +256,20 @@ export function run<Def extends Definition>(def: Def, data: Event<Def>["data"], 
   )
 }
 
+/**
+ * Publish an event whose state another process already wrote, so this
+ * process's subscribers (its TUI among them) see it. Nothing is projected or
+ * recorded; needs the aggregate's instance context, like a normal publish.
+ */
+export function announce<Def extends Definition>(def: Def, data: Event<Def>["data"]) {
+  const result = convertEvent(def.type, data)
+  if (result instanceof Promise) {
+    void result.then((converted) => ProjectBus.publish({ type: def.type, properties: def.schema }, converted))
+    return
+  }
+  void ProjectBus.publish({ type: def.type, properties: def.schema }, result)
+}
+
 export function remove(aggregateID: string) {
   Database.transaction((tx) => {
     tx.delete(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).run()

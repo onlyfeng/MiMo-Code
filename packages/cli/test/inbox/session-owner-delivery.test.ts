@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock } from "bun:test"
-import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect"
+import { Deferred, Effect, Fiber, Layer, Logger, ManagedRuntime } from "effect"
 import { Bus } from "../../src/bus"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { InboxController } from "../../src/inbox"
@@ -34,6 +34,13 @@ afterEach(async () => {
 })
 
 const it = testEffect(Layer.mergeAll(Session.defaultLayer, CrossSpawnSpawner.defaultLayer, Bus.layer, InboxController.defaultLayer))
+
+// The application routes Effect logs to its log file; a woken lane must keep that
+// logger, or its logs land on the terminal under the TUI.
+const logged: string[] = []
+const capture = Logger.layer([Logger.make((options) => { logged.push(String(options.message)) })], { mergeWithExisting: false })
+const itLogged = testEffect(Layer.mergeAll(Session.defaultLayer, CrossSpawnSpawner.defaultLayer, Bus.layer, InboxController.defaultLayer)
+  .pipe(Layer.provideMerge(capture)))
 
 // A controller built earlier in this process and never disposed, like the global
 // AppRuntime one other test files start. Wakes must still go to the current one.
@@ -165,6 +172,16 @@ describe("inbox delivery across processes", () => {
     yield* until(() => waiting.pollUnsafe() !== undefined)
     expect(waiting.pollUnsafe()).toBeDefined()
     expect(yield* Fiber.join(waiting)).toBe(before + 1)
+  })), 30_000)
+
+  itLogged.live("a woken lane runs with the controller's logger, not the default console one", provideTmpdirInstance(() => Effect.gen(function* () {
+    const session = yield* (yield* Session.Service).create({})
+    kick.mockImplementation(() => Effect.logInfo("woken lane log"))
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    remoteAccept(session.id)
+    yield* until(() => kicked(session.id) > 0 && wakes(session.id).length === 0)
+    expect(kicked(session.id)).toBeGreaterThan(0)
+    expect(logged.some((line) => line.includes("woken lane log"))).toBe(true)
   })), 30_000)
 
   it.live("without a lane scheduler an adoptable input leaves neither an owner nor a wake", provideTmpdirInstance(() => Effect.gen(function* () {

@@ -24,6 +24,7 @@ const report = z.object({
   sessionID: z.string().optional(),
   busy: z.array(z.string()).optional(),
   output: z.record(z.string(), z.unknown()).optional(),
+  shown: z.array(z.string()).optional(),
   message: z.string().optional(),
 })
 type Report = z.infer<typeof report>
@@ -75,6 +76,10 @@ describe("cross-process session delivery", () => {
 
           const ran = yield* receiver.next("ran")
           expect(ran.busy).toContain(ready.sessionID)
+          // The receiver's window shows the delivered message, before the reply to it.
+          const delivered = ran.shown?.indexOf("user:agent") ?? -1
+          expect(delivered).toBeGreaterThanOrEqual(0)
+          expect(ran.shown?.indexOf("assistant:local") ?? -1).toBeGreaterThan(delivered)
           sender.send("finish")
           const done = yield* sender.next("done")
           expect(done.busy).not.toContain(ready.sessionID)

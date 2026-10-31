@@ -31,6 +31,8 @@ import * as InstanceState from "@/effect/instance-state"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
 import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { SessionOwner } from "@/session/session-owner"
+import { MessageV2 } from "@/session/message-v2"
+import { SyncEvent } from "@/sync"
 
 const log = Log.create({ service: "inbox" })
 
@@ -40,6 +42,9 @@ const WAKE_POLL_JITTER_MS = 500
 // Wakes belong to this process (its instance id), not to one controller, so
 // every controller in the process shares which woken lanes are running.
 const wakingLanes = new Set<string>()
+// Input messages another process accepted that this process has announced to
+// its own subscribers, per woken lane.
+const announcedInputs = new Map<string, Set<string>>()
 
 export class ReceiptNotFound extends Error {
   constructor(readonly receiptId: string) {
@@ -741,6 +746,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     // Start lanes that other processes woke for sessions this process owns.
     // The lane runs in its session's own instance, as an accept there would.
     const inSessionInstance = <A>(sessionID: SessionID, effect: Effect.Effect<A>) => Effect.gen(function* () {
+      // Carry this fiber's services and references, the application logger
+      // among them: a bare runtime logs to the console, under the TUI.
+      const context = yield* Effect.context<never>()
       const row = yield* Effect.sync(() => Database.use((db) => db.select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
         .from(SessionTable).where(eq(SessionTable.id, sessionID)).get()))
       if (!row) return undefined
@@ -751,7 +759,35 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       return yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
         Instance.restore(instance, () => Effect.runPromise(effect.pipe(
           Effect.provideService(InstanceRef, instance), Effect.provideService(WorkspaceRef, workspace),
+          Effect.provide(context),
         ))),
+      }))
+    })
+    // Input written by another process was announced only there. Tell this
+    // process's subscribers, so the window that runs the session shows it.
+    const announceRemoteInput = (lane: Lane) => Effect.gen(function* () {
+      const key = waiterKey(lane)
+      const known = announcedInputs.get(key) ?? new Set<string>()
+      const rows = yield* Effect.sync(() => Database.use((db) => db.select({ messageID: InboxTable.input_message_id })
+        .from(InboxTable).where(and(
+          eq(InboxTable.receiver_session_id, lane.sessionID), eq(InboxTable.receiver_actor_id, lane.agentID),
+          eq(InboxTable.state, "accepted"),
+        )).orderBy(sql`${InboxTable}.rowid`).all()))
+      const current = new Set<string>()
+      const fresh: MessageID[] = []
+      for (const row of rows) {
+        if (!row.messageID) continue
+        current.add(row.messageID)
+        if (!known.has(row.messageID)) fresh.push(row.messageID)
+      }
+      announcedInputs.set(key, current)
+      if (fresh.length === 0) return
+      yield* inSessionInstance(lane.sessionID, Effect.sync(() => {
+        for (const messageID of fresh) {
+          const message = MessageV2.get({ sessionID: lane.sessionID, messageID })
+          SyncEvent.announce(MessageV2.Event.Updated, { sessionID: lane.sessionID, info: message.info })
+          for (const part of message.parts) SyncEvent.announce(MessageV2.Event.PartUpdated, { sessionID: lane.sessionID, part, time: Date.now() })
+        }
       }))
     })
     // A wake stays until its lane's run settles, so an owner that exits first
@@ -763,11 +799,14 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       for (const wake of wakes) {
         // Remote input must reach a turn already waiting on this lane, as local input would.
         yield* wakeInputWaiters(wake)
+        yield* announceRemoteInput(wake).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => log.warn("inbox wake announce failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) }))))
         const key = waiterKey(wake)
         if (wakingLanes.has(key)) continue
         wakingLanes.add(key)
         const settled = () => {
           wakingLanes.delete(key)
+          announcedInputs.delete(key)
           try {
             Database.use((db) => SessionOwner.clearWake(db, wake))
           } catch (error) {

@@ -2719,8 +2719,12 @@ files remain byte-identical to the accepted main correction.
     Only the process's current controller (`inboxControllerRef`) takes wakes,
     as only the current scheduler runs lanes. A wake also releases the owner's
     `observeInput` waiters, so remote input reaches an actor wait or retry
-    backoff as local input does. An adoptable lane in a process without a
-    scheduler waits for its next run, as before.
+    backoff as local input does. The owner announces the accepted input
+    messages another process wrote (`SyncEvent.announce`: bus events only, no
+    projection), so its own TUI shows each delivered message before the reply.
+    A woken lane runs with the controller's context, so its Effect logs reach
+    the log file rather than the terminal under the TUI. An adoptable lane in
+    a process without a scheduler waits for its next run, as before.
   - `actor send` to another session passes `adoptReceiver: false` and reports
     `delivery`: `this_process`, `queued_for_owner` with `owner_pid`, or
     `receiver_not_open` with a hint naming `mimo -s <id>`. Same-session sends
