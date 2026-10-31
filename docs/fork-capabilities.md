@@ -134,6 +134,7 @@ not change their implementation. The preceding review is retained in the
 | FC-020 | Stringified object/array tool arguments: AI SDK tool-call parse and `Tool.define` validation              | Fork hardening of upstream's raw tool-call input                 | Decode only container-typed string failures; persist and execute one input               |
 | FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
 | FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
+| FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2242,3 +2243,49 @@ logged`, and the peer `success`/`failure` variants of
   with the other clone's tag on the line.
 - Retirement condition: upstream's `clone()` stops returning the cached
   per-service logger.
+
+## FC-023 — a turn that names no model keeps the session's variant
+
+- Status: active
+- Canonical owner: fork `main` user-message model resolution in
+  `packages/cli/src/session/prompt.ts` (`continuedVariant`, `createUserMessage`,
+  `shell` and `command`)
+- Observable contract:
+  - A prompt that names no model, for an agent without one, takes the last
+    user message's model through `lastModel`. It now takes that message's
+    `variant` too, while the model still offers it; otherwise the variant is
+    unset.
+  - A prompt that names a model without a variant still gets that model's
+    default. The agent-variant rule is unchanged.
+  - A command whose model comes from the same fallback passes the continued
+    variant to its prompt.
+  - A shell run's user message keeps the previous user message's variant when
+    it runs on that message's model. The shell API has no variant field, and
+    later model-less turns continue this message.
+- Motivation: cron fires (`injectScheduledPrompt`) send no model, and the
+  variant was rebuilt from the input and the agent only, so every fire ran at
+  the model's default variant. Inbox deliveries and actor notifications copy
+  the last user message's model through `resolveDrainSeed`, so after one fire
+  they lost the variant as well. The TUI restores its selected variant from the
+  session's last user message when it opens a session, so it then showed the
+  default too. In one incident two sessions whose typed prompts ran almost
+  only at `max` held 344 cron and 98 inbox user messages without a variant, and
+  every turn one session delegated to another ran at the default.
+- Upstream relationship: upstream `7bc7dc3a` resolves the variant the same way.
+  Fork fix of shared code. `dev/compat` applies the same rule in its shared
+  model-selection resolver (DC-TUI-001).
+- Watch surfaces: `previousModel`, `lastModel`, `continuedVariant`,
+  `createUserMessage`, `shell` and `command` in
+  `packages/cli/src/session/prompt.ts`; `resolveDrainSeed` in
+  `packages/cli/src/inbox/inbox.ts`; `injectScheduledPrompt`; the session sync
+  in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`.
+- Tests/evidence: `packages/cli/test/session/prompt-continued-variant.test.ts`:
+  - a cron-shaped prompt continues `max`, and a named model without a variant
+    keeps its default;
+  - a variant the model no longer offers is not continued;
+  - a shell run on the same model keeps `max` for the next fire;
+  - a command without a model keeps `max`.
+
+  Reverting any one site fails its case. Inheriting whenever the model matches
+  the previous turn fails the named-model case.
+- Retirement condition: upstream continues the variant along with the model.
