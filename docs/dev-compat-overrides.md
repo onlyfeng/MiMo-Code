@@ -2255,6 +2255,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- 2026-10-31 FC-023 propagation: main continues the fallback model's variant in `createUserMessage`. Compat creates user messages through `SessionModelSelection.resolve`, so the resolver applies the same rule: only when neither the input nor the agent names a model, and only while the model still offers the variant. The resolver's fallback type now carries the optional variant that `lastModel` returns. The preview endpoint always sends the TUI's selected model, so a preview never reaches the fallback and its results are unchanged; a named model without a variant still previews and resolves to its default. Shell and command continuation come unchanged from main's `prompt.ts`.
+
 - 2026-10-13 full sync: upstream `3c6e6bb0` removes the compose agent and its "(legacy)" label from the Prompt footer. Compat keeps its `flexShrink={0}` agent label and `ModelMetadata` display; only the retired suffix branch is dropped.
 
 - 2026-10-02 full sync: upstream removes the free `mimo-auto` channel, including the Prompt footer guard that hid the provider label for it. Compat keeps `ModelMetadata` as the authoritative footer display, so the upstream-only `currentProviderLabel` row stays absent; provider/model/variant truth and `titleLocale` submission are unchanged.
