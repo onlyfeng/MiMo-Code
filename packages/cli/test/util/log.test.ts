@@ -340,3 +340,22 @@ test("print mode is unaffected by an unusable log directory", async () => {
   expect(result.stderr).toContain("printed record")
   expect(result.stderr).not.toContain("failed")
 })
+
+test("cloned loggers keep their own tags", async () => {
+  await using tmp = await tmpdir()
+  Global.Path.log = tmp.path
+  await Log.init({ print: false })
+  const active = Log.file()
+
+  // Concurrent streams each clone the service logger and tag their own request.
+  const base = Log.create({ service: "clone-isolation" })
+  const a = base.clone().tag("session.id", "ses_a")
+  base.clone().tag("session.id", "ses_b")
+  a.info("from a")
+  base.info("from base")
+  await Log.shutdown()
+
+  const lines = (await fs.readFile(active.replace(/\.active\.log$/, ".log"), "utf8")).split("\n")
+  expect(lines.find((line) => line.includes("from a"))).toContain("session.id=ses_a")
+  expect(lines.find((line) => line.includes("from base"))).not.toContain("session.id=")
+})
