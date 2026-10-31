@@ -24,7 +24,7 @@ export const resolve = Effect.fn("SessionModelSelection.resolve")(function* (
     modelRef?: string
     variant?: string
   },
-  fallback: Effect.Effect<z.infer<typeof Model>>,
+  fallback: Effect.Effect<z.infer<typeof Model> & { variant?: string }>,
 ) {
   const inputModel = input.modelRef
     ? yield* provider
@@ -42,11 +42,21 @@ export const resolve = Effect.fn("SessionModelSelection.resolve")(function* (
     !input.variant && input.agent.variant && same
       ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
       : undefined
+  // FC-023: only a model taken from the fallback continues its variant, while
+  // the model still offers it. A named model without a variant keeps its default.
+  const continued: (z.infer<typeof Model> & { variant?: string }) | undefined =
+    inputModel || agentModel ? undefined : model
+  const offered =
+    !input.variant && continued?.variant
+      ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
+      : undefined
   return {
     providerID: model.providerID,
     modelID: model.modelID,
     variant:
-      input.variant ?? (input.agent.variant && full?.variants?.[input.agent.variant] ? input.agent.variant : undefined),
+      input.variant ??
+      (input.agent.variant && full?.variants?.[input.agent.variant] ? input.agent.variant : undefined) ??
+      (continued?.variant && offered?.variants?.[continued.variant] ? continued.variant : undefined),
   }
 })
 

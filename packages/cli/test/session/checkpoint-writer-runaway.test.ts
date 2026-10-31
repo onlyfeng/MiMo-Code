@@ -52,7 +52,10 @@ const isWriter = (body: Body) => JSON.stringify(body.messages).includes(WRITER_M
  * background, concurrently with the foreground turn, so a positional script
  * cannot tell which reply reaches which caller.
  */
-function startRoutedLLM(input: { main: (call: number) => string[]; writer: (body: Body) => Response }) {
+function startRoutedLLM(input: {
+  main: (call: number) => string[]
+  writer: (body: Body) => Response | Promise<Response>
+}) {
   let mainCalls = 0
   const writers: Body[] = []
   const encoder = new TextEncoder()
@@ -130,13 +133,24 @@ describe("checkpoint writer context overflow", () => {
     "settles as a failure after one rejected request instead of re-sending it",
     () =>
       Effect.gen(function* () {
+        // The writer's requests are held until the settlement wait below has
+        // started. Otherwise a fast writer settles first, its slot is gone, and
+        // the wait reports "no-writer".
+        let release!: () => void
+        const held = new Promise<void>((resolve) => {
+          release = resolve
+        })
         const server = startRoutedLLM({
           // The second foreground step reports usage past the 50% threshold, so
           // the turn after it starts the writer.
           main: (call) => textStopResponse(`reply ${call}`, call === 1 ? { promptTokens: HIGH_USAGE } : undefined),
-          writer: overflow,
+          writer: async () => {
+            await held
+            return overflow()
+          },
         })
         yield* Effect.addFinalizer(() => Effect.promise(() => server.stop()))
+        yield* Effect.addFinalizer(() => Effect.sync(() => release()))
         yield* provideTmpdirInstance(
           () =>
             Effect.gen(function* () {
@@ -151,6 +165,17 @@ describe("checkpoint writer context overflow", () => {
               yield* say("produce the large step")
               yield* say("next")
 
+              // The writer is in flight once its first request reaches the stub.
+              yield* Effect.gen(function* () {
+                while (server.writerCalls === 0) yield* Effect.sleep("20 millis")
+              }).pipe(Effect.timeout("20 seconds"), Effect.ignore)
+              // Give tryStartCheckpointWriter time to register the writer, then
+              // release its request only after the wait below has begun.
+              yield* Effect.sleep("200 millis")
+              yield* Effect.sleep("200 millis").pipe(
+                Effect.andThen(Effect.sync(() => release())),
+                Effect.forkChild,
+              )
               const settled = yield* checkpoint
                 .waitForWriterSettlement(session.id)
                 .pipe(Effect.timeout("20 seconds"), Effect.option)

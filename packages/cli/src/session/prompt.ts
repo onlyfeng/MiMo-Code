@@ -3170,14 +3170,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .resolveModelRef(agent.modelRef)
             .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
         : agent.model
-      const model = inputModel ?? agentModel ?? (yield* lastModel(input.sessionID))
+      const previous = yield* previousModel(input.sessionID)
+      const model = inputModel ?? agentModel ?? previous ?? (yield* provider.defaultModel())
+      // A shell run has no variant to choose, and later model-less turns
+      // continue this message's model, so it keeps the session's variant
+      // while the model is unchanged (FC-023).
+      const variant =
+        previous && model.providerID === previous.providerID && model.modelID === previous.modelID
+          ? yield* continuedVariant(previous)
+          : undefined
       const userMsg: MessageV2.User = {
         id: input.messageID ?? MessageID.ascending(),
         sessionID: input.sessionID,
         time: { created: Date.now() },
         role: "user",
         agent: input.agent,
-        model: { providerID: model.providerID, modelID: model.modelID },
+        model: { providerID: model.providerID, modelID: model.modelID, variant },
         source: "user",
       }
       yield* sessions.createMessage(userMsg)
@@ -3384,14 +3392,52 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.failCause(exit.cause)
     })
 
-    const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
+    const previousModel = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(
         sessionID,
         (m) => m.info.role === "user" && m.info.agent !== "system" && m.info.model.providerID !== "system",
         { agentID: "*" },
       )
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
-      return yield* provider.defaultModel()
+      return undefined
+    })
+
+    const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
+      return (yield* previousModel(sessionID)) ?? (yield* provider.defaultModel())
+    })
+
+    // FC-023: a turn that names no model continues the previous turn's model,
+    // and keeps the variant that turn ran at while the model still offers it.
+    // Upstream kept only the model, so cron fires fell back to the default
+    // variant, and inbox deliveries and actor notifications, which copy the
+    // last user message's model, inherited that loss.
+    const continuedVariant = Effect.fnUntraced(function* (model: {
+      providerID: ProviderID
+      modelID: ModelID
+      variant?: string
+    }) {
+      if (!model.variant) return undefined
+      const full = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
+      return full?.variants?.[model.variant] ? model.variant : undefined
+    })
+
+    // createUserMessage's agent-variant rule: an agent's configured variant
+    // applies only on the agent's own model. A caller that resolves a continued
+    // variant itself checks this first so the agent keeps precedence (FC-023).
+    const agentVariant = Effect.fnUntraced(function* (
+      ag: Pick<Agent.Info, "model" | "modelRef" | "variant">,
+      model: { providerID: ProviderID; modelID: ModelID },
+    ) {
+      if (!ag.variant) return undefined
+      const agentModel = ag.modelRef
+        ? yield* provider
+            .resolveModelRef(ag.modelRef)
+            .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
+        : ag.model
+      if (!agentModel || agentModel.providerID !== model.providerID || agentModel.modelID !== model.modelID)
+        return undefined
+      const full = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
+      return full?.variants?.[ag.variant] ? ag.variant : undefined
     })
 
     const acceptsIntoInbox = (input: PromptInput) => input.noReply !== true
@@ -7963,6 +8009,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       template = template.trim()
 
+      // The lastModel fallback, read at most once. Only a model taken from it
+      // continues the previous turn's variant (FC-023).
+      let fallback: { providerID: ProviderID; modelID: ModelID; variant?: string } | undefined
+      const fallbackModel = Effect.fnUntraced(function* () {
+        fallback ??= yield* lastModel(input.sessionID)
+        return fallback
+      })
+
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
         if (cmd.agent) {
@@ -7970,7 +8024,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (cmdAgent?.model) return cmdAgent.model
         }
         if (input.model) return Provider.parseModel(input.model)
-        return yield* lastModel(input.sessionID)
+        return yield* fallbackModel()
       })
 
       yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
@@ -8019,8 +8073,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const userModel = isSubtask
         ? input.model
           ? Provider.parseModel(input.model)
-          : yield* lastModel(input.sessionID)
+          : yield* fallbackModel()
         : taskModel
+      const userAgentInfo = fallback && userModel === fallback ? yield* agents.get(userAgent) : undefined
+      const userVariant =
+        input.variant ??
+        (fallback && userModel === fallback
+          ? ((userAgentInfo ? yield* agentVariant(userAgentInfo, fallback) : undefined) ??
+            (yield* continuedVariant(fallback)))
+          : undefined)
       if (isSubtask) {
         if (!(yield* agents.get(userAgent))) {
           const error = new NamedError.Unknown({ message: `Agent not found: "${userAgent}".` })
@@ -8051,7 +8112,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         agent: userAgent,
         parts,
         titleLocale: input.titleLocale,
-        variant: input.variant,
+        variant: userVariant,
         system: input.system,
         systemMode: input.systemMode,
         harness: input.harness,
