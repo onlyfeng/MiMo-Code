@@ -2189,7 +2189,9 @@ logged`, and the peer `success`/`failure` variants of
   drives real sessions against a content-routed stub that tells writer
   requests from foreground ones:
   - a writer whose request is rejected as an overflow settles as a
-    non-retryable `overflow` failure after exactly one request;
+    non-retryable `overflow` failure after exactly one request. The stub holds
+    the writer's request until the settlement wait has started, because a
+    writer that settles first leaves no slot and the wait reports `no-writer`;
   - a bounded agent prompted directly (no fork context) stops after one
     rejected request with `ContextOverflowError`;
   - with every writer failing, two rebuilds on one stale checkpoint leave a
