@@ -208,7 +208,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
      * record, bump input_revision. Returns undefined when the admission
      * guard rejects the write.
      */
-    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number }
+    // `runsHere`: whether this process may start the inserted input's lane. When
+    // it may not, the accept transaction itself records the owner's wake.
+    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; runsHere?: boolean }
     const writeAccept = (input: AcceptInput, identity: ExecutionOwnership.Identity, guard?: AdmissionGuard) =>
       Effect.suspend(() => {
       let prepared: AcceptedWrite | undefined
@@ -318,7 +320,18 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           })
           .returning().get()!
         InboxSync.record({ sessionID: input.lane.sessionID, receipts: [row], lanes: [laneRow] })
-        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
+        // Decide in this transaction whether the lane can start here, and record
+        // the owner's wake with the input, so an interruption after the commit
+        // cannot leave accepted input that no process will start.
+        let runsHere: boolean | undefined
+        if (!guard?.deferKick && !input.legacyInboxID) {
+          const owner = SessionOwner.status(db, input.lane.sessionID)
+          const adopt = input.adoptReceiver ?? true
+          runsHere = owner.kind === "self" || (owner.kind === "unowned" && adopt && schedulerRef.current !== undefined)
+          // Same rule as maybeKick: wake only when ownership keeps the lane from running here.
+          if (owner.kind === "other" || (owner.kind === "unowned" && !adopt)) SessionOwner.ringWake(db, input.lane)
+        }
+        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision, runsHere }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
         if (!committed || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
         log.warn("inbox postcommit publisher failed", { cause: Cause.pretty(cause) })
@@ -425,7 +438,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         // Wake observeInput waiters — any accept advances input_revision.
         yield* wakeInputWaiters(input.lane)
         yield* publish(receipt)
-        if (!guard?.deferKick && !input.legacyInboxID) yield* maybeKick(input.lane, input.adoptReceiver)
+        if (!guard?.deferKick && !input.legacyInboxID && written.runsHere) yield* maybeKick(input.lane, input.adoptReceiver)
       } else if (!guard && !input.legacyInboxID && (receipt.state === "accepted" || receipt.state === "claimed")) {
         yield* maybeKick(input.lane, input.adoptReceiver)
       }

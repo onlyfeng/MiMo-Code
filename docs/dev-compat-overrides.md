@@ -2709,7 +2709,9 @@ files remain byte-identical to the accepted main correction.
     process exits.
   - Delivery: inbox accepts stay durable everywhere; only the owner kicks the
     lane. When ownership stops a process (another live owner, or input that
-    may not adopt an unowned receiver) it writes an `inbox_wake` row. Each
+    may not adopt an unowned receiver) it writes an `inbox_wake` row, in the
+    accept transaction itself, so a sender interrupted after the commit
+    cannot leave input that no process starts. Each
     controller looks at the wakes for its own sessions every 1–1.5 s, kicks the
     lane in the session's own instance, and clears the wake only after that
     run settles (unless it was rung again since), so an owner that exits first

@@ -104,7 +104,9 @@ depends on ownership:
   the lane starts here as before.
 - If ownership stops it, because another live process owns the receiver or the
   input may not adopt an unowned one, the process writes an `inbox_wake` row for
-  the lane and stops.
+  the lane and stops. For new input it writes the wake in the accept transaction
+  itself. A sender interrupted between that commit and its kick therefore cannot
+  leave accepted input that no poller would find.
 - A process without a lane scheduler still leaves adoptable input for the
   session's next run, as before.
 

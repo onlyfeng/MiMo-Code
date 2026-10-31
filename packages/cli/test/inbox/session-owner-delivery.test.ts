@@ -176,6 +176,27 @@ describe("inbox delivery across processes", () => {
     expect(yield* Fiber.join(waiting)).toBe(before + 1)
   })), 30_000)
 
+  it.live("a sender interrupted right after accepting still leaves the receiver's wake", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    const sent = input(session.id)
+    // Interrupt the accepting fiber the moment its commit announces the message,
+    // before anything after the commit runs.
+    let accepting: Fiber.Fiber<unknown, unknown> | undefined
+    const listener = (event: { payload: { type: string; properties?: { info?: { id?: string } } } }) => {
+      if (event.payload.type === "message.updated" && event.payload.properties?.info?.id === sent.message.id) accepting?.interruptUnsafe()
+    }
+    GlobalBus.on("event", listener)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+    accepting = yield* tq.accept({ ...sent, adoptReceiver: false }).pipe(Effect.forkChild)
+    yield* Fiber.await(accepting)
+
+    const receipt = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.input_message_id, sent.message.id)).get())
+    expect(receipt?.state).toBe("accepted")
+    expect(wakes(session.id)).toHaveLength(1)
+    expect(kicked(session.id)).toBe(0)
+  })), 30_000)
+
   it.live("input another process wrote is shown here even when a running turn claims it before any wake poll", provideTmpdirInstance(() => Effect.gen(function* () {
     const tq = yield* InboxController.Service
     const session = yield* (yield* Session.Service).create({})
