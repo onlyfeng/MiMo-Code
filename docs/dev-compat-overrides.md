@@ -2758,7 +2758,36 @@ files remain byte-identical to the accepted main correction.
   `test/tool/actor-send.test.ts`, and the live-instance sweep case in
   `test/actor/registry.test.ts`. Fixtures: `test/fixture/process-owner.ts`,
   `test/fixture/session-owner-peer.ts`, `test/lib/process-owner.ts`.
-- Evidence: EVIDENCE_PLACEHOLDER
+- Evidence (2026-11-01, PR #183 runtime/tests `501ede28`, pinned Bun 1.3.14,
+  ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and
+  `MIMOCODE_CODEX_MODE` unset):
+  - Exact-SHA CI passes: lint, typecheck, and test with all four unit shards
+    and the dedicated suites. The workflow skips Windows runtime on this
+    trigger.
+  - A local focused run passes 1583 cases, with 2 skips and 8 failures. The
+    run covers `test/inbox`, `test/actor`, `test/tool`, and the owner,
+    execution-ownership and run-state session files. All 8 failures are the
+    `subagent-resume-negatives` "Missing actual prefix captor" cases, which
+    pass 8/8 alone.
+  - Each guarded rule failed its test when removed, checked against the code
+    as it stood when the rule was added:
+    - the run-state claim, the prompt claim, the open-time instance check, and
+      the sweep's liveness filter;
+    - the kick's ownership check, the accept-transaction wake, the wake
+      poller, wake retention, first-run reconciliation, and current-controller
+      polling;
+    - the release of remote waiters, the claim-time and wake-time
+      announcements, and the controller logger context;
+    - the coordinated second probe and busy detection in liveness;
+    - the tool's `adoptReceiver: false`.
+  - Removing both the kick check and the run-state claim fails the
+    two-process test.
+  - Codex review raised ten findings over seven rounds, all fixed; the final
+    round on `501ede28` reported none.
+  - Six `aistudy` agent windows on build `045168f1` exchanged cross-session
+    messages. The display faults they showed are fixed in `71020407` and
+    `4543da04`: log lines over the TUI, and a delivered message missing
+    until reload.
 - Exit condition: retire when shared `main` (or upstream) gains process-level
   session ownership with equivalent delivery, or MiMo runs one process per
   database. If propagated to `main`, move the contract to the shared registry.
