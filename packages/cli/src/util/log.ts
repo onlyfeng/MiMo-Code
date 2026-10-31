@@ -262,11 +262,13 @@ function formatError(error: Error, depth = 0): string {
 }
 
 let last = Date.now()
-export function create(tags?: Record<string, any>) {
+// `shared: false` builds a private logger: tag() on it must not reach the
+// per-service instance that create() hands every other caller (FC-022).
+export function create(tags?: Record<string, any>, shared = true) {
   tags = tags || {}
 
   const service = tags["service"]
-  if (service && typeof service === "string") {
+  if (shared && service && typeof service === "string") {
     const cached = loggers.get(service)
     if (cached) {
       return cached
@@ -317,7 +319,7 @@ export function create(tags?: Record<string, any>) {
       return result
     },
     clone() {
-      return create({ ...tags })
+      return create({ ...tags }, false)
     },
     time(message: string, extra?: Record<string, any>) {
       const now = Date.now()
@@ -338,7 +340,7 @@ export function create(tags?: Record<string, any>) {
     },
   }
 
-  if (service && typeof service === "string") {
+  if (shared && service && typeof service === "string") {
     loggers.set(service, result)
   }
 

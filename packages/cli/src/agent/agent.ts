@@ -30,6 +30,12 @@ import { InstanceState } from "@/effect"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 
+// FC-021: step budget for the checkpoint writer. Successful writers have taken
+// a median of 7 and at most 86 steps; a model that never stops calling tools
+// otherwise runs the writer until the process dies. At the budget the last
+// step goes out with tools disabled, so the writer has to finish.
+export const CHECKPOINT_WRITER_STEPS = 120
+
 export const Info = z
   .object({
     name: z.string(),
@@ -324,6 +330,7 @@ export const layer = Layer.effect(
             options: {},
             native: true,
             hidden: true,
+            steps: CHECKPOINT_WRITER_STEPS,
             // No `prompt` field — fork agent contract: at spawn time,
             // tryStartCheckpointWriter captures parent's full LLM request prefix
             // (system + tools + messages-to-watermark) into a frozen ForkContext,

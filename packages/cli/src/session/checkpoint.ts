@@ -48,7 +48,7 @@ import { alignToNonToolResultUser } from "./checkpoint-align"
 import { loadPriorDiscoveredTitles } from "./checkpoint-retry"
 import * as CheckpointContext from "./checkpoint-context"
 import { buildProgressDiff } from "./checkpoint-progress-reconcile"
-import { isBoundaryUser, isRebuildBoundary, renderTailDigest } from "./tail-digest"
+import { collapseCheckpointTail, isBoundaryUser, isRebuildBoundary, renderTailDigest } from "./tail-digest"
 
 const log = Log.create({ service: "session.checkpoint" })
 const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep", "task"] as const
@@ -219,6 +219,23 @@ function estimateMessageTokens(m: { parts: Array<{ type: string; [k: string]: un
       sum += 1000
     }
   }
+  return sum
+}
+
+// Sizes a writer view for the window check. Bytes/3 bounds dense text (e.g.
+// CJK) that Token.estimate's chars-per-token undercounts; estimateMessageTokens
+// keeps its own estimator because computeBoundary's tail sizing depends on it.
+function estimateViewTokens(msgs: ReadonlyArray<{ parts: unknown[] }>): number {
+  let sum = 0
+  for (const m of msgs)
+    for (const p of m.parts) {
+      try {
+        const json = JSON.stringify(p)
+        sum += Math.max(Token.estimate(json), Math.round(Buffer.byteLength(json, "utf8") / 3))
+      } catch {
+        sum += 1000
+      }
+    }
   return sum
 }
 
@@ -539,6 +556,12 @@ export type TryStartCheckpointWriterInput = {
   sessionID: SessionID
   model: { providerID: string; modelID: string }
   promptOps: ActorPromptOps
+  /**
+   * The parent's usable window and its latest provider-reported usage. When
+   * present, a full-fidelity writer view projected past the window falls back
+   * to the parent's own view (FC-021).
+   */
+  context?: { usable: number; used: number }
 }
 
 /**
@@ -826,7 +849,27 @@ export const layer: Layer.Layer<
         new Set(receipts.filter((receipt) => receipt.consumed).map((receipt) => receipt.id)),
         (messageID) => MessageV2.get({ sessionID: input.sessionID, messageID }),
       )
-      const msgs = withRebuildTail(window, readRebuildTail(input.sessionID, window))
+      // FC-021: the writer reads the newest rebuild boundary's tail at full
+      // fidelity while the parent sees it digested. When writers keep failing,
+      // that tail spans every rebuild since the last good checkpoint and can
+      // outgrow the window, so every later writer fails too and the checkpoint
+      // never advances. Project the full view from the parent's reported usage
+      // plus the estimated difference; past the usable window, fork from the
+      // parent's own view, whose boundary carries the checkpoint and the tail
+      // digest — the same history the parent works from.
+      const tailed = withRebuildTail(window, readRebuildTail(input.sessionID, window))
+      const parentView = collapseCheckpointTail(window)
+      const projected = input.context
+        ? input.context.used + estimateViewTokens(tailed) - estimateViewTokens(parentView)
+        : 0
+      const msgs =
+        input.context && projected > input.context.usable && parentView.length < tailed.length ? parentView : tailed
+      if (msgs !== tailed)
+        log.info("writer view exceeds the usable window, forking the parent view", {
+          sessionID: input.sessionID,
+          projected,
+          usable: input.context?.usable,
+        })
       if (msgs.length === 0) {
         log.info("no messages, skipping checkpoint", { sessionID: input.sessionID })
         return "skipped" as const

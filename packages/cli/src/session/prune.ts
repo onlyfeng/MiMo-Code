@@ -249,6 +249,7 @@ export const layer: Layer.Layer<
             sessionID: input.sessionID,
             model: { providerID: input.model.providerID, modelID: input.model.id },
             promptOps: input.promptOps,
+            context: { usable: windowSize, used: currentTokens },
           })
           .pipe(Effect.catch(() => Effect.succeed<"started" | "queued" | "skipped">("skipped")))
 
