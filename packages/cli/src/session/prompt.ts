@@ -4218,6 +4218,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const executionGuard = Effect.suspend(() => cancellation.isCancelled() || actorExecution?.cancelled
           ? Effect.interrupt : Effect.void)
         const session = yield* sessions.get(input.sessionID)
+        // Refuse before anything is written when another live process runs this
+        // session. Instance ownership stays with the run, which enforces it.
+        const identity = yield* ExecutionOwnership.captureIdentity
+        yield* Effect.sync(() => Database.use((db) => {
+          if (ExecutionOwnership.isOwned(db, input.sessionID, identity))
+            ExecutionOwnership.claimProcess(db, input.sessionID, identity)
+        }))
         if (
           hookNonTextRequiresProvenance({
             source: input.source,

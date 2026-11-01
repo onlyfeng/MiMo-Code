@@ -1,5 +1,5 @@
 import { Effect, Layer, Context } from "effect"
-import { Database, inArray, eq, and, ne, sql } from "@/storage"
+import { Database, inArray, eq, and, ne, notInArray, sql } from "@/storage"
 import { Bus } from "@/bus"
 import type { SessionID, MessageID } from "@/session/schema"
 import { ActorRegistryTable } from "./actor.sql"
@@ -17,10 +17,11 @@ import type {
 import { deriveLiveness, DEFAULT_LIVENESS_ABANDON_MS } from "./schema"
 import * as Events from "./events"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
-import { randomUUID } from "node:crypto"
+import { ProcessLiveness } from "@/session/process-liveness"
 
-// Identifies the registering process; a different token does not prove termination.
-const PROCESS_INSTANCE_ID = randomUUID()
+// Identifies the registering process. A different token alone does not prove
+// termination; ProcessLiveness answers whether that process still runs.
+const PROCESS_INSTANCE_ID = ProcessLiveness.INSTANCE_ID
 
 /**
  * Settle abandoned other-process actors so waiters can observe their terminal
@@ -32,6 +33,14 @@ export function sweepAbandonedZombies(): void {
   const cutoff = Date.now() - DEFAULT_LIVENESS_ABANDON_MS
   // Keep this a top-level transaction; Database.use would bypass its boundary.
   Database.transaction((tx) => {
+    const abandoned = and(
+      inArray(ActorRegistryTable.status, ["running", "pending"]),
+      ne(ActorRegistryTable.instance_id, PROCESS_INSTANCE_ID),
+      sql`COALESCE(${ActorRegistryTable.last_activity_time}, ${ActorRegistryTable.time_created}) < ${cutoff}`,
+    )
+    // A quiet actor is not abandoned while the process that runs it is alive.
+    const live = [...new Set(tx.select({ instanceID: ActorRegistryTable.instance_id }).from(ActorRegistryTable).where(abandoned).all()
+      .map((row) => row.instanceID))].filter((instanceID) => ProcessLiveness.isAlive(instanceID))
     tx.update(ActorRegistryTable)
       .set({
         status: "idle",
@@ -41,13 +50,7 @@ export function sweepAbandonedZombies(): void {
         time_completed: Date.now(),
         time_updated: Date.now(),
       })
-      .where(
-        and(
-          inArray(ActorRegistryTable.status, ["running", "pending"]),
-          ne(ActorRegistryTable.instance_id, PROCESS_INSTANCE_ID),
-          sql`COALESCE(${ActorRegistryTable.last_activity_time}, ${ActorRegistryTable.time_created}) < ${cutoff}`,
-        ),
-      )
+      .where(live.length > 0 ? and(abandoned, notInArray(ActorRegistryTable.instance_id, live)) : abandoned)
       .run()
   })
 }
@@ -151,6 +154,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     // Layer rebuilds retain the same process identity.
     // This is stable across layer rebuilds within the same process.
     const instanceID = PROCESS_INSTANCE_ID
+    // Hold the liveness lock before any row names this process.
+    yield* Effect.sync(() => ProcessLiveness.ensureHeld())
 
     // --- CRUD methods ---
 

@@ -86,6 +86,8 @@ export interface AgentInput {
   content: string
   type?: string
   legacyInboxID?: string
+  /** See AcceptInput.adoptReceiver. */
+  adoptReceiver?: boolean
 }
 
 export interface Interface {
@@ -160,6 +162,7 @@ export const layer = Layer.effect(
         legacyInboxID: input.legacyInboxID,
         senderSessionID: input.senderSessionID,
         senderActorID: input.senderActorID,
+        adoptReceiver: input.adoptReceiver,
       }, guard).pipe(
         Effect.provideService(InstanceRef, receiverInstance),
         Effect.provideService(WorkspaceRef, workspace),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { ActorExecution } from "../../src/actor/execution"
 import { WorkspaceID } from "../../src/control-plane/schema"
 import { InstanceRef, WorkspaceRef } from "../../src/effect/instance-ref"
@@ -15,6 +15,9 @@ import { SessionTable } from "../../src/session/session.sql"
 import { Database, eq } from "../../src/storage"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { startProcessOwner } from "../lib/process-owner"
+import { ProcessLiveness } from "../../src/session/process-liveness"
+import { SessionOwnerTable } from "../../src/session/session-owner.sql"
 
 const it = testEffect(Layer.mergeAll(Session.defaultLayer, SessionRunState.defaultLayer, ActorExecution.layer, CrossSpawnSpawner.defaultLayer))
 const oldWorkspace = WorkspaceID.make("wrk_old_execution_owner")
@@ -104,6 +107,54 @@ describe("execution ownership", () => {
       expect(current.pollUnsafe()).toBeUndefined()
       yield* Deferred.succeed(finish, result(session.id))
       expect(Exit.isSuccess(yield* Fiber.await(current))).toBe(true)
+    })), 30000)
+  }
+
+  it.live("a window claims the session it opens only when its instance owns that session", provideTmpdirInstance((directory) => Effect.gen(function* () {
+    const session = yield* (yield* Session.Service).create({})
+    const owner = () => Database.use((db) => db.select().from(SessionOwnerTable).where(eq(SessionOwnerTable.session_id, session.id)).get())
+
+    // Opened from another project directory: no claim, so no woken input runs outside it.
+    expect(Database.use((db) => ExecutionOwnership.claimOpened(db, session.id, { directory: `${directory}/elsewhere` }))).toEqual({ kind: "foreign" })
+    expect(owner()).toBeUndefined()
+
+    expect(Database.use((db) => ExecutionOwnership.claimOpened(db, session.id, { directory }))).toEqual({ kind: "self" })
+    expect(owner()?.instance_id).toBe(ProcessLiveness.INSTANCE_ID)
+  })), 30000)
+
+  for (const entry of ["start", "startOwned", "ensureRunning", "ensureExclusive", "startShell", "startRunning"] as const) {
+    it.live(`${entry} refuses a session another live process runs and adopts it once that process is gone`, provideTmpdirInstance(() => Effect.gen(function* () {
+      const session = yield* (yield* Session.Service).create({})
+      const runs = yield* SessionRunState.Service
+      const owner = yield* Effect.promise(() => startProcessOwner(ProcessLiveness.directory()))
+      yield* Effect.addFinalizer(() => Effect.promise(owner.kill))
+      Database.use((db) => db.insert(SessionOwnerTable)
+        .values({ session_id: session.id, instance_id: owner.instanceID, pid: owner.pid, time_claimed: Date.now() }).run())
+      let ran = 0
+      const finished = yield* Deferred.make<void>()
+      const work = Effect.sync(() => { ran++; return result(session.id) }).pipe(Effect.ensuring(Deferred.succeed(finished, undefined)))
+      const run = (): Effect.Effect<unknown, unknown> => {
+        switch (entry) {
+          case "startShell": return runs.startShell(session.id, Effect.interrupt, work)
+          // start forks the run and returns at once.
+          case "start": return runs.start(session.id, "main", Effect.interrupt, work).pipe(Effect.andThen(Deferred.await(finished)))
+          // startRunning and startOwned hand back the run instead of awaiting it.
+          case "startRunning": return runs.startRunning(session.id, "main", Effect.interrupt, work).pipe(Effect.flatMap((completion) => completion))
+          case "startOwned": return runs.startOwned(session.id, "main", Effect.interrupt, work).pipe(Effect.flatMap((owned) => owned.completion))
+          default: return runs[entry](session.id, "main", Effect.interrupt, work)
+        }
+      }
+
+      const denied = yield* run().pipe(Effect.exit)
+      expect(Exit.isFailure(denied)).toBe(true)
+      expect(String(Exit.isFailure(denied) ? Cause.squash(denied.cause) : "")).toContain(`pid ${owner.pid}`)
+      expect(ran).toBe(0)
+
+      yield* Effect.promise(owner.kill)
+      expect(Exit.isSuccess(yield* run().pipe(Effect.exit))).toBe(true)
+      expect(ran).toBe(1)
+      expect(Database.use((db) => db.select().from(SessionOwnerTable).where(eq(SessionOwnerTable.session_id, session.id)).get())?.instance_id)
+        .toBe(ProcessLiveness.INSTANCE_ID)
     })), 30000)
   }
 

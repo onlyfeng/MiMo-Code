@@ -68,6 +68,23 @@ export const InboxSessionEpochTable = sqliteTable("inbox_session_epoch", {
   time_updated: integer().notNull(),
 })
 
+/**
+ * A lane whose accepted input was written by a process that does not run the
+ * receiver. The receiver's owning process takes the row and starts the lane.
+ */
+export const InboxWakeTable = sqliteTable(
+  "inbox_wake",
+  {
+    session_id: text()
+      .$type<SessionID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    agent_id: text().notNull(),
+    time_created: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.session_id, t.agent_id] })],
+)
+
 export type InboxRow = typeof InboxTable.$inferSelect
 export type InboxLaneStateRow = typeof InboxLaneStateTable.$inferSelect
 export type InboxSessionEpochRow = typeof InboxSessionEpochTable.$inferSelect

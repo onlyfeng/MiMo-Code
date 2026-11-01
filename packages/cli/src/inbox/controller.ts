@@ -28,8 +28,33 @@ import { EffectBridge } from "@/effect"
 import { bindScopedRef } from "@/effect/scoped-ref"
 import { Instance } from "@/project/instance"
 import * as InstanceState from "@/effect/instance-state"
+import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
+import { WorkspaceContext } from "@/control-plane/workspace-context"
+import { SessionOwner } from "@/session/session-owner"
+import { MessageV2 } from "@/session/message-v2"
+import { SyncEvent } from "@/sync"
 
 const log = Log.create({ service: "inbox" })
+
+/** How often a process looks for input that other processes accepted for sessions it runs. */
+const WAKE_POLL_MS = 1_000
+const WAKE_POLL_JITTER_MS = 500
+// Wakes belong to this process (its instance id), not to one controller, so
+// every controller in the process shares which woken lanes are running.
+const wakingLanes = new Set<string>()
+// Input messages whose events this process has published: its own accepts, and
+// input from other processes it announced. Bounded; a re-announce only repeats
+// an idempotent upsert.
+const shownInputs = new Set<string>()
+const SHOWN_INPUTS_LIMIT = 10_000
+function markShown(messageID: string) {
+  shownInputs.add(messageID)
+  if (shownInputs.size <= SHOWN_INPUTS_LIMIT) return
+  for (const oldest of shownInputs) {
+    shownInputs.delete(oldest)
+    if (shownInputs.size <= SHOWN_INPUTS_LIMIT * 0.8) break
+  }
+}
 
 export class ReceiptNotFound extends Error {
   constructor(readonly receiptId: string) {
@@ -183,7 +208,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
      * record, bump input_revision. Returns undefined when the admission
      * guard rejects the write.
      */
-    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number }
+    // `runsHere`: whether this process may start the inserted input's lane. When
+    // it may not, the accept transaction itself records the owner's wake.
+    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; runsHere?: boolean }
     const writeAccept = (input: AcceptInput, identity: ExecutionOwnership.Identity, guard?: AdmissionGuard) =>
       Effect.suspend(() => {
       let prepared: AcceptedWrite | undefined
@@ -293,7 +320,18 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           })
           .returning().get()!
         InboxSync.record({ sessionID: input.lane.sessionID, receipts: [row], lanes: [laneRow] })
-        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
+        // Decide in this transaction whether the lane can start here, and record
+        // the owner's wake with the input, so an interruption after the commit
+        // cannot leave accepted input that no process will start.
+        let runsHere: boolean | undefined
+        if (!guard?.deferKick && !input.legacyInboxID) {
+          const owner = SessionOwner.status(db, input.lane.sessionID)
+          const adopt = input.adoptReceiver ?? true
+          runsHere = owner.kind === "self" || (owner.kind === "unowned" && adopt && schedulerRef.current !== undefined)
+          // Same rule as maybeKick: wake only when ownership keeps the lane from running here.
+          if (owner.kind === "other" || (owner.kind === "unowned" && !adopt)) SessionOwner.ringWake(db, input.lane)
+        }
+        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision, runsHere }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
         if (!committed || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
         log.warn("inbox postcommit publisher failed", { cause: Cause.pretty(cause) })
@@ -310,11 +348,57 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       return toReceipt(row)
     })
 
-    /** Fire-and-forget schedule: Controller owns receipts; kick only starts a lease when idle. */
-    const maybeKick = (lane: Lane) =>
+    /**
+     * Publish the message events for input another process wrote, once per
+     * process. The accepting process announced them only to its own bus, so
+     * this process's TUI would otherwise answer input it never shows.
+     */
+    const showInputs = (sessionID: SessionID, messageIDs: readonly (MessageID | undefined)[]) => Effect.sync(() => {
+      for (const messageID of messageIDs) {
+        if (!messageID || shownInputs.has(messageID)) continue
+        const message = MessageV2.get({ sessionID, messageID })
+        SyncEvent.announce(MessageV2.Event.Updated, { sessionID, info: message.info })
+        for (const part of message.parts) SyncEvent.announce(MessageV2.Event.PartUpdated, { sessionID, part, time: Date.now() })
+        markShown(messageID)
+      }
+    })
+
+    /** Release this process's observeInput waiters on a lane; each re-reads the durable revision. */
+    const wakeInputWaiters = (lane: Lane) => Effect.gen(function* () {
+      const waiters = inputWaiters.get(waiterKey(lane))
+      if (!waiters) return
+      const rev = Database.use((db) =>
+        db.select().from(InboxLaneStateTable)
+          .where(and(eq(InboxLaneStateTable.session_id, lane.sessionID), eq(InboxLaneStateTable.agent_id, lane.agentID)))
+          .get(),
+      )?.input_revision ?? 0
+      for (const d of [...waiters]) {
+        waiters.delete(d)
+        const done = yield* Deferred.isDone(d)
+        if (done) continue
+        Deferred.doneUnsafe(d, Effect.succeed(rev))
+      }
+      if (waiters.size === 0) inputWaiters.delete(waiterKey(lane))
+    })
+
+    /**
+     * Fire-and-forget schedule: Controller owns receipts; kick only starts a lease when idle.
+     * Only the process that owns the receiver session runs it. Any other process
+     * leaves a wake for the owner; `adopt` lets this process take an unowned session.
+     */
+    const maybeKick = (lane: Lane, adopt = true, onSettled?: () => void) =>
       Effect.gen(function* () {
         const sched = schedulerRef.current
-        if (!sched || stopping.has(lane.sessionID)) return
+        if (sched && stopping.has(lane.sessionID)) return false
+        const runsHere = yield* Effect.sync(() => Database.use((db) => {
+          const owner = adopt && sched ? SessionOwner.claim(db, lane.sessionID) : SessionOwner.status(db, lane.sessionID)
+          if (owner.kind === "self") return true
+          // Wake only when ownership keeps the lane from running here. Without a
+          // scheduler an adoptable lane waits for its next run, as before.
+          if (owner.kind === "other" || !adopt) SessionOwner.ringWake(db, lane)
+          return false
+        }))
+        if (!runsHere || !sched) return false
         const bridge = yield* EffectBridge.make()
         const directory = yield* InstanceState.directory
         const guard = sched.guard ? yield* sched.guard(lane) : undefined
@@ -323,10 +407,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           (owner) => Effect.sync(() => {
             const work = bridge.promise(sched.kick(lane, guard))
             owner.transferred = true
-            void work.then(owner.release, owner.release)
+            const settle = () => {
+              owner.release()
+              onSettled?.()
+            }
+            void work.then(settle, settle)
           }),
           (owner) => owner.transferred ? Effect.void : Effect.sync(owner.release),
         ).pipe(Effect.uninterruptible)
+        return true
       })
 
     const accept = Effect.fn("Inbox.accept")(function* (input: AcceptInput, guard?: AdmissionGuard) {
@@ -344,26 +433,14 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       if (written === undefined) return yield* Effect.interrupt
       const receipt = toReceipt(written.row)
       if (written.kind === "inserted") {
+        // commitUserMessageSync announced this message to this process's bus.
+        markShown(input.message.id)
         // Wake observeInput waiters — any accept advances input_revision.
-        const waiters = inputWaiters.get(waiterKey(input.lane))
-        if (waiters) {
-          const rev = Database.use((db) =>
-            db.select().from(InboxLaneStateTable)
-              .where(and(eq(InboxLaneStateTable.session_id, input.lane.sessionID), eq(InboxLaneStateTable.agent_id, input.lane.agentID)))
-              .get(),
-          )?.input_revision ?? 0
-          for (const d of [...waiters]) {
-            waiters.delete(d)
-            const done = yield* Deferred.isDone(d)
-            if (done) continue
-            Deferred.doneUnsafe(d, Effect.succeed(rev))
-          }
-          if (waiters.size === 0) inputWaiters.delete(waiterKey(input.lane))
-        }
+        yield* wakeInputWaiters(input.lane)
         yield* publish(receipt)
-        if (!guard?.deferKick && !input.legacyInboxID) yield* maybeKick(input.lane)
+        if (!guard?.deferKick && !input.legacyInboxID && written.runsHere) yield* maybeKick(input.lane, input.adoptReceiver)
       } else if (!guard && !input.legacyInboxID && (receipt.state === "accepted" || receipt.state === "claimed")) {
-        yield* maybeKick(input.lane)
+        yield* maybeKick(input.lane, input.adoptReceiver)
       }
       return receipt
     })
@@ -450,6 +527,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           }
         }))
         if (!batch) return undefined
+        // A running turn may take input another process wrote before any wake poll.
+        yield* showInputs(lane.sessionID, batch.receipts.map((receipt) => receipt.inputMessageID)).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => log.warn("inbox input announce failed", { sessionID: lane.sessionID, cause: Cause.pretty(cause) }))))
         for (const receipt of batch.receipts) yield* publish(receipt)
         return batch
       })
@@ -706,6 +786,77 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       getEpoch,
       reconcileOnBoot,
     }
+    // Start lanes that other processes woke for sessions this process owns.
+    // The lane runs in its session's own instance, as an accept there would.
+    const inSessionInstance = <A>(sessionID: SessionID, effect: Effect.Effect<A>) => Effect.gen(function* () {
+      // Carry this fiber's services and references, the application logger
+      // among them: a bare runtime logs to the console, under the TUI.
+      const context = yield* Effect.context<never>()
+      const row = yield* Effect.sync(() => Database.use((db) => db.select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
+        .from(SessionTable).where(eq(SessionTable.id, sessionID)).get()))
+      if (!row) return undefined
+      const workspace = row.workspaceID ?? undefined
+      const instance = yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
+        Instance.provide({ directory: row.directory, fn: () => Instance.current }),
+      }))
+      return yield* Effect.promise(async () => await WorkspaceContext.provide({ workspaceID: workspace, fn: () =>
+        Instance.restore(instance, () => Effect.runPromise(effect.pipe(
+          Effect.provideService(InstanceRef, instance), Effect.provideService(WorkspaceRef, workspace),
+          Effect.provide(context),
+        ))),
+      }))
+    })
+    // Input written by another process was announced only there. Tell this
+    // process's subscribers, so the window that runs the session shows it.
+    const announceRemoteInput = (lane: Lane) => Effect.gen(function* () {
+      const rows = yield* Effect.sync(() => Database.use((db) => db.select({ messageID: InboxTable.input_message_id })
+        .from(InboxTable).where(and(
+          eq(InboxTable.receiver_session_id, lane.sessionID), eq(InboxTable.receiver_actor_id, lane.agentID),
+          eq(InboxTable.state, "accepted"),
+        )).orderBy(sql`${InboxTable}.rowid`).all()))
+      const fresh = rows.flatMap((row) => row.messageID && !shownInputs.has(row.messageID) ? [row.messageID] : [])
+      if (fresh.length === 0) return
+      yield* inSessionInstance(lane.sessionID, showInputs(lane.sessionID, fresh))
+    })
+    // A wake stays until its lane's run settles, so an owner that exits first
+    // leaves it for the next owner of the session.
+    const startWoken = Effect.gen(function* () {
+      // Like the lane scheduler, wakes go to the process's current controller only.
+      if (!schedulerRef.current || inboxControllerRef.current !== impl) return
+      const wakes = yield* Effect.sync(() => Database.use((db) => SessionOwner.listWakes(db)))
+      for (const wake of wakes) {
+        // Remote input must reach a turn already waiting on this lane, as local input would.
+        yield* wakeInputWaiters(wake)
+        yield* announceRemoteInput(wake).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => log.warn("inbox wake announce failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) }))))
+        const key = waiterKey(wake)
+        if (wakingLanes.has(key)) continue
+        wakingLanes.add(key)
+        const settled = () => {
+          wakingLanes.delete(key)
+          try {
+            Database.use((db) => SessionOwner.clearWake(db, wake))
+          } catch (error) {
+            log.warn("inbox wake clear failed", { sessionID: wake.sessionID, agentID: wake.agentID, error: String(error) })
+          }
+        }
+        // Reconcile a session this process has not run yet before its first
+        // woken lane claims input; a later first prompt then leaves that run alone.
+        const run = reconcileOnBoot(wake.sessionID).pipe(Effect.andThen(maybeKick(wake, true, settled)))
+        const kicked = yield* inSessionInstance(wake.sessionID, run).pipe(Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            log.warn("inbox wake failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) })
+            return false
+          })))
+        if (!kicked) wakingLanes.delete(key)
+      }
+    })
+    yield* Effect.gen(function* () {
+      while (true) {
+        yield* Effect.sleep(WAKE_POLL_MS + Math.floor(Math.random() * WAKE_POLL_JITTER_MS))
+        yield* startWoken.pipe(Effect.catchCause((cause) => Effect.sync(() => log.warn("inbox wake poll failed", { cause: Cause.pretty(cause) }))))
+      }
+    }).pipe(Effect.forkScoped)
     yield* bindScopedRef(inboxControllerRef, impl)
     return Service.of(impl)
   }),

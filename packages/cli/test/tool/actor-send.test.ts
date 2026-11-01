@@ -22,6 +22,12 @@ import { Truncate } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { startProcessOwner } from "../lib/process-owner"
+import { ProcessLiveness } from "../../src/session/process-liveness"
+import { SessionOwner } from "../../src/session/session-owner"
+import { SessionOwnerTable } from "../../src/session/session-owner.sql"
+import { InboxWakeTable } from "../../src/inbox/inbox.sql"
+import { schedulerRef } from "../../src/inbox/scheduler"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -147,6 +153,72 @@ describe("actor tool — send action", () => {
         expect(parsed.inboxID).toBeNull()
         expect(parsed.error).toBe("receiver not found")
         expect(result.title).toContain("receiver not found")
+      }),
+    ),
+  )
+
+  // A cross-session message runs only in the process that has the receiver open.
+  const sendAcross = (from: SessionID, to: SessionID) => Effect.gen(function* () {
+    const def = yield* (yield* ActorTool).init()
+    const result = yield* def.execute(
+      { operation: { action: "send", to_actor_id: "main", to_session_id: to, content: "please take task 2" } },
+      ctxFor(from),
+    )
+    return JSON.parse(result.output) as { inboxID: string; delivery?: string; owner_pid?: number; hint?: string }
+  })
+
+  it.live(
+    "cross-session send to a session no process has open queues it and tells the sender",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "coordinator" })
+        const target = yield* sessions.create({ title: "worker" })
+        // With a lane scheduler present this process could run the receiver; it must not.
+        const kicks: string[] = []
+        const previous = schedulerRef.current
+        schedulerRef.current = { kick: (lane) => Effect.sync(() => { kicks.push(lane.sessionID) }) }
+        yield* Effect.addFinalizer(() => Effect.sync(() => { schedulerRef.current = previous }))
+        const parsed = yield* sendAcross(chat.id, target.id)
+        expect(kicks).toEqual([])
+        expect(parsed.inboxID).toBeTruthy()
+        expect(parsed.delivery).toBe("receiver_not_open")
+        expect(parsed.hint).toContain(target.id)
+        // The sender's process neither adopted the receiver nor lost the message.
+        expect(Database.use((db) => SessionOwner.status(db, target.id))).toEqual({ kind: "unowned" })
+        expect(Database.use((db) => db.select().from(InboxWakeTable).where(eq(InboxWakeTable.session_id, target.id)).all())).toHaveLength(1)
+      }),
+    ),
+  )
+
+  it.live(
+    "cross-session send to a session another live process runs names that process",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "coordinator" })
+        const target = yield* sessions.create({ title: "worker" })
+        const owner = yield* Effect.promise(() => startProcessOwner(ProcessLiveness.directory()))
+        yield* Effect.addFinalizer(() => Effect.promise(owner.kill))
+        Database.use((db) => db.insert(SessionOwnerTable)
+          .values({ session_id: target.id, instance_id: owner.instanceID, pid: owner.pid, time_claimed: Date.now() }).run())
+        const parsed = yield* sendAcross(chat.id, target.id)
+        expect(parsed.delivery).toBe("queued_for_owner")
+        expect(parsed.owner_pid).toBe(owner.pid)
+      }),
+    ),
+    30_000,
+  )
+
+  it.live(
+    "cross-session send to a session this process runs says it runs here",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "coordinator" })
+        const target = yield* sessions.create({ title: "worker" })
+        Database.use((db) => SessionOwner.claim(db, target.id))
+        expect((yield* sendAcross(chat.id, target.id)).delivery).toBe("this_process")
       }),
     ),
   )

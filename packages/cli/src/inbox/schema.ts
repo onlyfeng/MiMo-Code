@@ -36,6 +36,12 @@ export type AcceptInput = {
   idempotencyKey?: string
   legacyInboxID?: string
   generatedPartIDs?: ReadonlySet<PartID>
+  /**
+   * Whether this process may take an unowned receiver session and run it here.
+   * Defaults to true; input from another session passes false so a session
+   * nobody has open is not run invisibly by the sender's process.
+   */
+  adoptReceiver?: boolean
 }
 
 export const ReceiptStateSchema = z.enum(["accepted", "claimed", "settled", "cancelled", "rejected"])

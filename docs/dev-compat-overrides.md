@@ -302,6 +302,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-10-31 DC-SESSION-001 added
+
+New compat owner, no inherited change: one live process drives a session when several MiMo processes share one database (design `docs/superpowers/specs/2026-10-31-session-process-ownership-design.md`). It adds the twelfth owner to the sync index. New source files: `session/process-liveness.ts`, `session/session-owner.ts`, `session/session-owner.sql.ts` and migration `20261031000000_session_owner`. Overlays: `session/execution-ownership.ts`, `session/run-state.ts`, `session/prompt.ts` (`preparePrompt`), `inbox/controller.ts`, `inbox/inbox.ts`, `inbox/inbox.sql.ts`, `inbox/schema.ts`, `tool/actor.ts` (`send`), `actor/registry.ts`, `storage/index.ts`, `cli/cmd/tui/worker.ts` and `cli/cmd/tui/thread.ts`, plus tests. `session/prompt.ts` and `tool/actor.ts` were already compat-different. With a single process the visible behavior is unchanged; a cross-session `actor send` now reports where the message runs.
+
 ## 2026-10-19 DC-WEBFETCH-001 added
 
 New compat owner, no inherited change: an opt-in `webfetch` config block lists gateway models that fetch a public URL when the direct fetch cannot (a host without public DNS or egress), with private targets kept direct-only. It adds two new source files, `tool/webfetch-hosted/destination.ts` and `tool/webfetch-hosted/hosted.ts`, and overlays on `tool/webfetch.ts`, `tool/webfetch.txt`, `config/config.ts` and the generated SDK `types.gen.ts`, plus two test files. Without a `webfetch` config block, WebFetch routing is unchanged; the only always-on change is the tool description's added line about hosted results.
@@ -1348,6 +1352,7 @@ files remain byte-identical to the accepted main correction.
 | DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
 | DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
 | DC-WEBFETCH-001 | `webfetch` config, WebFetch route chain, destination classification, hosted fetch models | Compat-only extension; main has no hosted fetch and no `webfetch` config | Preserve direct-first default, private targets direct-only, result-block proof, digest labelling and chained failure reasons |
+| DC-SESSION-001 | `ExecutionOwnership`, `SessionRunState` entries, `preparePrompt`, inbox `maybeKick`/wake poller/`reconcileOnBoot`, `actor send`, `sweepAbandonedZombies`, TUI `claimSession` | Compat-only extension; main assumes one process per database | Keep one live driver per session; never adopt across sessions; gate any new lane start, run entry or boot-time recovery of other processes' state |
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -2670,6 +2675,122 @@ files remain byte-identical to the accepted main correction.
   with direct-first routing and private-target protection, or when the user
   drops the `webfetch` config. If propagated to `main`, move the contract to
   the shared registry.
+
+## DC-SESSION-001 — one live process drives a session
+
+- Status: active
+- Canonical owner: `dev/compat` session process ownership
+- Added: 2026-10-31 (twelfth owner).
+- Base: inherited `main` checks execution ownership by directory and workspace
+  only. Run state, the bus and the TUI live in each process's memory, so when
+  several `mimo` windows share `mimocode.db`, any process that accepts input
+  for a session can start it. A cross-session `actor send` ran the receiver's
+  turn inside the sender's process: the receiver's window showed nothing, two
+  processes could drive one session, and their concurrent writes raised
+  `database is locked`. The actor abandon sweep settled live processes' long
+  tool calls as failures.
+- Contract:
+  - Liveness (`session/process-liveness.ts`): each process holds an exclusive
+    SQLite lock on `<data dir>/instances/<instance id>.lock` for its lifetime
+    (`locking_mode=EXCLUSIVE` after one write, on the `#db` client, so Bun and
+    Node behave alike). Another instance is alive exactly while that lock
+    cannot be taken; a probe that takes it deletes the file. No heartbeat or
+    expiry: a paused, sleeping or busy process stays alive, a killed one is
+    dead at once. The connection is held strongly, because Bun closes an
+    unreachable database on collection. Publishing and locking a new lock
+    file, and deleting one that probed free, both run under the directory's
+    coordination lock (`coordination.db`); a probe that finds a file free looks
+    again under it, so a starting process's file is never deleted.
+  - Ownership (`session_owner`): every `SessionRunState` entry (through
+    `claimExecution`, after instance ownership) and `preparePrompt` (before it
+    writes) claim the session for the current process. Another live owner
+    fails the call with `OwnedElsewhereError`, naming its pid; a dead owner's
+    session is adopted with a compare-and-set. Ownership lasts until the
+    process exits.
+  - Delivery: inbox accepts stay durable everywhere; only the owner kicks the
+    lane. When ownership stops a process (another live owner, or input that
+    may not adopt an unowned receiver) it writes an `inbox_wake` row, in the
+    accept transaction itself, so a sender interrupted after the commit
+    cannot leave input that no process starts. Each
+    controller looks at the wakes for its own sessions every 1–1.5 s, kicks the
+    lane in the session's own instance, and clears the wake only after that
+    run settles (unless it was rung again since), so an owner that exits first
+    leaves it for the next owner. Before the first woken lane of a session it
+    has not run yet, the controller runs that session's `reconcileOnBoot`, so a
+    later first prompt cannot cancel the woken run's claims as crashed work.
+    Only the process's current controller (`inboxControllerRef`) takes wakes,
+    as only the current scheduler runs lanes. A wake also releases the owner's
+    `observeInput` waiters, so remote input reaches an actor wait or retry
+    backoff as local input does. The owner announces input messages another
+    process wrote (`SyncEvent.announce`: bus events only, no projection) when
+    it takes their wake or when a running turn claims them first, once per
+    process, so its own TUI shows each delivered message before the reply.
+    A woken lane runs with the controller's context, so its Effect logs reach
+    the log file rather than the terminal under the TUI. An adoptable lane in
+    a process without a scheduler waits for its next run, as before.
+  - `actor send` to another session passes `adoptReceiver: false` and reports
+    `delivery`: `this_process`, `queued_for_owner` with `owner_pid`, or
+    `receiver_not_open` with a hint naming `mimo -s <id>`. Same-session sends
+    and internal flows (child notifications, prompts, workflows) keep
+    adopting.
+  - A TUI started with `-s <id>` without `--fork` claims that session through
+    the worker `claimSession` RPC (`ExecutionOwnership.claimOpened`), so queued
+    input starts without a keystroke, but only when the window's directory and
+    workspace own the session; a session from another project is not claimed.
+  - `sweepAbandonedZombies` skips actors whose instance is alive; the registry
+    layer takes the liveness lock before it writes rows naming the process.
+- Delta: windows still running an older binary neither claim nor honour
+  ownership, so every window needs a restart. Switching sessions inside a
+  window claims on the first turn, not on view. Opening a window for a
+  receiver nobody has open is not automatic.
+- Source surfaces: `packages/cli/src/session/{process-liveness,session-owner,session-owner.sql,execution-ownership,run-state,prompt}.ts`,
+  `packages/cli/src/inbox/{controller,inbox,inbox.sql,schema}.ts`,
+  `packages/cli/src/tool/actor.ts`, `packages/cli/src/actor/registry.ts`,
+  `packages/cli/src/storage/index.ts`,
+  `packages/cli/src/cli/cmd/tui/{worker,thread}.ts`,
+  `packages/cli/migration/20261031000000_session_owner/migration.sql`.
+- Test surfaces: `test/session/session-owner-e2e.test.ts` (two real processes
+  over one database file: the turn runs in the receiver, the sender never sees
+  that session busy, one model request), `test/session/process-liveness.test.ts`,
+  `test/session/session-owner.test.ts`, `test/session/session-owner-prompt.test.ts`,
+  the six run-entry cases in `test/session/execution-ownership.test.ts`,
+  `test/inbox/session-owner-delivery.test.ts`, the three `delivery` cases in
+  `test/tool/actor-send.test.ts`, and the live-instance sweep case in
+  `test/actor/registry.test.ts`. Fixtures: `test/fixture/process-owner.ts`,
+  `test/fixture/session-owner-peer.ts`, `test/lib/process-owner.ts`.
+- Evidence (2026-11-01, PR #183 runtime/tests `501ede28`, pinned Bun 1.3.14,
+  ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and
+  `MIMOCODE_CODEX_MODE` unset):
+  - Exact-SHA CI passes: lint, typecheck, and test with all four unit shards
+    and the dedicated suites. The workflow skips Windows runtime on this
+    trigger.
+  - A local focused run passes 1583 cases, with 2 skips and 8 failures. The
+    run covers `test/inbox`, `test/actor`, `test/tool`, and the owner,
+    execution-ownership and run-state session files. All 8 failures are the
+    `subagent-resume-negatives` "Missing actual prefix captor" cases, which
+    pass 8/8 alone.
+  - Each guarded rule failed its test when removed, checked against the code
+    as it stood when the rule was added:
+    - the run-state claim, the prompt claim, the open-time instance check, and
+      the sweep's liveness filter;
+    - the kick's ownership check, the accept-transaction wake, the wake
+      poller, wake retention, first-run reconciliation, and current-controller
+      polling;
+    - the release of remote waiters, the claim-time and wake-time
+      announcements, and the controller logger context;
+    - the coordinated second probe and busy detection in liveness;
+    - the tool's `adoptReceiver: false`.
+  - Removing both the kick check and the run-state claim fails the
+    two-process test.
+  - Codex review raised ten findings over seven rounds, all fixed; the final
+    round on `501ede28` reported none.
+  - Six `aistudy` agent windows on build `045168f1` exchanged cross-session
+    messages. The display faults they showed are fixed in `71020407` and
+    `4543da04`: log lines over the TUI, and a delivered message missing
+    until reload.
+- Exit condition: retire when shared `main` (or upstream) gains process-level
+  session ownership with equivalent delivery, or MiMo runs one process per
+  database. If propagated to `main`, move the contract to the shared registry.
 
 ### C13 stable candidate verification
 
