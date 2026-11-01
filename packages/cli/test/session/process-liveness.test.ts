@@ -37,7 +37,9 @@ describe("process liveness", () => {
     expect(() => process.kill(owner.pid, 0)).not.toThrow()
   }, 30_000)
 
-  test("a dead instance whose lock file cannot be deleted yet is still dead, and a later probe deletes it", () => {
+  // Root deletes inside a read-only directory, so POSIX has no deletion blocker for it.
+  const posixRoot = process.platform !== "win32" && process.getuid?.() === 0
+  test.skipIf(posixRoot)("a dead instance whose lock file cannot be deleted yet is still dead, and a later probe deletes it", () => {
     using locks = lockDirectory()
     const stale = "00000000-0000-4000-8000-000000000001"
     const file = path.join(locks.directory, `${stale}.lock`)
