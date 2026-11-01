@@ -44,14 +44,17 @@ describe("process liveness", () => {
     writeFileSync(file, "")
     ProcessLiveness.withCoordination(locks.directory, () => undefined)
     // Deletion fails on Windows while another handle has the file open, as a
-    // concurrent probe does, and on POSIX inside a read-only directory.
+    // concurrent probe does. POSIX deletes open files, so there the directory
+    // is made read-only instead; on Windows that attribute would also fail
+    // the coordination lock's mkdir.
     const open = init(file).$client
-    chmodSync(locks.directory, 0o555)
+    const readOnly = process.platform !== "win32"
+    if (readOnly) chmodSync(locks.directory, 0o555)
     try {
       expect(ProcessLiveness.isAlive(stale, locks.directory)).toBe(false)
       expect(existsSync(file)).toBe(true)
     } finally {
-      chmodSync(locks.directory, 0o755)
+      if (readOnly) chmodSync(locks.directory, 0o755)
       open.close()
     }
     expect(ProcessLiveness.isAlive(stale, locks.directory)).toBe(false)
