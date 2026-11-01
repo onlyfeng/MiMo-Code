@@ -505,6 +505,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
 
+- 2026-11-01: `prefixCaptureRef` is filled through `registerPrefixCapture`. Disposing a SessionPrompt layer hands the slot to the most recent captor that is still live, never to a disposed one, instead of clearing it. Production holds one layer, so nothing changes there. A test process that builds its own layer beside the process-wide AppRuntime no longer strands AppRuntime without a captor; that was the cause of the combined-run "Missing actual prefix captor" failures in `subagent-resume-negatives`, `subagent-resume-route` and `session-actor-recovery`. Covered by `test/session/prefix-capture-ref.test.ts`.
+
 - 2026-10-31 (FC-021): the writer's full receipt-aware history is bounded by the usable window. When the projected view exceeds it, the writer forks the parent's own view; the full view is kept whenever it fits.
 
 - 2026-10-22 synchronization: new rebuild parts carry `placement: "after-tail"`; legacy records retain exact chronological seam reconstruction. Model requests use the boundary digest and unanswered text/media, while the writer and logical turn recover full receipt-aware history. Queued inputs are excluded until delivery or terminal settlement. Task provenance, run approval and fail-closed frozen capture remain unchanged. The appended window and legacy collapse are covered by placement, writer-tail, legacy golden, rebuild-unify and tail-digest tests.
