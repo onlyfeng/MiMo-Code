@@ -1532,7 +1532,11 @@ describe("mandatory network recovery", () => {
   for (const phase of ["request", "stream"] as const) {
     test(`${phase} coordinator retries eight HTTP timeouts then succeeds despite host/config limits`, async () => {
       loadHostErrorCatalog({ protocolVersion: 2, rules: [] })
-      const config = SessionRetry.resolve({ retry: { network: { mode: "bounded", maxRetries: 1, deadlineMs: 1, initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } } })
+      // Request-scope network errors take the request budget's delays, so it is
+      // limited as tightly as the network budget: otherwise eight real backoffs
+      // from the 200 ms default sleep about 50 s.
+      const limits = { mode: "bounded", maxRetries: 1, deadlineMs: 1, initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } as const
+      const config = SessionRetry.resolve({ retry: { network: limits, request: limits } })
       let attempts = 0
       const updates: Array<{ hostCode?: string; kind: string; maxAttempts: number }> = []
       const schedule = SessionRetry.policy({
