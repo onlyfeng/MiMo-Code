@@ -32,9 +32,14 @@ export function directory() {
 
 const lockFile = (dir: string, instanceID: string) => path.join(dir, `${instanceID}.lock`)
 
+// Best effort. Windows refuses to delete a file that another handle has open,
+// such as a concurrent probe; a file left behind is deleted by a later probe.
 function remove(file: string) {
-  rmSync(file, { force: true })
-  rmSync(`${file}-journal`, { force: true })
+  for (const target of [file, `${file}-journal`]) {
+    try {
+      rmSync(target, { force: true })
+    } catch {}
+  }
 }
 
 function busy(error: unknown) {
@@ -92,6 +97,20 @@ export function ensureHeld(dir = directory()): void {
   })
   held = { directory: dir, client }
   sweep(dir)
+}
+
+/**
+ * Give up this process's liveness lock and delete its file, for a test harness
+ * about to delete the directory: Windows cannot delete a file that is still
+ * open. Other processes then see this one as gone and may adopt its sessions,
+ * so call it only once this process will run nothing more.
+ */
+export function release(): void {
+  if (!held) return
+  const { directory: dir, client } = held
+  held = undefined
+  client.close()
+  remove(lockFile(dir, INSTANCE_ID))
 }
 
 /** Whether the process that took `instanceID`'s lock is still running. */

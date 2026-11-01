@@ -213,6 +213,10 @@ if (createdCwdMimocode) writeFileSync(cwdMimocodeMarker, identity(cwdMimocode))
 afterAll(async () => {
   const { Database } = await import("../src/storage")
   Database.close()
+  // The liveness lock file stays open for the process's lifetime, and Windows
+  // cannot delete an open file.
+  const { ProcessLiveness } = await import("../src/session/process-liveness")
+  ProcessLiveness.release()
   const roots = [dir, fixtureRoot, outsideGitRoot]
   const removeSync = (target: string) => {
     try {

@@ -1,4 +1,5 @@
-// A second real process that holds its liveness lock until the parent asks it to exit.
+// A second real process that holds its liveness lock until the parent asks it to
+// release that lock or to exit.
 import { ProcessLiveness } from "../../src/session/process-liveness"
 
 const [directory] = process.argv.slice(2)
@@ -6,5 +7,9 @@ if (!directory || !process.send) throw new Error("process-owner requires its tes
 ProcessLiveness.ensureHeld(directory)
 process.on("message", (message) => {
   if (message === "finish") process.exit(0)
+  if (message === "release") {
+    ProcessLiveness.release()
+    process.send!("released")
+  }
 })
 process.send({ instanceID: ProcessLiveness.INSTANCE_ID, pid: process.pid })

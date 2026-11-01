@@ -302,6 +302,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-01 DC-SESSION-001 Windows lock release
+
+Follow-up to PR #183, no inherited change and no owner added or retired. The first `windows-runtime` run on merge `e332bb94` passed every selected case but failed each focused suite's teardown with `EBUSY` while deleting the per-run test data directory: the process's liveness lock file stays open for its lifetime, and Windows cannot delete an open file. `ProcessLiveness.release()` closes and deletes this process's lock, and the test preload calls it after `Database.close()`, before it removes its directories. Deleting another instance's dead lock file is now best effort: on Windows a concurrent probe's open handle makes the deletion fail, which used to throw out of `status`/`claim`; a file left behind is deleted by a later probe. The Windows entry (DC-PLATFORM-001) also runs `process-liveness` and `session-owner` as a focused suite, so the lock primitive is checked on real Windows locking and deletion rules. New overlays: `test/preload.ts` and `script/verify-windows-runtime.ts`, both previously identical to main.
+
 ## 2026-10-31 DC-SESSION-001 added
 
 New compat owner, no inherited change: one live process drives a session when several MiMo processes share one database (design `docs/superpowers/specs/2026-10-31-session-process-ownership-design.md`). It adds the twelfth owner to the sync index. New source files: `session/process-liveness.ts`, `session/session-owner.ts`, `session/session-owner.sql.ts` and migration `20261031000000_session_owner`. Overlays: `session/execution-ownership.ts`, `session/run-state.ts`, `session/prompt.ts` (`preparePrompt`), `inbox/controller.ts`, `inbox/inbox.ts`, `inbox/inbox.sql.ts`, `inbox/schema.ts`, `tool/actor.ts` (`send`), `actor/registry.ts`, `storage/index.ts`, `cli/cmd/tui/worker.ts` and `cli/cmd/tui/thread.ts`, plus tests. `session/prompt.ts` and `tool/actor.ts` were already compat-different. With a single process the visible behavior is unchanged; a cross-session `actor send` now reports where the message runs.
@@ -1513,6 +1517,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
 
+- 2026-11-01 DC-SESSION-001 follow-up: the Windows entry adds a fourth focused suite, `session-owner` (`test/session/process-liveness.test.ts` and `test/session/session-owner.test.ts`), and records `src/session/process-liveness.ts` in its source hashes. That suite and its subject belong to DC-SESSION-001; the archive, no-rg and other focused cases are unchanged.
+
 - 2026-10-10 FC-008 Actions usage reduction (main PR #153): the shared `windows-runtime` job no longer runs for any pull request, including one into `dev/compat`. It runs on each push to `dev/compat` that changes more than `docs/`, and on dispatch with `windows_runtime: true`; a compat branch that changes `ripgrep.ts`, `archive.ts` or the Windows entry dispatches `test.yml` on that branch with the input when it needs pre-merge platform evidence. The environment record no longer carries a pull-request head SHA. The platform entry and both fallbacks are unchanged.
 
 - 2026-10-02 full sync: the Windows runtime entry is now `packages/cli/script/verify-windows-runtime.ts`; the shared `test.yml` `windows-runtime` job and the `tsconfig.scripts.json` exclusion follow the rename. The ripgrep/archive overlay is unchanged.
@@ -2700,7 +2706,11 @@ files remain byte-identical to the accepted main correction.
     unreachable database on collection. Publishing and locking a new lock
     file, and deleting one that probed free, both run under the directory's
     coordination lock (`coordination.db`); a probe that finds a file free looks
-    again under it, so a starting process's file is never deleted.
+    again under it, so a starting process's file is never deleted. Deleting a
+    dead instance's file is best effort (Windows refuses while a concurrent
+    probe has it open; a later probe deletes it). `release()` closes and
+    deletes this process's own lock for a test harness about to delete the
+    directory; the test preload calls it after `Database.close()`.
   - Ownership (`session_owner`): every `SessionRunState` entry (through
     `claimExecution`, after instance ownership) and `preparePrompt` (before it
     writes) claim the session for the current process. Another live owner
@@ -2749,6 +2759,10 @@ files remain byte-identical to the accepted main correction.
   `packages/cli/src/storage/index.ts`,
   `packages/cli/src/cli/cmd/tui/{worker,thread}.ts`,
   `packages/cli/migration/20261031000000_session_owner/migration.sql`.
+- Harness surfaces: `packages/cli/test/preload.ts` (`release()` before the
+  data directory is removed) and the `session-owner` focused suite in
+  `packages/cli/script/verify-windows-runtime.ts` (entry owned by
+  DC-PLATFORM-001).
 - Test surfaces: `test/session/session-owner-e2e.test.ts` (two real processes
   over one database file: the turn runs in the receiver, the sender never sees
   that session busy, one model request), `test/session/process-liveness.test.ts`,
@@ -2762,8 +2776,9 @@ files remain byte-identical to the accepted main correction.
   ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and
   `MIMOCODE_CODEX_MODE` unset):
   - Exact-SHA CI passes: lint, typecheck, and test with all four unit shards
-    and the dedicated suites. The workflow skips Windows runtime on this
-    trigger.
+    and the dedicated suites. That dispatch did not set `windows_runtime`;
+    the first Windows run, on merge `e332bb94`, failed at teardown (see the
+    2026-11-01 note).
   - A local focused run passes 1583 cases, with 2 skips and 8 failures. The
     run covers `test/inbox`, `test/actor`, `test/tool`, and the owner,
     execution-ownership and run-state session files. All 8 failures are the
