@@ -2058,6 +2058,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
+- 2026-11-01 PR #185 propagation: main's FC-002 captor registration (`registerPrefixCapture`) merges without conflict into `prefix-capture-ref.ts` and the compat `prompt.ts` overlay. The compat-only `turnContext` field of `PrefixCaptureResult` and the compat capture body are unchanged; only the finalizer now unregisters its own captor instead of clearing the slot. A full-context actor therefore still reads the live layer's frozen system, tools, permissions and turnContext, and disposing another `SessionPrompt` layer in the same process no longer removes it. Overflow handling and the DC-SESSION-001 `preparePrompt` overlay are untouched. `retry.test.ts` and the new `prefix-capture-ref.test.ts` are byte-identical to main.
+
 - 2026-09-24 synchronization: preserve the strict JSON `context` and `lifecycle`
   selectors, bounded state capture, and frozen full-context actor lifecycle.
   Retire only the historical shell and no-script argument recovery surfaces

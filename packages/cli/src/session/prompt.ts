@@ -152,7 +152,7 @@ import {
   assistantFinalText,
   sessionErrorText,
 } from "./trajectory"
-import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
+import { prefixCaptureRef, prefixModelIdentity, registerPrefixCapture } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { Interface as ActorInterface } from "@/actor/spawn"
 import { workflowRef } from "@/workflow/runtime-ref"
@@ -1070,12 +1070,8 @@ export const layer = Layer.effect(
         ),
       )
     }
-    prefixCaptureRef.current = capture
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        if (prefixCaptureRef.current === capture) prefixCaptureRef.current = undefined
-      }),
-    )
+    const unregisterCapture = registerPrefixCapture(capture)
+    yield* Effect.addFinalizer(() => Effect.sync(unregisterCapture))
 
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
       return yield* EffectBridge.make().pipe(RunApproval.capture)
