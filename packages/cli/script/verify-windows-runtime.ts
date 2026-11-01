@@ -83,14 +83,20 @@ const focusedTests = {
     name: "tool-gate-orchestration",
     args: ["test", "--timeout", "120000", "test/session/tool-gate-orchestration.test.ts"],
   },
+  // DC-SESSION-001: the liveness lock relies on the platform's file locking and deletion rules.
+  sessionOwner: {
+    name: "session-owner",
+    args: ["test", "--timeout", "120000", "test/session/process-liveness.test.ts", "test/session/session-owner.test.ts"],
+  },
 }
 const focusedExits = {
   [focusedTests.hiddenTools.name]: await run(focusedTests.hiddenTools.name, focusedTests.hiddenTools.args),
   [focusedTests.runApproval.name]: await run(focusedTests.runApproval.name, focusedTests.runApproval.args),
   [focusedTests.toolGate.name]: await run(focusedTests.toolGate.name, focusedTests.toolGate.args),
+  [focusedTests.sessionOwner.name]: await run(focusedTests.sessionOwner.name, focusedTests.sessionOwner.args),
 }
 
-const files = ["src/util/archive.ts", "src/util/process.ts", "src/file/ripgrep.ts"]
+const files = ["src/util/archive.ts", "src/util/process.ts", "src/file/ripgrep.ts", "src/session/process-liveness.ts"]
 await fs.writeFile(
   path.join(artifacts, "runtime.json"),
   `${JSON.stringify(
