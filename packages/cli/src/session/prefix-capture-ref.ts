@@ -71,3 +71,23 @@ export type PrefixCaptureFn = (input: {
 }) => Effect.Effect<PrefixCaptureResult, never>
 
 export const prefixCaptureRef: { current: PrefixCaptureFn | undefined } = { current: undefined }
+
+const live: PrefixCaptureFn[] = []
+
+/**
+ * Make `capture` the process's captor until the returned function runs.
+ *
+ * A process can hold several SessionPrompt layers at once (a test builds its
+ * own beside the process-wide AppRuntime). Disposing one gives the slot back to
+ * the most recent captor still live, never to one already disposed, instead of
+ * clearing it under the others.
+ */
+export function registerPrefixCapture(capture: PrefixCaptureFn): () => void {
+  live.push(capture)
+  prefixCaptureRef.current = capture
+  return () => {
+    const index = live.lastIndexOf(capture)
+    if (index !== -1) live.splice(index, 1)
+    if (prefixCaptureRef.current === capture) prefixCaptureRef.current = live.at(-1)
+  }
+}
