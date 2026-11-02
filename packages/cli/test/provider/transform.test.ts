@@ -679,6 +679,13 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
             { type: "object", properties: { action: { const: "get" } } },
           ],
         },
+        // The flat form closes the object, so the `set` branch's dictionary would be lost.
+        settings: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "get" } } },
+            { type: "object", properties: { action: { const: "set" } }, additionalProperties: { type: "string" } },
+          ],
+        },
         // A flat object keeps one schema per property, so `value` would lose `number`.
         measure: {
           anyOf: [

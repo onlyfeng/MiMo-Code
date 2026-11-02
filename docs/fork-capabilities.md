@@ -2323,9 +2323,12 @@ logged`, and the peer `success`/`failure` variants of
     constrain such a property differently (actor's `task_id`), the flat form
     widens it to that type and zod applies each branch's constraint. The union
     node may carry only `type: "object"`, `description` and `title` beside the
-    branches. Any other union, such as an MCP tool's `string | null`, a numeric
-    discriminator, a shared property whose type differs between branches, or a
-    node with its own `properties` or `required`, is left as it is, for Grok too.
+    branches, and each branch only `type`, `properties`, `required`,
+    `description`, `title` and a missing or `false` `additionalProperties`. Any
+    other union, such as an MCP tool's `string | null`, a numeric discriminator,
+    a shared property whose type differs between branches, a node with its own
+    `properties` or `required`, or a branch with dynamic properties, is left as
+    it is, for Grok too.
   - Every other model receives the nested union unchanged. The existing
     root-level flattening is unchanged for all models.
 - Motivation: Grok answers a property whose schema is `anyOf` of object
@@ -2351,8 +2354,8 @@ logged`, and the peer `success`/`failure` variants of
     Grok case.
   - `packages/cli/test/provider/transform.test.ts` "grok nested unions": a
     `string | null` property, object branches without a discriminator, a
-    numeric discriminator, a shared property of differing types and a node with
-    its own required property pass through
+    numeric discriminator, a shared property of differing types, a node with its
+    own required property and a branch with `additionalProperties` pass through
     unchanged; a discriminated object union is flattened with its description
     kept; a shared string property constrained differently is widened to
     `string`. Accepting a non-string discriminator, accepting differing types,

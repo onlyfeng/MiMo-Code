@@ -2021,6 +2021,9 @@ function shapeOf(node: unknown): unknown {
 // Keys a qualifying union node may carry: anything else (shared `properties`,
 // `required`, `allOf`, ...) would be lost by replacing the node with the flat form.
 const NESTED_UNION_KEYS = new Set(["type", "anyOf", "oneOf", "description", "title"])
+// Keys a qualifying branch may carry; the flat form keeps only fixed properties
+// and closes the object, so dynamic-property schemas would be lost.
+const NESTED_BRANCH_KEYS = new Set(["type", "properties", "required", "additionalProperties", "description", "title"])
 
 function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> | undefined {
   if (Object.keys(node).some((key) => !NESTED_UNION_KEYS.has(key))) return undefined
@@ -2028,7 +2031,12 @@ function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> 
   const variants = node.anyOf ?? node.oneOf
   if (!variants || variants.length < 2) return undefined
   const objects = variants.filter(
-    (v): v is JSONSchema7 => typeof v === "object" && v.type === "object" && v.properties !== undefined,
+    (v): v is JSONSchema7 =>
+      typeof v === "object" &&
+      v.type === "object" &&
+      v.properties !== undefined &&
+      (v.additionalProperties === undefined || v.additionalProperties === false) &&
+      Object.keys(v).every((key) => NESTED_BRANCH_KEYS.has(key)),
   )
   if (objects.length !== variants.length) return undefined
   const constOf = (v: JSONSchema7, key: string) => {
