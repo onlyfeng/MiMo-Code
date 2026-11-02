@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Layer } from "effect"
 import z from "zod"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { schema as transformSchema } from "../../src/provider/transform"
 import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -14,6 +15,7 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ProviderTest } from "../fake/provider"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
@@ -940,6 +942,25 @@ describe("Actor tool subagent_type enum (F36)", () => {
         // don't stringify the envelope, and must retain its inner 8-way union.
         expect(flat.properties.operation.type).toBe("object")
         expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(8)
+      }),
+    ),
+  )
+
+  // Grok answers the nested operation union with `{}` every time (FC-025).
+  it.live("grok gets the operation envelope as one flat object with an action enum", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
+        const op = transformSchema(grok, z.toJSONSchema(def.parameters) as JSONSchema7).properties?.operation
+        if (typeof op !== "object") throw new Error("expected an operation object schema")
+        const action = op.properties?.action
+        const actions = typeof action === "object" ? action.enum : undefined
+        expect(op.anyOf ?? op.oneOf).toBeUndefined()
+        expect(op.required).toEqual(["action"])
+        expect(actions).toHaveLength(8)
+        expect(actions?.[0]).toBe("spawn")
       }),
     ),
   )

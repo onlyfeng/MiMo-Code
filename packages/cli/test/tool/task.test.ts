@@ -11,6 +11,11 @@ import { Truncate } from "../../src/tool"
 import { TaskTool } from "../../src/tool/task"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import z from "zod"
+import type { JSONSchema7 } from "@ai-sdk/provider"
+import { schema as transformSchema } from "../../src/provider/transform"
+import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ProviderTest } from "../fake/provider"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -201,6 +206,25 @@ describe("task tool", () => {
           tool.execute({ operation: { action: "progress", id: t.id } } as any, ctx(sess.id)),
         )
         expect(exit._tag).toBe("Failure")
+      }),
+    ),
+  )
+})
+
+describe("task tool: grok operation schema (FC-025)", () => {
+  // Grok answered the nested operation union with `{}` in 191 of 191 recorded task calls.
+  it.live("grok gets a flat operation object; zod still parses the nested shape", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const def = yield* (yield* TaskTool).init()
+        const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
+        const op = transformSchema(grok, z.toJSONSchema(def.parameters) as JSONSchema7).properties?.operation
+        if (typeof op !== "object") throw new Error("expected an operation object schema")
+        const action = op.properties?.action
+        expect(op.anyOf ?? op.oneOf).toBeUndefined()
+        expect(op.required).toEqual(["action"])
+        expect(typeof action === "object" ? action.enum : undefined).toContain("list")
+        expect(def.parameters.safeParse({ operation: { action: "list" } }).success).toBe(true)
       }),
     ),
   )
