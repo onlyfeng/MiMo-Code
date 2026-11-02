@@ -172,7 +172,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             const rows = cancelInputs(db, sessionID, Date.now())
             InboxSync.record({ sessionID, receipts: rows })
             return rows
-          }))
+          }, { behavior: "immediate" }))
           for (const row of rows) yield* publish(toReceipt(row))
         }).pipe(Effect.ensuring(Effect.sync(() => {
           const remaining = (stopping.get(sessionID) ?? 1) - 1
@@ -411,7 +411,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
               owner.release()
               onSettled?.()
             }
-            void work.then(settle, settle)
+            void work.then(settle, (error: unknown) => {
+              // A lane that fails before claiming leaves its input accepted; say so.
+              log.warn("inbox lane run failed", { sessionID: lane.sessionID, agentID: lane.agentID, error: String(error) })
+              settle()
+            })
           }),
           (owner) => owner.transferred ? Effect.void : Effect.sync(owner.release),
         ).pipe(Effect.uninterruptible)
@@ -525,7 +529,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             receipts: rows.map(toReceipt).sort((a, b) => compareUtf8Bytes(a.id, b.id)),
             claimFrontier,
           }
-        }))
+        // Ownership is read before the claim writes; start with the write lock
+        // so another process's commit makes this wait instead of fail.
+        }, { behavior: "immediate" }))
         if (!batch) return undefined
         // A running turn may take input another process wrote before any wake poll.
         yield* showInputs(lane.sessionID, batch.receipts.map((receipt) => receipt.inputMessageID)).pipe(Effect.catchCause((cause) =>
@@ -603,7 +609,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           }
           InboxSync.record({ sessionID: lane.sessionID, receipts: rows, lanes })
           return rows
-        }),
+        }, { behavior: "immediate" }),
       )
       for (const row of rows) yield* publish(toReceipt(row))
     })
@@ -681,7 +687,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           const receipts = cancelInputs(db, sessionID, now)
           InboxSync.record({ sessionID, receipts, epoch: epochRow })
           return { epoch: nextEpoch, receipts }
-        }),
+        }, { behavior: "immediate" }),
       )
       for (const row of stopped.receipts) yield* publish(toReceipt(row))
       log.info("inbox abort", { sessionID, epoch: stopped.epoch })
@@ -742,7 +748,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
               ),
             )
             .all()
-        })
+        }, { behavior: "immediate" })
         reconciled.add(sessionID)
         return lanes
       })
@@ -767,7 +773,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           inArray(InboxTable.state, ["accepted", "claimed"]))).returning().all()
         InboxSync.record({ sessionID: lane.sessionID, receipts: rows })
         return rows
-      }))
+      }, { behavior: "immediate" }))
       for (const row of rows) yield* publish(toReceipt(row))
       return rows.length
     })

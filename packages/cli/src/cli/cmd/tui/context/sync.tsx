@@ -603,7 +603,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     event.subscribe((event) => {
       switch (event.type) {
         case "server.instance.disposed":
-          void bootstrap().catch(reportDenied)
+          void refreshAfterDispose()
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]
@@ -1196,6 +1196,29 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           }
           throw e
         })
+    }
+
+    // An instance can be disposed under a running session, and the server boots a
+    // fresh one for the refresh. That boot can fail transiently (another process
+    // holding the shared database, for one), so a failed refresh must not take the
+    // running session down: retry, and keep the current data if it keeps failing.
+    let disposeRefresh = 0
+    async function refreshAfterDispose() {
+      const generation = ++disposeRefresh
+      const delays = [0, 500, 2000, 5000]
+      for (const [attempt, delay] of delays.entries()) {
+        if (delay) await Bun.sleep(delay)
+        if (generation !== disposeRefresh) return
+        try {
+          await bootstrap({ fatal: false })
+          return
+        } catch (error) {
+          if (isDirectoryDeniedError(error)) return reportDenied(error)
+          if (attempt === delays.length - 1) {
+            toast?.show({ message: "Refresh after instance reload failed; showing earlier data", variant: "error" })
+          }
+        }
+      }
     }
 
     onMount(() => {

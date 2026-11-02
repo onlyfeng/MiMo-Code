@@ -26,9 +26,10 @@ export const InstanceBootstrap = Effect.gen(function* () {
   yield* Plugin.Service.use((svc) => svc.init())
   // Keep startup independent of transcript size. Only actor metadata is
   // reclaimed here; orphan tools are handled when their session runs.
-  yield* Effect.sync(() => {
-    sweepAbandonedZombies()
-  }).pipe(
+  // A throw inside Effect.sync is a defect that Effect.catch never sees, and a
+  // busy database would then fail the whole boot. Settling stale actors can
+  // wait for the next boot.
+  yield* Effect.try({ try: () => sweepAbandonedZombies(), catch: (err) => err }).pipe(
     Effect.catch((err: unknown) =>
       Effect.sync(() => Log.Default.warn("abandoned actor sweep failed", { error: String(err) })),
     ),

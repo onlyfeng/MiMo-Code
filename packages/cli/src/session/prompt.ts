@@ -4199,7 +4199,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           .where(and(eq(InboxTable.id, receiptId), eq(InboxTable.state, "accepted"))).returning().all()
         QueueSync.record({ sessionID, receipts })
         return receipts
-      }))
+      }, { behavior: "immediate" }))
       for (const receipt of receipts) yield* bus.publish(ReceiptUpdated, {
         sessionID, receiptId: receipt.id, agentID: receipt.receiver_actor_id,
         state: receipt.state, inputMessageID: String(receipt.input_message_id), epoch: receipt.epoch,
@@ -5781,7 +5781,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 )).returning().all()
                 QueueSync.record({ sessionID, receipts })
                 return receipts
-              }))
+              }, { behavior: "immediate" }))
               for (const row of anchored) {
                 yield* bus.publish(ReceiptUpdated, {
                   sessionID: row.receiver_session_id,
