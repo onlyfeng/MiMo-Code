@@ -302,6 +302,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-02 DC-SESSION-001 boot reconciliation outcome (FC-024)
+
+Inherited from `main` PR #191, no owner added or retired. `reconcileOnBoot` now settles a claim already delivered into the conversation (`consumed`) as `interrupted` and an undelivered one as `never_ran`, the rule `cancelInputs` already applied. Compat's controller overlay (owner checks, unclaimed-input retry, write-contention transactions) merges without conflict around it: the two changed `set` calls are inside the existing `immediate` transaction and `assertOwnership`. The unclaimed-input retry reacts only to `accepted` rows, which reconciliation leaves `never_ran` as before, so its rings and backoff are unchanged.
+
 ## 2026-11-02 DC-SESSION-001 unclaimed input retry
 
 Follow-up to PR #187, no inherited change and no owner added or retired. Woken input could stay accepted for hours with its owner alive and idle: a woken run ended without claiming it (it failed before the claim, or claimed nothing), the wake was cleared when the run settled, and `laneKick` requeues only after a success or a claim, so nothing kicked the lane again until the next input. In the six `aistudy` windows this held three lanes for 9 to 10 hours each. Any kick that settles with waiting input still accepted now rings the lane again, and the wake poller retries it with a bounded backoff (contract above). Two delivery cases changed their stand-in scheduler from a no-op to one that claims and settles the input, as a lane does: with a no-op the wake now rightly stays, because the input is still waiting.
@@ -2292,6 +2296,7 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- 2026-11-02 FC-023 rebuild-boundary propagation (`main` PR #193): `insertRebuildBoundary` keeps the variant of the lane's newest user message when the boundary is on that message's model. Compat restores the TUI selection and resolves model-less turns through `SessionModelSelection.resolve`, whose fallback takes the last user message's model and variant; with the boundary now carrying the variant, a session reopened after a rebuild shows it and inbox deliveries keep it. `checkpoint.ts` merges without conflict beside compat's `coverage` read and writer `turnContext`.
 - 2026-10-31 FC-023 propagation: main continues the fallback model's variant in `createUserMessage`. Compat creates user messages through `SessionModelSelection.resolve`, so the resolver applies the same rule: only when neither the input nor the agent names a model, and only while the model still offers the variant. The resolver's fallback type now carries the optional variant that `lastModel` returns. The preview endpoint always sends the TUI's selected model, so a preview never reaches the fallback and its results are unchanged; a named model without a variant still previews and resolves to its default. Shell and command continuation come unchanged from main's `prompt.ts`.
 
 - 2026-10-13 full sync: upstream `3c6e6bb0` removes the compose agent and its "(legacy)" label from the Prompt footer. Compat keeps its `flexShrink={0}` agent label and `ModelMetadata` display; only the retired suffix branch is dropped.
@@ -2414,6 +2419,7 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-PROVIDER-001 — Responses routing and declared reasoning capability
 
+- 2026-11-02 FC-025 propagation (`main` PRs #192, #195): Grok now receives a flat `operation` envelope for `cron`, `task` and `actor`. Grok is matched on its model id, so a Grok gateway routed through `@ai-sdk/openai` Responses, which this owner forces to reasoning, matches as well; the routing, `forceReasoning` and provider-executed tool-call ordering hunks in `transform.ts` are untouched. Compat's actor `spawn` branch fixes `lifecycle` with a `const` (DC-ACTOR-001); #195 lets a constant present in only some branches through, so the compat `actor` envelope flattens for Grok too (`test/tool/actor.test.ts` grok case).
 - 2026-10-13 full sync: upstream `597e7103` adds `Provider.effectiveBaseURL` and an OpenCode Go session header in `session/llm.ts`. Compat's loader fallback and reasoning mapping are untouched; `test/provider/provider.test.ts` passes 95.
 
 - Status: active
