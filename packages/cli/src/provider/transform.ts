@@ -2006,18 +2006,14 @@ function isGrok(model: Provider.Model): boolean {
 // type and zod applies each branch's constraint. The union node itself may hold
 // nothing the flat form would drop. Any other union keeps its shape.
 
-// A property schema without its descriptions, for comparing branch shapes.
-function shapeOf(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(shapeOf)
-  if (!node || typeof node !== "object") return node
-  return Object.fromEntries(
-    Object.entries(node)
-      .filter(([key]) => key !== "description")
-      .map(([key, value]) => [key, shapeOf(value)]),
-  )
+// A property schema without its own annotation, for comparing branch shapes.
+// Only the root `description` goes: nested keys may be real property names.
+function shapeOf(node: JSONSchema7Definition): string {
+  if (typeof node !== "object") return JSON.stringify(node)
+  const { description: _, ...rest } = node
+  return JSON.stringify(rest)
 }
 
-// The properties to widen to their shared type, or undefined if `node` does not qualify.
 // Keys a qualifying union node may carry: anything else (shared `properties`,
 // `required`, `allOf`, ...) would be lost by replacing the node with the flat form.
 const NESTED_UNION_KEYS = new Set(["type", "anyOf", "oneOf", "description", "title"])
@@ -2048,13 +2044,21 @@ function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> 
     return values.every((value) => value !== undefined) && new Set(values).size === objects.length
   })
   if (!discriminator) return undefined
+  // flattenDiscriminatedUnion picks the first `const` property it finds; with a
+  // second one it could pick that instead and keep a single branch's value.
+  const otherConst = objects.some((v) =>
+    Object.entries(v.properties ?? {}).some(
+      ([key, prop]) => key !== discriminator && typeof prop === "object" && prop.const !== undefined,
+    ),
+  )
+  if (otherConst) return undefined
   const shapes = new Map<string, { type: JSONSchema7["type"]; shape: string }>()
   const widen = new Map<string, JSONSchema7["type"]>()
   for (const v of objects) {
     for (const [key, prop] of Object.entries(v.properties ?? {})) {
       if (key === discriminator) continue
       const type = typeof prop === "object" ? prop.type : undefined
-      const shape = JSON.stringify(shapeOf(prop))
+      const shape = shapeOf(prop)
       const seen = shapes.get(key)
       if (!seen) {
         shapes.set(key, { type, shape })

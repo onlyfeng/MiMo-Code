@@ -686,6 +686,13 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
             { type: "object", properties: { action: { const: "set" } }, additionalProperties: { type: "string" } },
           ],
         },
+        // A second `const` (here before `action`) could be taken as the discriminator.
+        coded: {
+          anyOf: [
+            { type: "object", properties: { code: { type: "number", const: 1 }, action: { const: "get" } } },
+            { type: "object", properties: { code: { type: "number", const: 2 }, action: { const: "set" } } },
+          ],
+        },
         // A flat object keeps one schema per property, so `value` would lose `number`.
         measure: {
           anyOf: [
@@ -740,6 +747,33 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
     expect(op.anyOf).toBeUndefined()
     expect(typeof taskID === "object" ? { type: taskID.type, pattern: taskID.pattern, minLength: taskID.minLength } : taskID)
       .toEqual({ type: "string", pattern: undefined, minLength: undefined })
+  })
+
+  test("compares a shared object property by its fields, including one named description", () => {
+    const payload = (type: "string" | "number"): JSONSchema7 => ({
+      type: "object",
+      description: "the payload",
+      properties: { description: { type } },
+    })
+    const schema: JSONSchema7 = {
+      type: "object",
+      properties: {
+        operation: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "text" }, payload: payload("string") } },
+            { type: "object", properties: { action: { const: "count" }, payload: payload("number") } },
+          ],
+        },
+      },
+    }
+    const op = ProviderTransform.schema(grok, schema).properties?.operation
+    if (typeof op !== "object") throw new Error("expected an object schema")
+    const flat = op.properties?.payload
+    // Widened to the shared type rather than keeping the first branch's `string` field.
+    expect(typeof flat === "object" ? { type: flat.type, properties: flat.properties } : flat).toEqual({
+      type: "object",
+      properties: undefined,
+    })
   })
 })
 

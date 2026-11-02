@@ -2318,8 +2318,9 @@ logged`, and the peer `success`/`failure` variants of
     shape, so zod still parses them with the original union and rejects a
     missing or unknown action.
   - Only a union the flat form can represent qualifies: every branch is an
-    object schema, one property holds a distinct string `const` in each branch,
-    and a property shared by several branches has one `type`. When the branches
+    object schema, one property holds a distinct string `const` in each branch
+    and no other property holds a `const`, and a property shared by several
+    branches has one `type`. When the branches
     constrain such a property differently (actor's `task_id`), the flat form
     widens it to that type and zod applies each branch's constraint. The union
     node may carry only `type: "object"`, `description` and `title` beside the
@@ -2355,11 +2356,14 @@ logged`, and the peer `success`/`failure` variants of
   - `packages/cli/test/provider/transform.test.ts` "grok nested unions": a
     `string | null` property, object branches without a discriminator, a
     numeric discriminator, a shared property of differing types, a node with its
-    own required property and a branch with `additionalProperties` pass through
+    own required property, a branch with `additionalProperties` and branches
+    with a second `const` property pass through
     unchanged; a discriminated object union is flattened with its description
     kept; a shared string property constrained differently is widened to
-    `string`. Accepting a non-string discriminator, accepting differing types,
-    or skipping the widening each fails a case.
+    `string`, and a shared object property whose inner field is named
+    `description` is compared by that field. Accepting a non-string
+    discriminator, accepting differing types, skipping the widening, accepting
+    a second `const`, or ignoring nested `description` keys each fails a case.
   - `packages/cli/test/tool/task.test.ts` and `actor.test.ts`: the same flat
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
