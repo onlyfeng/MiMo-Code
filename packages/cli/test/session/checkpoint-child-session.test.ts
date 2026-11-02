@@ -197,7 +197,6 @@ describe("checkpoint writer child-session isolation", () => {
           "apply_patch",
           "glob",
           "grep",
-          "task",
         ])
         const contracts = [
           ...(spawnLog.lastInput?.task.matchAll(
@@ -207,6 +206,35 @@ describe("checkpoint writer child-session isolation", () => {
         expect(contracts).toHaveLength(1)
         expect(contracts[0]?.[1]?.split(", ")).toEqual(spawnLog.lastInput?.tools)
         expect(spawnLog.lastInput?.task).not.toContain("Available tools (runtime-enforced whitelist)")
+      }),
+    ),
+  )
+
+  it.live(
+    "writer gets the parent's tasks, finished ones included, as a snapshot",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const tasks = yield* TaskRegistry.Service
+        const { info } = yield* seedParentSession()
+        const parent = yield* tasks.create({ session_id: info.id, summary: "Example parent task" })
+        const child = yield* tasks.create({ session_id: info.id, summary: "Example finished subtask", parent_id: parent.id })
+        yield* tasks.done({ session_id: info.id, id: child.id })
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+        // The writer runs in a child session, which has no tasks of its own.
+        expect(spawnLog.lastInput?.sessionID).not.toBe(info.id)
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task).toContain("TASK SNAPSHOT")
+        expect(task).toContain(`- ${parent.id} 🔵 open — Example parent task`)
+        expect(task).toContain(`  - ${child.id} ✅ done — Example finished subtask`)
+        expect(task).not.toContain("Use the `task` tool")
       }),
     ),
   )

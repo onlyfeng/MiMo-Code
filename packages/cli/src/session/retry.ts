@@ -31,6 +31,12 @@ export const RATE_LIMIT_MAX_RETRIES = 5
 // recovery window; unknown means uncatalogued, not terminal.
 export const UNKNOWN_MAX_RETRIES = SERVER_MAX_RETRIES
 export const UNKNOWN_RETRY_DEADLINE_MS = SERVER_RETRY_DEADLINE_MS
+// Background system agents (checkpoint writer, dream, distill) get another
+// chance on their own schedule, so their retries stay bounded whatever the
+// configured mode: a persistent budget only holds their slot while a model
+// keeps failing, as one that keeps returning empty output does.
+export const SYSTEM_AGENT_MAX_RETRIES = 4
+export const SYSTEM_AGENT_RETRY_DEADLINE_MS = 5 * 60_000
 
 export type RetryBudget = {
   mode: "bounded" | "persistent"
@@ -213,6 +219,18 @@ export function budgetFor(config: ResolvedRetryConfig, decision: RetryDecision):
   if (decision.phase === "request") return config.request
   if (decision.kind === "unknown") return config.unknown
   return config.stream
+}
+
+/** `budget` capped for a background system agent (see SYSTEM_AGENT_MAX_RETRIES). */
+export function boundForSystemAgent(budget: RetryBudget): RetryBudget {
+  return {
+    ...budget,
+    mode: "bounded",
+    maxRetries: Math.min(budget.maxRetries ?? SYSTEM_AGENT_MAX_RETRIES, SYSTEM_AGENT_MAX_RETRIES),
+    maxElapsedMs: budget.maxElapsedMs > 0
+      ? Math.min(budget.maxElapsedMs, SYSTEM_AGENT_RETRY_DEADLINE_MS)
+      : SYSTEM_AGENT_RETRY_DEADLINE_MS,
+  }
 }
 
 export type RetryPhase = "request" | "stream"
@@ -528,6 +546,8 @@ export function policy(opts: {
   jitterRatio?: number
   initialDelayMs?: number
   budget?: (decision: RetryDecision) => RetryBudget
+  // Applied last, after host and network constraints have widened the budget.
+  cap?: (budget: RetryBudget) => RetryBudget
   replaySafe?: (decision: RetryDecision) => boolean
   onTerminal?: (decision: RetryDecision) => Effect.Effect<void>
   silentRetry?: (error: Err) => boolean
@@ -558,7 +578,8 @@ export function policy(opts: {
         maxDelayMs: RETRY_MAX_DELAY_NO_HEADERS,
         jitterRatio: opts.jitterRatio ?? RETRY_JITTER_RATIO,
       }
-      const budget = constrainBudget(configured, decision)
+      const constrained = constrainBudget(configured, decision)
+      const budget = opts.cap ? opts.cap(constrained) : constrained
       if (
         opts.replaySafe?.(decision) === false ||
         (budget.mode === "bounded" && budget.maxRetries !== undefined && meta.attempt > budget.maxRetries)
