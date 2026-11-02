@@ -42,6 +42,12 @@ const WAKE_POLL_JITTER_MS = 500
 // Wakes belong to this process (its instance id), not to one controller, so
 // every controller in the process shares which woken lanes are running.
 const wakingLanes = new Set<string>()
+// Lanes whose last run ended without claiming input that was already waiting,
+// with how often that happened in a row and when the poller may kick them again.
+const unclaimedRetries = new Map<string, { attempts: number; next: number }>()
+const UNCLAIMED_RETRY_MS = 1_500
+const UNCLAIMED_RETRY_MAX_MS = 60_000
+const UNCLAIMED_RETRY_LIMIT = 8
 // Input messages whose events this process has published: its own accepts, and
 // input from other processes it announced. Bounded; a re-announce only repeats
 // an idempotent upsert.
@@ -181,6 +187,46 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         }))),
       )
     const waiterKey = (lane: Lane) => `${lane.sessionID}:${lane.agentID}`
+
+    const acceptedInputs = (lane: Lane) => Database.use((db) => db.select({ id: InboxTable.id }).from(InboxTable).where(and(
+      eq(InboxTable.receiver_session_id, lane.sessionID), eq(InboxTable.receiver_actor_id, lane.agentID),
+      eq(InboxTable.state, "accepted"), promptOnly,
+    )).all().map((row) => row.id))
+
+    // A run can end without claiming input that was waiting when it started: it
+    // failed before its claim, or found nothing it could claim. That input stays
+    // accepted with nothing left to start it, so ring the lane again; the wake
+    // poller retries it, backing off, and gives up loudly after a bounded number
+    // of attempts. A later input or run resets the count.
+    const retryUnclaimed = (lane: Lane, waiting: ReadonlySet<string>) => {
+      const key = waiterKey(lane)
+      try {
+        const stuck = waiting.size === 0 ? [] : acceptedInputs(lane).filter((id) => waiting.has(id))
+        if (stuck.length === 0) {
+          unclaimedRetries.delete(key)
+          return
+        }
+        const current = unclaimedRetries.get(key)
+        // Runs that end together (a first wake also reconciles, which kicks the
+        // lane too) make one retry round, not several.
+        if (current && Date.now() < current.next) {
+          Database.use((db) => SessionOwner.ringWake(db, lane))
+          return
+        }
+        const attempts = (current?.attempts ?? 0) + 1
+        if (attempts > UNCLAIMED_RETRY_LIMIT) {
+          unclaimedRetries.delete(key)
+          log.error("inbox input still unclaimed after retries", { sessionID: lane.sessionID, agentID: lane.agentID, inputs: stuck.length, attempts: attempts - 1 })
+          return
+        }
+        const delay = Math.min(UNCLAIMED_RETRY_MS * 2 ** (attempts - 1), UNCLAIMED_RETRY_MAX_MS)
+        unclaimedRetries.set(key, { attempts, next: Date.now() + delay })
+        if (attempts === 1) log.warn("inbox input left unclaimed by a lane run; retrying", { sessionID: lane.sessionID, agentID: lane.agentID, inputs: stuck.length })
+        Database.use((db) => SessionOwner.ringWake(db, lane))
+      } catch (error) {
+        log.warn("inbox unclaimed input retry failed", { sessionID: lane.sessionID, agentID: lane.agentID, error: String(error) })
+      }
+    }
 
     const getEpoch = Effect.fn("Inbox.getEpoch")(function* (sessionID: SessionID) {
       const row = yield* Effect.sync(() =>
@@ -405,10 +451,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         yield* Effect.acquireUseRelease(
           Effect.sync(() => ({ release: Instance.claim(directory), transferred: false })),
           (owner) => Effect.sync(() => {
+            const waiting = new Set(acceptedInputs(lane))
             const work = bridge.promise(sched.kick(lane, guard))
             owner.transferred = true
             const settle = () => {
               owner.release()
+              retryUnclaimed(lane, waiting)
               onSettled?.()
             }
             void work.then(settle, (error: unknown) => {
@@ -825,7 +873,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       yield* inSessionInstance(lane.sessionID, showInputs(lane.sessionID, fresh))
     })
     // A wake stays until its lane's run settles, so an owner that exits first
-    // leaves it for the next owner of the session.
+    // leaves it for the next owner of the session. A run that leaves waiting
+    // input unclaimed rings it again (retryUnclaimed); the lane then waits out
+    // its backoff here before the next kick.
     const startWoken = Effect.gen(function* () {
       // Like the lane scheduler, wakes go to the process's current controller only.
       if (!schedulerRef.current || inboxControllerRef.current !== impl) return
@@ -837,6 +887,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           Effect.sync(() => log.warn("inbox wake announce failed", { sessionID: wake.sessionID, agentID: wake.agentID, cause: Cause.pretty(cause) }))))
         const key = waiterKey(wake)
         if (wakingLanes.has(key)) continue
+        const retry = unclaimedRetries.get(key)
+        if (retry && Date.now() < retry.next) continue
         wakingLanes.add(key)
         const settled = () => {
           wakingLanes.delete(key)
