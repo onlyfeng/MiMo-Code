@@ -1,3 +1,4 @@
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import type { ModelMessage } from "ai"
 import { Flag } from "../../src/flag/flag"
 import { ProviderTest } from "../fake/provider"
@@ -643,6 +644,50 @@ describe("ProviderTransform.providerOptions", () => {
     expect(ProviderTransform.providerOptions(model, { reasoningFormat: "parsed" })).toEqual({
       groq: { reasoningFormat: "parsed" },
     })
+  })
+})
+
+describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
+  const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
+
+  test("leaves a union that is not a discriminated object union unchanged", () => {
+    // MCP tools pass external schemas through the same transform.
+    const schema: JSONSchema7 = {
+      type: "object",
+      properties: {
+        note: { anyOf: [{ type: "string" }, { type: "null" }], description: "optional note" },
+        target: {
+          anyOf: [
+            { type: "object", properties: { path: { type: "string" } } },
+            { type: "object", properties: { url: { type: "string" } } },
+          ],
+        },
+      },
+    }
+    expect(ProviderTransform.schema(grok, structuredClone(schema)).properties).toEqual(schema.properties)
+  })
+
+  test("flattens a discriminated object union", () => {
+    const schema: JSONSchema7 = {
+      type: "object",
+      properties: {
+        operation: {
+          type: "object",
+          description: "the operation",
+          anyOf: [
+            { type: "object", properties: { action: { const: "list" } }, required: ["action"] },
+            { type: "object", properties: { action: { const: "get" }, id: { type: "string" } }, required: ["action", "id"] },
+          ],
+        },
+      },
+    }
+    const op = ProviderTransform.schema(grok, schema).properties?.operation
+    if (typeof op !== "object") throw new Error("expected an object schema")
+    const action = op.properties?.action
+    expect(op.anyOf).toBeUndefined()
+    expect(op.description).toBe("the operation")
+    expect(op.required).toEqual(["action"])
+    expect(typeof action === "object" ? action.enum : undefined).toEqual(["list", "get"])
   })
 })
 

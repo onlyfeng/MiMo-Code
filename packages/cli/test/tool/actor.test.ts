@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Layer } from "effect"
 import z from "zod"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { schema as transformSchema } from "../../src/provider/transform"
 import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -14,6 +15,7 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ProviderTest } from "../fake/provider"
 import { ActorTool, type ActorPromptOps } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
@@ -950,12 +952,15 @@ describe("Actor tool subagent_type enum (F36)", () => {
       Effect.gen(function* () {
         const tool = yield* ActorTool
         const def = yield* tool.init()
-        const grok = { providerID: "test", id: "grok-4.7", api: { id: "grok-4.7", npm: "@ai-sdk/openai" }, capabilities: { input: {} } } as any
-        const op = (transformSchema(grok, z.toJSONSchema(def.parameters)) as any).properties.operation
+        const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
+        const op = transformSchema(grok, z.toJSONSchema(def.parameters) as JSONSchema7).properties?.operation
+        if (typeof op !== "object") throw new Error("expected an operation object schema")
+        const action = op.properties?.action
+        const actions = typeof action === "object" ? action.enum : undefined
         expect(op.anyOf ?? op.oneOf).toBeUndefined()
         expect(op.required).toEqual(["action"])
-        expect(op.properties.action.enum).toHaveLength(8)
-        expect(op.properties.action.enum[0]).toBe("spawn")
+        expect(actions).toHaveLength(8)
+        expect(actions?.[0]).toBe("spawn")
       }),
     ),
   )

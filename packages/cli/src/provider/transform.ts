@@ -1996,24 +1996,41 @@ function isGrok(model: Provider.Model): boolean {
 // Grok answers a property whose schema is a discriminated union (the cron,
 // task and actor `operation` envelope) with an empty object, every time, so
 // the call never validates (FC-025). Flatten each such top-level property the
-// way the root is flattened above; zod still parses the original union.
+// way the root is flattened above; zod still parses the original union. Only
+// unions of object variants that share a `const` discriminator qualify: any
+// other union (e.g. an MCP `string | null`) keeps its shape.
+function isDiscriminatedObjectUnion(node: JSONSchema7): boolean {
+  const variants = node.anyOf ?? node.oneOf
+  if (!variants || variants.length < 2) return false
+  const objects = variants.filter(
+    (v): v is JSONSchema7 => typeof v === "object" && v.type === "object" && v.properties !== undefined,
+  )
+  if (objects.length !== variants.length) return false
+  const [first, ...rest] = objects
+  return Object.entries(first.properties ?? {}).some(([key, prop]) => {
+    if (typeof prop !== "object" || prop.const === undefined) return false
+    const values = new Set([prop.const])
+    for (const v of rest) {
+      const other = v.properties?.[key]
+      if (typeof other !== "object" || other.const === undefined) return false
+      values.add(other.const)
+    }
+    return values.size === objects.length
+  })
+}
+
 function flattenNestedDiscriminatedUnions(schema: JSONSchema7): JSONSchema7 {
   if (!schema.properties) return schema
   let changed = false
   const properties: Record<string, JSONSchema7Definition> = {}
   for (const [key, prop] of Object.entries(schema.properties)) {
-    const node = prop as Record<string, any>
-    if (typeof prop !== "object" || !(node.anyOf ?? node.oneOf)) {
-      properties[key] = prop
-      continue
-    }
-    const flat = flattenDiscriminatedUnion(node)
-    if (flat === node) {
+    if (typeof prop !== "object" || !isDiscriminatedObjectUnion(prop)) {
       properties[key] = prop
       continue
     }
     changed = true
-    properties[key] = node.description ? { ...flat, description: node.description } : flat
+    const flat = flattenDiscriminatedUnion(prop)
+    properties[key] = prop.description ? { ...flat, description: prop.description } : flat
   }
   return changed ? { ...schema, properties } : schema
 }

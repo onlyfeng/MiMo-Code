@@ -12,7 +12,10 @@ import { TaskTool } from "../../src/tool/task"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import z from "zod"
+import type { JSONSchema7 } from "@ai-sdk/provider"
 import { schema as transformSchema } from "../../src/provider/transform"
+import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ProviderTest } from "../fake/provider"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -214,11 +217,13 @@ describe("task tool: grok operation schema (FC-025)", () => {
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const def = yield* (yield* TaskTool).init()
-        const grok = { providerID: "test", id: "grok-4.7", api: { id: "grok-4.7", npm: "@ai-sdk/openai" }, capabilities: { input: {} } } as any
-        const op = (transformSchema(grok, z.toJSONSchema(def.parameters)) as any).properties.operation
+        const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
+        const op = transformSchema(grok, z.toJSONSchema(def.parameters) as JSONSchema7).properties?.operation
+        if (typeof op !== "object") throw new Error("expected an operation object schema")
+        const action = op.properties?.action
         expect(op.anyOf ?? op.oneOf).toBeUndefined()
         expect(op.required).toEqual(["action"])
-        expect(op.properties.action.enum).toContain("list")
+        expect(typeof action === "object" ? action.enum : undefined).toContain("list")
         expect(def.parameters.safeParse({ operation: { action: "list" } }).success).toBe(true)
       }),
     ),
