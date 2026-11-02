@@ -669,6 +669,16 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
             { type: "object", properties: { action: { const: 2 } } },
           ],
         },
+        // Replacing the node would drop the shared, required `tenant_id`.
+        scoped: {
+          type: "object",
+          properties: { tenant_id: { type: "string" } },
+          required: ["tenant_id"],
+          anyOf: [
+            { type: "object", properties: { action: { const: "list" } } },
+            { type: "object", properties: { action: { const: "get" } } },
+          ],
+        },
         // A flat object keeps one schema per property, so `value` would lose `number`.
         measure: {
           anyOf: [

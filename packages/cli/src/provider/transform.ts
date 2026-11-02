@@ -2003,7 +2003,8 @@ function isGrok(model: Provider.Model): boolean {
 // property holds a distinct string `const` in each branch (the flat form emits
 // a string enum). A property shared by several branches must have one `type`;
 // if the branches constrain it differently, the flat form widens it to that
-// type and zod applies each branch's constraint. Any other union keeps its shape.
+// type and zod applies each branch's constraint. The union node itself may hold
+// nothing the flat form would drop. Any other union keeps its shape.
 
 // A property schema without its descriptions, for comparing branch shapes.
 function shapeOf(node: unknown): unknown {
@@ -2017,7 +2018,13 @@ function shapeOf(node: unknown): unknown {
 }
 
 // The properties to widen to their shared type, or undefined if `node` does not qualify.
+// Keys a qualifying union node may carry: anything else (shared `properties`,
+// `required`, `allOf`, ...) would be lost by replacing the node with the flat form.
+const NESTED_UNION_KEYS = new Set(["type", "anyOf", "oneOf", "description", "title"])
+
 function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> | undefined {
+  if (Object.keys(node).some((key) => !NESTED_UNION_KEYS.has(key))) return undefined
+  if (node.type !== undefined && node.type !== "object") return undefined
   const variants = node.anyOf ?? node.oneOf
   if (!variants || variants.length < 2) return undefined
   const objects = variants.filter(
