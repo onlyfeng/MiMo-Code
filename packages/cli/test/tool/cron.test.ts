@@ -11,6 +11,11 @@ import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { provideInstance, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import z from "zod"
+import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
+import { schema as transformSchema } from "../../src/provider/transform"
+import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ProviderTest } from "../fake/provider"
 
 const runtime = ManagedRuntime.make(
   Layer.mergeAll(Truncate.defaultLayer, Agent.defaultLayer, SchedulerDefaultLayer),
@@ -84,6 +89,46 @@ describe("cron.execute: schedule sanity warnings", () => {
     const out = await runSchedule({ cron: "*/5 * * * *", prompt: "poll" })
     expect(out.output).not.toMatch(/rolled|never matches/)
   })
+})
+
+describe("cron schema: nested operation union for grok (FC-025)", () => {
+  const node = (schema: JSONSchema7Definition | undefined): JSONSchema7 => {
+    if (typeof schema !== "object") throw new Error("expected an object schema")
+    return schema
+  }
+  const operation = (id: string) =>
+    Effect.gen(function* () {
+      const info = yield* CronTool
+      const def = yield* info.init()
+      const model = ProviderTest.model({ id: ModelID.make(id), providerID: ProviderID.make("test") })
+      const wire = transformSchema(model, z.toJSONSchema(def.parameters) as JSONSchema7)
+      return { def, op: node(wire.properties?.operation) }
+    })
+
+  it.live("grok gets operation as one flat object with an action enum", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { def, op } = yield* operation("grok-4.7")
+        expect(op.anyOf ?? op.oneOf).toBeUndefined()
+        expect(op.type).toBe("object")
+        expect(op.required).toEqual(["action"])
+        expect(node(op.properties?.action).enum).toEqual(["schedule", "loop", "list", "get", "delete", "rename"])
+        expect(node(op.properties?.cron).description).toContain('only when action="schedule"')
+        // What grok sends against the flat schema is still the nested shape zod parses.
+        expect(def.parameters.safeParse({ operation: { action: "list" } }).success).toBe(true)
+        expect(def.parameters.safeParse({ operation: {} }).success).toBe(false)
+      }),
+    ),
+  )
+
+  it.live("other models keep the nested union", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { op } = yield* operation("test-model")
+        expect((op.anyOf ?? op.oneOf)?.length).toBe(6)
+      }),
+    ),
+  )
 })
 
 describe("cron.execute: stringified operation envelope", () => {
