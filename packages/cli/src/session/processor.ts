@@ -999,6 +999,8 @@ export const layer: Layer.Layer<
         const cfg = yield* config.get()
         ctx.shouldBreak = cfg.experimental?.continue_loop_on_deny !== true
         const retryConfig = SessionRetry.resolve(cfg, streamInput.model.providerID)
+        // Background system agents retry within a bounded budget (FC-013).
+        const systemAgent = SYSTEM_SPAWNED_AGENT_TYPES.has(ctx.assistantMessage.agent)
         ctx.retrying = false
         ctx.retryWaiter = undefined
         ctx.superseded = false
@@ -1143,6 +1145,7 @@ export const layer: Layer.Layer<
                 parse,
                 phase: "stream",
                 budget: (decision) => SessionRetry.budgetFor(retryConfig, decision),
+                cap: systemAgent ? SessionRetry.boundForSystemAgent : undefined,
                 jitterRatio: retryConfig.jitterRatio,
                 replaySafe: () => ctx.retrySafe,
                 silentRetry: (error) => isMain && SessionRetry.isGptServerOverloadedError(error),

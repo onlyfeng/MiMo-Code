@@ -46,10 +46,51 @@ import { loadPriorDiscoveredTitles } from "./checkpoint-retry"
 import * as CheckpointContext from "./checkpoint-context"
 import { buildProgressDiff } from "./checkpoint-progress-reconcile"
 import { collapseCheckpointTail, isBoundaryUser, isRebuildBoundary, renderTailDigest } from "./tail-digest"
+import type { Task } from "@/task/schema"
 
 const log = Log.create({ service: "session.checkpoint" })
-const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep", "task"] as const
+// No `task`: the writer runs in a child session, where the tool would read and
+// write the child's empty task list. It gets the parent's tasks as a snapshot
+// (renderTaskSnapshot) and never changes task state.
+const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep"] as const
 const checkpointWriterToolContract = `The ${CHECKPOINT_WRITER_TOOLS.join(", ")} tools are available; do not invoke others.`
+const TASK_SNAPSHOT_LIMIT = 300
+
+/** The session's tasks, including finished ones, for the writer's §4. */
+function renderTaskSnapshot(all: readonly Task[]): string {
+  const icon = (status: string) =>
+    ({ open: "🔵", in_progress: "🔄", blocked: "🟡", done: "✅", abandoned: "❌" })[status] ?? status
+  // Over the limit, unfinished tasks and their ancestors come first, then the
+  // most recently active finished ones; the tree keeps creation order.
+  const byID = new Map(all.map((task) => [task.id, task]))
+  const kept = new Set<string>()
+  const keep = (task: Task | undefined) => {
+    for (let at = task; at && !kept.has(at.id); at = byID.get(at.parent_task_id ?? "")) {
+      if (kept.size >= TASK_SNAPSHOT_LIMIT) return
+      kept.add(at.id)
+    }
+  }
+  const finished = (task: Task) => task.status === "done" || task.status === "abandoned"
+  for (const task of all) if (!finished(task)) keep(task)
+  for (const task of all.filter(finished).toSorted((a, b) => b.last_event_at - a.last_event_at)) keep(task)
+  const tasks = all.filter((task) => kept.has(task.id))
+  const children = new Map<string, Task[]>()
+  for (const task of tasks) {
+    if (!task.parent_task_id) continue
+    children.set(task.parent_task_id, [...(children.get(task.parent_task_id) ?? []), task])
+  }
+  const lines: string[] = []
+  const visit = (task: Task, depth: number) => {
+    lines.push(`${"  ".repeat(depth)}- ${task.id} ${icon(task.status)} ${task.status} — ${task.summary}`)
+    for (const child of children.get(task.id) ?? []) visit(child, depth + 1)
+  }
+  for (const task of tasks) if (!task.parent_task_id || !kept.has(task.parent_task_id)) visit(task, 0)
+  if (all.length > tasks.length) lines.push(`(${all.length - tasks.length} more tasks not shown)`)
+  return [
+    "TASK SNAPSHOT (the session's task list when this writer started; the only source for §4):",
+    ...(lines.length > 0 ? lines : ["(no tasks)"]),
+  ].join("\n")
+}
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 60) + "\n... (truncated, full body at file)"
@@ -470,6 +511,7 @@ function composeWriterPrompt(input: {
   notesFile: string
   rangeDesc: string
   progressDiff: string  // Spec ② Chain 2: empty string when nothing to reconcile
+  taskSnapshot: string  // renderTaskSnapshot of the parent session
 }): string {
   return [
     "<system-reminder>",
@@ -496,6 +538,8 @@ function composeWriterPrompt(input: {
     "",
     input.progressDiff,
     "",
+    input.taskSnapshot,
+    "",
     PROMPT_CHECKPOINT_WRITER.replace("{{SECTION_BUDGETS}}", renderSectionBudgets(CHECKPOINT_SECTION_BUDGETS)),
     "</system-reminder>",
     "",
@@ -503,7 +547,7 @@ function composeWriterPrompt(input: {
     "",
     input.rangeDesc,
     "",
-    "Use the `task` tool for ALL task state ops (create / start / progress / done / abandon / approve / rename / block / unblock / batch_create). Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, stop immediately.",
+    "Do not change task state: §4 comes from the TASK SNAPSHOT above. Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, stop immediately.",
   ].join("\n")
 }
 
@@ -920,7 +964,8 @@ export const layer: Layer.Layer<
         : "This is the first checkpoint of this session. No prior checkpoint exists; MEMORY.md and the task narrative directory likely don't exist yet either."
 
       const progressDiff = yield* Effect.promise(() => buildProgressDiff(input.sessionID))
-      const promptText = composeWriterPrompt({ checkpointFile, memoryFile, taskMemDir, notesFile, rangeDesc, progressDiff })
+      const taskSnapshot = renderTaskSnapshot(yield* taskRegistry.list({ session_id: input.sessionID, include_terminal: true }))
+      const promptText = composeWriterPrompt({ checkpointFile, memoryFile, taskMemDir, notesFile, rangeDesc, progressDiff, taskSnapshot })
 
       // v6: spawn writer as subagent — shared sessionID, automatic
       // ActorRegistry registration, automatic tool whitelist enforcement
@@ -1991,4 +2036,4 @@ export * as SessionCheckpoint from "./checkpoint"
 
 // Test-only re-export so test code can call composeWriterPrompt without
 // triggering the full SessionCheckpoint Service stack.
-export { composeWriterPrompt as composeWriterPromptForTest }
+export { composeWriterPrompt as composeWriterPromptForTest, renderTaskSnapshot as renderTaskSnapshotForTest }

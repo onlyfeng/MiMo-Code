@@ -970,7 +970,11 @@ const live: Layer.Layer<
                 if (input.retryScope) return Stream.failCause(primaryCause)
                 const decision = SessionRetry.decide(normalized, "request", input.retryScope)
                 if (!decision.retryable) return Stream.failCause(primaryCause)
-                const budget = SessionRetry.budgetFor(retryConfig, decision)
+                const configured = SessionRetry.budgetFor(retryConfig, decision)
+                // Background system agents retry within a bounded budget (FC-013).
+                const budget = SYSTEM_SPAWNED_AGENT_TYPES.has(input.agent.name)
+                  ? SessionRetry.boundForSystemAgent(configured)
+                  : configured
                 const nextAttempt = retryCount + 1
                 if (budget.mode === "bounded" && (budget.maxRetries ?? 0) < nextAttempt)
                   return Stream.failCause(primaryCause)
