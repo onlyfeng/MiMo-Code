@@ -135,6 +135,7 @@ not change their implementation. The preceding review is retained in the
 | FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
 | FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
+| FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2299,3 +2300,34 @@ logged`, and the peer `success`/`failure` variants of
   Reverting any one site fails its case. Inheriting whenever the model matches
   the previous turn fails the named-model case.
 - Retirement condition: upstream continues the variant along with the model.
+
+## FC-024 — boot reconciliation reports a delivered claim as interrupted
+
+- Status: active
+- Canonical owner: fork `main` inbox boot recovery in
+  `packages/cli/src/inbox/controller.ts` (`reconcileOnBoot`)
+- Observable contract:
+  - When a process restarts, `reconcileOnBoot` cancels its session's stale-epoch
+    and crashed `claimed` rows. A row whose input was already delivered into the
+    conversation (`consumed`) settles as `interrupted`; a row not yet delivered
+    settles as `never_ran`. Stale-epoch `accepted` rows are never consumed, so
+    they stay `never_ran`.
+  - This is the rule `cancelInputs` in the same file already applies when a
+    session stops.
+- Motivation: `reconcileOnBoot` wrote `never_ran` for every claimed row, so a
+  sender reading the receipt after a crash could not tell an input the model had
+  already seen and partly acted on from one it never received. Recovery rules
+  such as "resend once when `never_ran` and `consumed=0`" depend on that
+  difference; resending a consumed input replays work that already ran.
+- Upstream relationship: upstream `reconcileOnBoot` writes `never_ran`
+  unconditionally. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: `reconcileOnBoot` and `cancelInputs` in
+  `packages/cli/src/inbox/controller.ts`; the `consumed` anchor in
+  `packages/cli/src/session/prompt.ts`.
+- Tests/evidence: `packages/cli/test/inbox/queue-controller.test.ts`
+  "reconcileOnBoot reports a claim already delivered into the conversation as
+  interrupted" claims two inputs, marks one delivered, and expects
+  `interrupted` and `never_ran` respectively. Writing `never_ran` again fails it.
+  "reconcileOnBoot cancels claimed rows" still expects `never_ran` for an
+  undelivered claim.
+- Retirement condition: upstream distinguishes consumed claims on boot recovery.

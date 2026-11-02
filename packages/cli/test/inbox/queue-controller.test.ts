@@ -418,6 +418,29 @@ describe("Inbox controller", () => {
   )
 
   it.live(
+    "reconcileOnBoot reports a claim already delivered into the conversation as interrupted",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionNs.Service
+        const tq = yield* InboxController.Service
+        const session = yield* sessions.create({ title: "reconcile-consumed" })
+        const lane = { sessionID: session.id, agentID: "main" }
+        const delivered = yield* tq.accept({ lane, ...userMessage(session.id, "delivered"), type: "prompt" })
+        const pending = yield* tq.accept({ lane, ...userMessage(session.id, "pending"), type: "prompt" })
+        yield* tq.claimNext(lane, 1)
+        // The run anchored only the first claim to its delivery message before the process died.
+        Database.use((db) =>
+          db.update(InboxTable).set({ consumed: true }).where(eq(InboxTable.id, delivered.id)).run(),
+        )
+        yield* tq.reconcileOnBoot(session.id)
+        const [d, p] = [yield* tq.getReceipt(delivered.id), yield* tq.getReceipt(pending.id)]
+        expect({ state: d.state, outcome: d.outcome }).toEqual({ state: "cancelled", outcome: "interrupted" })
+        expect({ state: p.state, outcome: p.outcome }).toEqual({ state: "cancelled", outcome: "never_ran" })
+      }),
+    ),
+  )
+
+  it.live(
     "cancelled records are not revived by claimNext and stay visible (cancelled)",
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

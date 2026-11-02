@@ -625,9 +625,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             .get()?.epoch ?? 0
           const now = Date.now()
           // Process restart mid-claim or stop fence: stale-epoch and crashed
-          // claims settle as cancelled/never_ran. Messages stay visible.
+          // claims settle as cancelled. A claim already delivered into the
+          // conversation was interrupted, not never run (FC-024). Messages stay visible.
+          const outcome = sql`CASE WHEN ${InboxTable.consumed} THEN 'interrupted' ELSE 'never_ran' END`
           const stale = db.update(InboxTable)
-            .set({ state: "cancelled", outcome: "never_ran", time_updated: now })
+            .set({ state: "cancelled", outcome, time_updated: now })
             .where(
               and(
                 eq(InboxTable.receiver_session_id, sessionID),
@@ -639,7 +641,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             .returning().all()
           receipts.push(...stale)
           const crashed = db.update(InboxTable)
-            .set({ state: "cancelled", outcome: "never_ran", time_updated: now })
+            .set({ state: "cancelled", outcome, time_updated: now })
             .where(and(
               eq(InboxTable.receiver_session_id, sessionID),
               promptOnly,
