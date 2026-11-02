@@ -57,9 +57,23 @@ const checkpointWriterToolContract = `The ${CHECKPOINT_WRITER_TOOLS.join(", ")} 
 const TASK_SNAPSHOT_LIMIT = 300
 
 /** The session's tasks, including finished ones, for the writer's §4. */
-function renderTaskSnapshot(tasks: readonly Task[]): string {
+function renderTaskSnapshot(all: readonly Task[]): string {
   const icon = (status: string) =>
     ({ open: "🔵", in_progress: "🔄", blocked: "🟡", done: "✅", abandoned: "❌" })[status] ?? status
+  // Over the limit, unfinished tasks and their ancestors come first, then the
+  // most recently active finished ones; the tree keeps creation order.
+  const byID = new Map(all.map((task) => [task.id, task]))
+  const kept = new Set<string>()
+  const keep = (task: Task | undefined) => {
+    for (let at = task; at && !kept.has(at.id); at = byID.get(at.parent_task_id ?? "")) {
+      if (kept.size >= TASK_SNAPSHOT_LIMIT) return
+      kept.add(at.id)
+    }
+  }
+  const finished = (task: Task) => task.status === "done" || task.status === "abandoned"
+  for (const task of all) if (!finished(task)) keep(task)
+  for (const task of all.filter(finished).toSorted((a, b) => b.last_event_at - a.last_event_at)) keep(task)
+  const tasks = all.filter((task) => kept.has(task.id))
   const children = new Map<string, Task[]>()
   for (const task of tasks) {
     if (!task.parent_task_id) continue
@@ -70,13 +84,11 @@ function renderTaskSnapshot(tasks: readonly Task[]): string {
     lines.push(`${"  ".repeat(depth)}- ${task.id} ${icon(task.status)} ${task.status} — ${task.summary}`)
     for (const child of children.get(task.id) ?? []) visit(child, depth + 1)
   }
-  const ids = new Set(tasks.map((task) => task.id))
-  for (const task of tasks) if (!task.parent_task_id || !ids.has(task.parent_task_id)) visit(task, 0)
-  const shown = lines.slice(0, TASK_SNAPSHOT_LIMIT)
-  if (lines.length > shown.length) shown.push(`(${lines.length - shown.length} more tasks not shown)`)
+  for (const task of tasks) if (!task.parent_task_id || !kept.has(task.parent_task_id)) visit(task, 0)
+  if (all.length > tasks.length) lines.push(`(${all.length - tasks.length} more tasks not shown)`)
   return [
     "TASK SNAPSHOT (the session's task list when this writer started; the only source for §4):",
-    ...(shown.length > 0 ? shown : ["(no tasks)"]),
+    ...(lines.length > 0 ? lines : ["(no tasks)"]),
   ].join("\n")
 }
 
@@ -2024,4 +2036,4 @@ export * as SessionCheckpoint from "./checkpoint"
 
 // Test-only re-export so test code can call composeWriterPrompt without
 // triggering the full SessionCheckpoint Service stack.
-export { composeWriterPrompt as composeWriterPromptForTest }
+export { composeWriterPrompt as composeWriterPromptForTest, renderTaskSnapshot as renderTaskSnapshotForTest }

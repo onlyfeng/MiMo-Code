@@ -10,6 +10,7 @@ import {
 } from "../../src/session/checkpoint-progress-reconcile"
 import { checkpointPath, tasksDir, progressPath, metaDir } from "../../src/session/checkpoint-paths"
 import { SessionID } from "../../src/session/schema"
+import type { Task } from "../../src/task/schema"
 
 async function withSessionMemory<T>(fn: (sid: SessionID) => Promise<T>): Promise<T> {
   const sid = SessionID.descending()
@@ -225,5 +226,35 @@ describe("composeWriterPrompt progressDiff injection", () => {
       taskSnapshot: "",
     })
     expect(prompt).not.toContain("SUBAGENT PROGRESS to integrate")
+  })
+})
+
+describe("renderTaskSnapshot", () => {
+  test("over the limit keeps unfinished tasks and their ancestors before older finished history", async () => {
+    const { renderTaskSnapshotForTest } = await import("../../src/session/checkpoint")
+    const task = (id: string, status: Task["status"], at: number, parent?: string): Task => ({
+      id,
+      session_id: SessionID.descending(),
+      parent_task_id: parent,
+      status,
+      summary: `task ${id}`,
+      created_at: at,
+      last_event_at: at,
+    })
+    // A finished root whose child is still active, 400 finished roots, then an active root.
+    const tasks = [
+      task("T0", "done", 0),
+      task("T0.1", "in_progress", 1, "T0"),
+      ...Array.from({ length: 400 }, (_, i) => task(`T${i + 1}`, "done", 10 + i)),
+      task("T401", "blocked", 500),
+    ]
+    const lines = renderTaskSnapshotForTest(tasks).split("\n")
+    expect(lines).toContain("- T0 ✅ done — task T0")
+    expect(lines).toContain("  - T0.1 🔄 in_progress — task T0.1")
+    expect(lines).toContain("- T401 🟡 blocked — task T401")
+    expect(lines).toContain("- T400 ✅ done — task T400")
+    expect(lines).not.toContain("- T1 ✅ done — task T1")
+    expect(lines.at(-1)).toBe("(103 more tasks not shown)")
+    expect(lines.filter((line) => line.startsWith("- ") || line.startsWith("  - "))).toHaveLength(300)
   })
 })
