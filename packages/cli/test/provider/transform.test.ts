@@ -772,6 +772,26 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
       .toEqual({ type: "string", pattern: undefined, minLength: undefined })
   })
 
+  test("flattens when another const appears in only some branches", () => {
+    // A branch-only constant (e.g. a fixed `lifecycle`) cannot be taken as the discriminator.
+    const schema: JSONSchema7 = {
+      type: "object",
+      properties: {
+        operation: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "spawn" }, lifecycle: { const: "persistent" } } },
+            { type: "object", properties: { action: { const: "status" } } },
+          ],
+        },
+      },
+    }
+    const op = ProviderTransform.schema(grok, schema).properties?.operation
+    if (typeof op !== "object") throw new Error("expected an object schema")
+    const action = op.properties?.action
+    expect(op.anyOf).toBeUndefined()
+    expect(typeof action === "object" ? action.enum : undefined).toEqual(["spawn", "status"])
+  })
+
   test("compares a shared object property by its fields, including one named description", () => {
     const payload = (type: "string" | "number"): JSONSchema7 => ({
       type: "object",

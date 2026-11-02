@@ -2062,14 +2062,18 @@ function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> 
     return values.every((value) => value !== undefined) && new Set(values).size === objects.length
   })
   if (!discriminator) return undefined
-  // flattenDiscriminatedUnion picks the first `const` property it finds; with a
-  // second one it could pick that instead and keep a single branch's value.
-  const otherConst = objects.some((v) =>
-    Object.entries(v.properties ?? {}).some(
-      ([key, prop]) => key !== discriminator && typeof prop === "object" && prop.const !== undefined,
-    ),
-  )
-  if (otherConst) return undefined
+  // flattenDiscriminatedUnion takes the first property with a distinct `const`
+  // in every branch, of any type; a second such property could be taken instead
+  // and keep a single branch's value. A `const` in only some branches cannot.
+  const rival = Object.keys(objects[0].properties ?? {}).some((key) => {
+    if (key === discriminator) return false
+    const values = objects.map((v) => {
+      const prop = v.properties?.[key]
+      return typeof prop === "object" ? prop.const : undefined
+    })
+    return values.every((value) => value !== undefined) && new Set(values).size === objects.length
+  })
+  if (rival) return undefined
   const shapes = new Map<string, { type: JSONSchema7["type"]; shape: string }>()
   const widen = new Map<string, JSONSchema7["type"]>()
   for (const v of objects) {
