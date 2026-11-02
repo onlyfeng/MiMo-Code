@@ -2074,6 +2074,8 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-ACTOR-001 — full-context actor and static-prefix overflow extensions
 
+- 2026-11-02 PR #189 propagation: main's FC-002 change drops `task` from the checkpoint writer's tools and gives the writer a TASK SNAPSHOT of the parent's tasks in `composeWriterPrompt`; `checkpoint.ts` merges without conflict. Even where a forked writer's frozen tools still list `task`, the per-tool runtime whitelist in `prompt.ts` rejects the call at execution, so the writer cannot change task state from its child session; `checkpoint-writer-runaway.test.ts`, whose scripted writer keeps calling `task`, still ends at the step budget. Compat's `coverage` read and the writer prefix's `turnContext` are unchanged.
+
 - 2026-11-01 PR #185 propagation: main's FC-002 captor registration (`registerPrefixCapture`) merges without conflict into `prefix-capture-ref.ts` and the compat `prompt.ts` overlay. The compat-only `turnContext` field of `PrefixCaptureResult` and the compat capture body are unchanged; only the finalizer now unregisters its own captor instead of clearing the slot. A full-context actor therefore still reads the live layer's frozen system, tools, permissions and turnContext, and disposing another `SessionPrompt` layer in the same process no longer removes it. Overflow handling and the DC-SESSION-001 `preparePrompt` overlay are untouched. `retry.test.ts` and the new `prefix-capture-ref.test.ts` are byte-identical to main.
 
 - 2026-09-24 synchronization: preserve the strict JSON `context` and `lifecycle`
@@ -2498,6 +2500,8 @@ files remain byte-identical to the accepted main correction.
   the contract to the shared registry.
 
 ## DC-WEBSEARCH-001 — provider-native web search and layered fallback
+
+- 2026-11-02 PR #189 propagation: main's FC-013 change bounds background system agents' retries in the `llm.ts` request ladder and as the processor stream policy's final `cap`; both merge without conflict beside this owner's code. The native-search resend before output stays one-shot per stream attempt and outside the ladder's retry count, so a capped system agent makes at most one extra request per attempt and still stops. The native display path in `processor.ts` is untouched.
 
 - 2026-10-30 synchronization: adopt the removal of Xiaomi gateway search (`d0684a3d`) without retiring this owner. No sidecar or provider-specific automatic exposure remains. Keep explicitly configured native search and standalone fallback models; every provider can reach Exa only under `MIMOCODE_ENABLE_EXA` (or the existing experimental alias), and exhausted routes return a no-results/WebFetch hint. Native permission/replay/failure/display contracts remain. Default and Exa-only opt-in runs cover the fallback suite; default registry tests include Xiaomi API/token-plan, OpenAI and OpenCode.
 

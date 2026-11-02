@@ -1217,6 +1217,43 @@ describe("retry decision and coordinator budget", () => {
     })
   }
 
+  test("a system-agent cap bounds network and persistent-host retries that constraints make persistent", async () => {
+    loadHostErrorCatalog({ protocolVersion: 2, rules: [] })
+    const resolved = SessionRetry.resolve(undefined)
+    const errors = [
+      Object.assign(new Error("socket closed"), { code: "ECONNRESET" }),
+      { name: "APIError", data: { message: "host-fail", isRetryable: true, hostCode: "h.p", hostRetryClass: "persistent" } },
+    ]
+    const clock = spyOn(Date, "now").mockReturnValue(1_000_000)
+    try {
+      for (const error of errors) {
+        const steps = (cap?: (budget: SessionRetry.RetryBudget) => SessionRetry.RetryBudget) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              const step = yield* Schedule.toStep(
+                SessionRetry.policy({
+                  parse: (input) => input as MessageV2.APIError,
+                  budget: (decision) => SessionRetry.budgetFor(resolved, decision),
+                  cap,
+                  set: () => Effect.void,
+                }),
+              )
+              let taken = 0
+              for (; taken < 12; taken++) {
+                clock.mockReturnValue(1_000_000 + taken * 1_000)
+                if (Exit.isFailure(yield* Effect.exit(step(Date.now(), error)))) break
+              }
+              return taken
+            }),
+          )
+        expect(await steps()).toBe(12)
+        expect(await steps(SessionRetry.boundForSystemAgent)).toBe(SessionRetry.SYSTEM_AGENT_MAX_RETRIES)
+      }
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   test("unconfigured persistent retries remain cancellable during the delay", async () => {
     const resolved = SessionRetry.resolve(undefined)
     const controller = new AbortController()
