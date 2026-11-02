@@ -207,6 +207,7 @@ describe("composeWriterPrompt progressDiff injection", () => {
       notesFile: "/x/notes.md",
       rangeDesc: "test range",
       progressDiff: "SUBAGENT PROGRESS to integrate:\n  - T4 (NEW, written-at=100)",
+      taskSnapshot: "",
     })
     expect(prompt).toContain("SUBAGENT PROGRESS to integrate")
     expect(prompt).toContain("T4 (NEW, written-at=100)")
@@ -221,6 +222,7 @@ describe("composeWriterPrompt progressDiff injection", () => {
       notesFile: "/x/notes.md",
       rangeDesc: "test range",
       progressDiff: "",
+      taskSnapshot: "",
     })
     expect(prompt).not.toContain("SUBAGENT PROGRESS to integrate")
   })

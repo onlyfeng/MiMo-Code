@@ -13,7 +13,7 @@ CHECKPOINT_PATH structure (11 sections, all required to exist; content may be "(
   ## §1 Active intent           - verbatim user request, block-quoted
   ## §2 Next concrete action    - concrete next step, with verbatim quote when possible
   ## §3 Directives (this session) - session-specific working style only
-  ## §4 Task tree               - source of truth = task tool DB. Per task: 🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned. Indent sub-tasks two spaces. Append `(progress: tasks/<id>/progress.md, last-reconciled-written-at: <n>)` for any task whose subagent-written progress.md you've reconciled (from the SUBAGENT PROGRESS block).
+  ## §4 Task tree               - source of truth = the TASK SNAPSHOT block. Per task: 🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned. Indent sub-tasks two spaces. Append `(progress: tasks/<id>/progress.md, last-reconciled-written-at: <n>)` for any task whose subagent-written progress.md you've reconciled (from the SUBAGENT PROGRESS block).
   ## §5 Current work            - what was being done before checkpoint
   ## §6 Files and code sections - files actively read/edited with one-line purpose
   ## §7 Discovered knowledge (cross-task) - cross-task facts (candidates for MEMORY.md promotion)
@@ -66,17 +66,17 @@ For §3 Directives in checkpoint.md, scan content:
     move that line's content into §5 Current work
   - Lines that are genuine session-only working preferences stay in §3
 
-For §4 Task tree, pull from the task tool only:
-  1. Call `task` tool with operation="list" — this is the authoritative source of truth (done/blocked/open/abandoned).
+For §4 Task tree, pull from the TASK SNAPSHOT block only:
+  1. The TASK SNAPSHOT block above lists the session's tasks (done/blocked/open/abandoned included) — this is the authoritative source of truth. You cannot change task state; do not try.
 
-  Render: parent task with task-tool status icon (🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned), use task summary for one-line body. Indent sub-tasks two spaces. Suffix the line as follows:
+  Render: parent task with its snapshot status icon (🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned), use task summary for one-line body. Indent sub-tasks two spaces. Suffix the line as follows:
     - If the SUBAGENT PROGRESS block listed this task as NEW or CHANGED: `(progress: tasks/<id>/progress.md, last-reconciled-written-at: <the written-at from the block>)`
     - If this task already has a `last-reconciled-written-at: <n>` marker on its previous-checkpoint line AND was NOT in the SUBAGENT PROGRESS block: preserve that previous marker line verbatim.
     - Otherwise: no suffix.
 
-  HARD CONSTRAINT: Do NOT include any task ID or status that doesn't appear in the `task` tool's response. If a section is empty, render it empty — never invent.
+  HARD CONSTRAINT: Do NOT include any task ID or status that doesn't appear in the TASK SNAPSHOT. If a section is empty, render it empty — never invent.
 
-  NAMING RULE: Use ONLY the IDs returned by `task` tool. Put the human-friendly description from the task's `summary` in the body. If the agent's conversation refers to a task by a logical label (e.g., "T6.1 Constfold") that doesn't match a DB ID, IGNORE the agent's label — render the DB ID only. Never write `T6.1 (T7)` or `T7 — T6.1`. One canonical name per line.
+  NAMING RULE: Use ONLY the IDs in the TASK SNAPSHOT. Put the human-friendly description from the task's `summary` in the body. If the agent's conversation refers to a task by a logical label (e.g., "T6.1 Constfold") that doesn't match a DB ID, IGNORE the agent's label — render the DB ID only. Never write `T6.1 (T7)` or `T7 — T6.1`. One canonical name per line.
 
 (Then proceed to Turn 2 final Edit pass.)
 
