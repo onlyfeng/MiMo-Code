@@ -2317,10 +2317,14 @@ logged`, and the peer `success`/`failure` variants of
   - The arguments a model sends against that flat object are the same nested
     shape, so zod still parses them with the original union and rejects a
     missing or unknown action.
-  - Only a union whose branches are all object schemas sharing a `const`
-    discriminator qualifies. Any other union, such as an MCP tool's
-    `string | null` or object branches without a discriminator, is left as it
-    is, for Grok too.
+  - Only a union the flat form can represent qualifies: every branch is an
+    object schema, one property holds a distinct string `const` in each branch,
+    and a property shared by several branches has one `type`. When the branches
+    constrain such a property differently (actor's `task_id`), the flat form
+    widens it to that type and zod applies each branch's constraint. Any other
+    union, such as an MCP tool's `string | null`, a numeric discriminator or a
+    shared property whose type differs between branches, is left as it is, for
+    Grok too.
   - Every other model receives the nested union unchanged. The existing
     root-level flattening is unchanged for all models.
 - Motivation: Grok answers a property whose schema is `anyOf` of object
@@ -2345,9 +2349,12 @@ logged`, and the peer `success`/`failure` variants of
     non-Grok model keeps the six-branch union. Removing the Grok call fails the
     Grok case.
   - `packages/cli/test/provider/transform.test.ts` "grok nested unions": a
-    `string | null` property and object branches without a discriminator pass
-    through unchanged, and a discriminated object union is flattened with its
-    description kept. Flattening any union fails the pass-through case.
+    `string | null` property, object branches without a discriminator, a
+    numeric discriminator and a shared property of differing types pass through
+    unchanged; a discriminated object union is flattened with its description
+    kept; a shared string property constrained differently is widened to
+    `string`. Accepting a non-string discriminator, accepting differing types,
+    or skipping the widening each fails a case.
   - `packages/cli/test/tool/task.test.ts` and `actor.test.ts`: the same flat
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or

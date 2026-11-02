@@ -662,6 +662,20 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
             { type: "object", properties: { url: { type: "string" } } },
           ],
         },
+        // A flat string enum could not carry a numeric discriminator.
+        level: {
+          anyOf: [
+            { type: "object", properties: { action: { const: 1 } } },
+            { type: "object", properties: { action: { const: 2 } } },
+          ],
+        },
+        // A flat object keeps one schema per property, so `value` would lose `number`.
+        measure: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "text" }, value: { type: "string" } } },
+            { type: "object", properties: { action: { const: "count" }, value: { type: "number" } } },
+          ],
+        },
       },
     }
     expect(ProviderTransform.schema(grok, structuredClone(schema)).properties).toEqual(schema.properties)
@@ -688,6 +702,27 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
     expect(op.description).toBe("the operation")
     expect(op.required).toEqual(["action"])
     expect(typeof action === "object" ? action.enum : undefined).toEqual(["list", "get"])
+  })
+
+  test("widens a shared property constrained differently but of one type", () => {
+    // The actor envelope: `task_id` is a pattern in `resume`, a min length in `spawn`.
+    const schema: JSONSchema7 = {
+      type: "object",
+      properties: {
+        operation: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "spawn" }, task_id: { type: "string", minLength: 1 } } },
+            { type: "object", properties: { action: { const: "resume" }, task_id: { type: "string", pattern: "^T\\d+$" } } },
+          ],
+        },
+      },
+    }
+    const op = ProviderTransform.schema(grok, schema).properties?.operation
+    if (typeof op !== "object") throw new Error("expected an object schema")
+    const taskID = op.properties?.task_id
+    expect(op.anyOf).toBeUndefined()
+    expect(typeof taskID === "object" ? { type: taskID.type, pattern: taskID.pattern, minLength: taskID.minLength } : taskID)
+      .toEqual({ type: "string", pattern: undefined, minLength: undefined })
   })
 })
 

@@ -1996,27 +1996,61 @@ function isGrok(model: Provider.Model): boolean {
 // Grok answers a property whose schema is a discriminated union (the cron,
 // task and actor `operation` envelope) with an empty object, every time, so
 // the call never validates (FC-025). Flatten each such top-level property the
-// way the root is flattened above; zod still parses the original union. Only
-// unions of object variants that share a `const` discriminator qualify: any
-// other union (e.g. an MCP `string | null`) keeps its shape.
-function isDiscriminatedObjectUnion(node: JSONSchema7): boolean {
+// way the root is flattened above; zod still parses the original union.
+//
+// Only a union the flat form can represent qualifies, because MCP tools pass
+// external schemas through here too: every branch is an object schema, and one
+// property holds a distinct string `const` in each branch (the flat form emits
+// a string enum). A property shared by several branches must have one `type`;
+// if the branches constrain it differently, the flat form widens it to that
+// type and zod applies each branch's constraint. Any other union keeps its shape.
+
+// A property schema without its descriptions, for comparing branch shapes.
+function shapeOf(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(shapeOf)
+  if (!node || typeof node !== "object") return node
+  return Object.fromEntries(
+    Object.entries(node)
+      .filter(([key]) => key !== "description")
+      .map(([key, value]) => [key, shapeOf(value)]),
+  )
+}
+
+// The properties to widen to their shared type, or undefined if `node` does not qualify.
+function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> | undefined {
   const variants = node.anyOf ?? node.oneOf
-  if (!variants || variants.length < 2) return false
+  if (!variants || variants.length < 2) return undefined
   const objects = variants.filter(
     (v): v is JSONSchema7 => typeof v === "object" && v.type === "object" && v.properties !== undefined,
   )
-  if (objects.length !== variants.length) return false
-  const [first, ...rest] = objects
-  return Object.entries(first.properties ?? {}).some(([key, prop]) => {
-    if (typeof prop !== "object" || prop.const === undefined) return false
-    const values = new Set([prop.const])
-    for (const v of rest) {
-      const other = v.properties?.[key]
-      if (typeof other !== "object" || other.const === undefined) return false
-      values.add(other.const)
-    }
-    return values.size === objects.length
+  if (objects.length !== variants.length) return undefined
+  const constOf = (v: JSONSchema7, key: string) => {
+    const prop = v.properties?.[key]
+    return typeof prop === "object" && typeof prop.const === "string" ? prop.const : undefined
+  }
+  const discriminator = Object.keys(objects[0].properties ?? {}).find((key) => {
+    const values = objects.map((v) => constOf(v, key))
+    return values.every((value) => value !== undefined) && new Set(values).size === objects.length
   })
+  if (!discriminator) return undefined
+  const shapes = new Map<string, { type: JSONSchema7["type"]; shape: string }>()
+  const widen = new Map<string, JSONSchema7["type"]>()
+  for (const v of objects) {
+    for (const [key, prop] of Object.entries(v.properties ?? {})) {
+      if (key === discriminator) continue
+      const type = typeof prop === "object" ? prop.type : undefined
+      const shape = JSON.stringify(shapeOf(prop))
+      const seen = shapes.get(key)
+      if (!seen) {
+        shapes.set(key, { type, shape })
+        continue
+      }
+      if (seen.shape === shape) continue
+      if (typeof type !== "string" || type !== seen.type) return undefined
+      widen.set(key, type)
+    }
+  }
+  return widen
 }
 
 function flattenNestedDiscriminatedUnions(schema: JSONSchema7): JSONSchema7 {
@@ -2024,13 +2058,24 @@ function flattenNestedDiscriminatedUnions(schema: JSONSchema7): JSONSchema7 {
   let changed = false
   const properties: Record<string, JSONSchema7Definition> = {}
   for (const [key, prop] of Object.entries(schema.properties)) {
-    if (typeof prop !== "object" || !isDiscriminatedObjectUnion(prop)) {
+    const plan = typeof prop === "object" ? nestedFlattenPlan(prop) : undefined
+    if (typeof prop !== "object" || !plan) {
       properties[key] = prop
       continue
     }
     changed = true
     const flat = flattenDiscriminatedUnion(prop)
-    properties[key] = prop.description ? { ...flat, description: prop.description } : flat
+    const flatProperties = { ...flat.properties }
+    for (const [name, type] of plan) {
+      const current = flatProperties[name]
+      const description = typeof current === "object" ? current.description : undefined
+      flatProperties[name] = description ? { type, description } : { type }
+    }
+    properties[key] = {
+      ...flat,
+      properties: flatProperties,
+      ...(prop.description ? { description: prop.description } : {}),
+    }
   }
   return changed ? { ...schema, properties } : schema
 }
