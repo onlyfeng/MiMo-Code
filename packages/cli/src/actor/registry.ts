@@ -52,7 +52,9 @@ export function sweepAbandonedZombies(): void {
       })
       .where(live.length > 0 ? and(abandoned, notInArray(ActorRegistryTable.instance_id, live)) : abandoned)
       .run()
-  })
+    // The read comes first, so a deferred start would fail at once on another
+    // process's write lock instead of waiting the busy timeout out.
+  }, { behavior: "immediate" })
 }
 
 type ActorRow = typeof ActorRegistryTable.$inferSelect

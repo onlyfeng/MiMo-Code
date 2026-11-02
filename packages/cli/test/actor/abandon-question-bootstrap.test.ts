@@ -11,6 +11,7 @@ import { Database, eq } from "../../src/storage"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { tmpdir } from "../fixture/fixture"
 import { Log } from "../../src/util"
+import * as Registry from "../../src/actor/registry"
 
 void Log.init({ print: false })
 
@@ -132,5 +133,24 @@ test("bootstrap settles abandoned actors without reading or reclaiming question 
     expect(actors).toHaveLength(1)
     expect(actors[0]?.status).toBe("idle")
     expect(actors[0]?.last_outcome).toBe("failure")
+  }
+}, 30000)
+
+test("bootstrap still boots when the actor sweep throws", async () => {
+  await using tmp = await tmpdir({ git: true })
+  // The sweep throws what SQLite throws once another process outlasts the busy
+  // timeout (zombie-sweep-busy.test.ts drives the real lock); boot must go on.
+  const sweep = spyOn(Registry, "sweepAbandonedZombies").mockImplementation(() => {
+    throw new Error("database is locked")
+  })
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      init: () => AppRuntime.runPromise(InstanceBootstrap),
+      fn: async () => {},
+    })
+    expect(sweep).toHaveBeenCalledTimes(1)
+  } finally {
+    sweep.mockRestore()
   }
 }, 30000)

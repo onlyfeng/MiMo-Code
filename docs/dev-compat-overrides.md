@@ -302,6 +302,15 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-02 DC-SESSION-001 write contention
+
+Follow-up to PR #183, no inherited change and no owner added or retired. Six windows over one database file showed two faults. A window exited: its instance was disposed under a running session, the TUI's refresh made the server boot a fresh instance, the boot-time sweep's read-then-write transaction met another process's commit and threw `database is locked`, the throw escaped `Effect.catch` as a defect, and the refresh's fatal bootstrap exited the TUI. Woken input stayed accepted for hours: the inbox claim, a deferred read-then-write, failed the same way, and the failure was neither logged nor retried. `main` is not affected: its sweep is a single write, and only compat reads first. The contract above now covers write contention.
+
+Evidence (runtime/tests on `fix/compat-sqlite-busy-resilience`, pinned Bun 1.3.14, ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE` unset):
+- Each new case failed when its rule was removed: the deferred sweep fails in about 4 ms with `database is locked` while another process holds the write lock, and with `immediate` it waits for the commit (about 1 s) and settles the row; `Effect.sync` lets the throwing sweep fail the boot; a fatal dispose refresh never retries.
+- Locally `test/inbox`, `test/actor`, `test/cli/tui`, `test/project` and the owner, liveness and execution-ownership session files pass 1010 cases, 5 skip, 3 fail. The three failures (two `poststop-progress-write-permission` cases and one `spawn` read-only GPT tool case) fail identically on the unchanged base `df211e32` on this host. Package typecheck exits 0; root lint reports zero errors.
+- Exact-SHA CI on `2dd59fe0` passes lint, typecheck and the test run dispatched with `windows_runtime: true` (all four unit shards, the dedicated suites and `windows-runtime`). Codex review on `2dd59fe0` reported no findings.
+
 ## 2026-11-01 DC-SESSION-001 Windows lock release
 
 Follow-up to PR #183, no inherited change and no owner added or retired. The first `windows-runtime` run on merge `e332bb94` passed every selected case but failed each focused suite's teardown with `EBUSY` while deleting the per-run test data directory: the process's liveness lock file stays open for its lifetime, and Windows cannot delete an open file. `ProcessLiveness.release()` closes and deletes this process's lock, and the test preload calls it after `Database.close()`, before it removes its directories. Deleting another instance's dead lock file is now best effort: on Windows a concurrent probe's open handle makes the deletion fail, which used to throw out of `status`/`claim`; a file left behind is deleted by a later probe. The Windows entry (DC-PLATFORM-001) also runs `process-liveness` and `session-owner` as a focused suite, so the lock primitive is checked on real Windows locking and deletion rules. New overlays: `test/preload.ts` and `script/verify-windows-runtime.ts`, both previously identical to main.
@@ -2757,6 +2766,19 @@ files remain byte-identical to the accepted main correction.
     workspace own the session; a session from another project is not claimed.
   - `sweepAbandonedZombies` skips actors whose instance is alive; the registry
     layer takes the liveness lock before it writes rows naming the process.
+  - Write contention: with several processes on one WAL database, a deferred
+    transaction that reads before it writes fails at once (`database is
+    locked`) when another process commits first, without waiting out the
+    busy timeout. Every such transaction this owner adds or relies on starts
+    with the write lock (`behavior: "immediate"`): the boot sweep, inbox
+    `claim`, `ack`, `withStop`, `abortSession`, `reconcileOnBoot` and
+    `cancelLane`, and the prompt's `recordDelivery` and
+    `cancelAcceptedPrompt` (`writeAccept` already did). `InstanceBootstrap`
+    runs the sweep through `Effect.try`, so a sweep that still fails is logged
+    and the boot goes on; a woken lane whose run fails is logged. A TUI refresh
+    after `server.instance.disposed` is not fatal: it retries (0.5 s, 2 s,
+    5 s), a newer disposal supersedes it, and if every attempt fails the window
+    keeps its data and shows an error toast.
 - Delta: windows still running an older binary neither claim nor honour
   ownership, so every window needs a restart. Switching sessions inside a
   window claims on the first turn, not on view. Opening a window for a
@@ -2766,6 +2788,8 @@ files remain byte-identical to the accepted main correction.
   `packages/cli/src/tool/actor.ts`, `packages/cli/src/actor/registry.ts`,
   `packages/cli/src/storage/index.ts`,
   `packages/cli/src/cli/cmd/tui/{worker,thread}.ts`,
+  `packages/cli/src/project/bootstrap.ts`,
+  `packages/cli/src/cli/cmd/tui/context/sync.tsx` (dispose refresh only),
   `packages/cli/migration/20261031000000_session_owner/migration.sql`.
 - Harness surfaces: `packages/cli/test/preload.ts` (`release()` before the
   data directory is removed) and the `session-owner` focused suite in
@@ -2777,9 +2801,13 @@ files remain byte-identical to the accepted main correction.
   `test/session/session-owner.test.ts`, `test/session/session-owner-prompt.test.ts`,
   the six run-entry cases in `test/session/execution-ownership.test.ts`,
   `test/inbox/session-owner-delivery.test.ts`, the three `delivery` cases in
-  `test/tool/actor-send.test.ts`, and the live-instance sweep case in
-  `test/actor/registry.test.ts`. Fixtures: `test/fixture/process-owner.ts`,
-  `test/fixture/session-owner-peer.ts`, `test/lib/process-owner.ts`.
+  `test/tool/actor-send.test.ts`, the live-instance sweep case in
+  `test/actor/registry.test.ts`, `test/actor/zombie-sweep-busy.test.ts` (the
+  sweep in one process waits out another process's write lock), the
+  throwing-sweep case in `test/actor/abandon-question-bootstrap.test.ts`, and
+  `test/cli/tui/dispose-refresh.test.tsx`. Fixtures: `test/fixture/process-owner.ts`,
+  `test/fixture/session-owner-peer.ts`, `test/fixture/zombie-sweep-peer.ts`,
+  `test/fixture/sqlite-write-holder.ts`, `test/lib/process-owner.ts`.
 - Evidence (2026-11-01, PR #183 runtime/tests `501ede28`, pinned Bun 1.3.14,
   ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and
   `MIMOCODE_CODEX_MODE` unset):
