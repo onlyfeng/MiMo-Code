@@ -1869,10 +1869,27 @@ export const layer: Layer.Layer<
 
       const indexText = yield* renderIndex(input.sessionID).pipe(Effect.catch(() => Effect.succeed("")))
 
+      // FC-023: the boundary is the lane's newest user message, so later
+      // model-less turns (inbox, cron) and the TUI's restored selection read
+      // their variant from it. Keep the variant the lane's previous turn ran at
+      // on this same model; without it every turn after a rebuild ran at the
+      // model's default.
+      let variant: string | undefined
+      for (const m of MessageV2.stream(input.sessionID, { agentID: input.agentID ?? "main" })) {
+        if (m.info.role !== "user") continue
+        if (m.info.model.providerID === input.model.providerID && m.info.model.modelID === input.model.modelID)
+          variant = m.info.model.variant
+        break
+      }
+
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user" as const,
-        model: { providerID: input.model.providerID as ProviderID, modelID: input.model.modelID as ModelID },
+        model: {
+          providerID: input.model.providerID as ProviderID,
+          modelID: input.model.modelID as ModelID,
+          ...(variant ? { variant } : {}),
+        },
         sessionID: input.sessionID,
         agent: input.agent,
         task_id: input.task_id,

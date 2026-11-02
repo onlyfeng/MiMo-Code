@@ -11,7 +11,7 @@ import { checkpointPath } from "../../src/session/checkpoint-paths"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorRegistry } from "../../src/actor/registry"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
-import { PartTable } from "../../src/session/session.sql"
+import { MessageTable, PartTable } from "../../src/session/session.sql"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Instance } from "../../src/project/instance"
 import { Database, eq } from "../../src/storage"
@@ -126,6 +126,49 @@ describe("rebuild boundary", () => {
           .filter((row) => !Bun.deepEquals(after.get(row.id), row.data))
           .map((row) => ({ id: row.id, after: after.get(row.id) }))
         expect(changed).toEqual([])
+      }),
+    ),
+  )
+
+  // Later model-less turns and the TUI's restored selection read the variant
+  // from the lane's newest user message, which is now the boundary (FC-023).
+  it.live(
+    "keeps the variant the previous turn ran at on the same model",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionNs.Service
+        const checkpoint = yield* SessionCheckpoint.Service
+        const boundaryOn = Effect.fn("RebuildLosslessTest.boundaryOn")(function* (
+          variant: string | undefined,
+          model: { providerID: string; modelID: string },
+        ) {
+          const info = yield* sessions.create({})
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
+            await Bun.write(checkpointPath(info.id), "## §1 Active intent\n\nrebuild variant test\n")
+          })
+          const t0 = 1_700_000_000_000
+          yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: { ...ref, ...(variant ? { variant } : {}) },
+            time: { created: t0 },
+          })
+          const boundary = yield* seedAssistantWithTool(info.id, t0 + 1, "read", "PRE_BOUNDARY_READ")
+          yield* seedAssistantWithTool(info.id, t0 + 2, "bash", "POST_BOUNDARY_BASH")
+          expect(yield* checkpoint.insertRebuildBoundary({ sessionID: info.id, boundary: boundary.id, agent: "build", model })).toBe(true)
+          const users = Database.use((db) =>
+            db.select({ data: MessageTable.data }).from(MessageTable).where(eq(MessageTable.session_id, info.id)).orderBy(MessageTable.time_created).all(),
+          ).filter((row) => row.data.role === "user")
+          return (users.at(-1)?.data as { model?: { variant?: string } }).model?.variant
+        })
+
+        expect(yield* boundaryOn("max", { providerID: "test", modelID: "test-model" })).toBe("max")
+        // A boundary on another model does not carry a variant that model may not offer.
+        expect(yield* boundaryOn("max", { providerID: "test", modelID: "other-model" })).toBeUndefined()
+        expect(yield* boundaryOn(undefined, { providerID: "test", modelID: "test-model" })).toBeUndefined()
       }),
     ),
   )
