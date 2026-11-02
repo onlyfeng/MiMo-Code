@@ -2272,6 +2272,11 @@ logged`, and the peer `success`/`failure` variants of
   - A shell run's user message keeps the previous user message's variant when
     it runs on that message's model. The shell API has no variant field, and
     later model-less turns continue this message.
+  - A checkpoint rebuild boundary (`insertRebuildBoundary`) keeps the variant
+    of the lane's newest user message when it is written for that message's
+    model, and has none on another model. The boundary becomes the lane's
+    newest user message, so later model-less turns and the TUI's restored
+    selection read their variant from it.
 - Motivation: cron fires (`injectScheduledPrompt`) send no model, and the
   variant was rebuilt from the input and the agent only, so every fire ran at
   the model's default variant. Inbox deliveries and actor notifications copy
@@ -2284,11 +2289,17 @@ logged`, and the peer `success`/`failure` variants of
 - Upstream relationship: upstream `7bc7dc3a` resolves the variant the same way.
   Fork fix of shared code. `dev/compat` applies the same rule in its shared
   model-selection resolver (DC-TUI-001).
+- 2026-11-02: rebuild boundaries kept the model but dropped the variant. After
+  every checkpoint rebuild, inbox deliveries copied the boundary's model and ran
+  at the default, and reopening the session showed no variant. In one
+  multi-agent workspace five sessions lost `max` or `xhigh` this way at their
+  first rebuild and never got it back.
 - Watch surfaces: `previousModel`, `lastModel`, `continuedVariant`,
   `agentVariant`, `createUserMessage`, `shell` and `command` in
   `packages/cli/src/session/prompt.ts`; `resolveDrainSeed` in
   `packages/cli/src/inbox/inbox.ts`; `injectScheduledPrompt`; the session sync
-  in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`.
+  in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`;
+  `insertRebuildBoundary` in `packages/cli/src/session/checkpoint.ts`.
 - Tests/evidence: `packages/cli/test/session/prompt-continued-variant.test.ts`:
   - a cron-shaped prompt continues `max`, and a named model without a variant
     keeps its default;
@@ -2299,6 +2310,10 @@ logged`, and the peer `success`/`failure` variants of
 
   Reverting any one site fails its case. Inheriting whenever the model matches
   the previous turn fails the named-model case.
+  `packages/cli/test/session/rebuild-boundary-lossless.test.ts` "keeps the
+  variant the previous turn ran at on the same model": a boundary after a
+  `max` turn keeps `max`, one on another model or after a turn without a
+  variant has none. Dropping the variant from the boundary fails it.
 - Retirement condition: upstream continues the variant along with the model.
 
 ## FC-024 — boot reconciliation reports a delivered claim as interrupted
