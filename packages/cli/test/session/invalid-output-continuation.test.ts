@@ -20,6 +20,7 @@ import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
+import { SessionRetry } from "../../src/session/retry"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -424,6 +425,40 @@ describe("invalid-output continuation — integration", () => {
               expect(nonSystem.some((m) => JSON.stringify(m.content).includes("CHECKPOINT_COMPLETE"))).toBe(false)
               expect(nonSystem).toEqual(nonSystemMessages(stub.captures[0]))
               expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(true)
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  })
+
+  test("checkpoint-writer gives up on endless empty output within its bounded budget", async () => {
+    await using tmp = await tmpdir({ git: true })
+    // Persistent for main (writeConfig): the writer must stop anyway, long before
+    // the sample that would finally answer.
+    const stub = startScriptedLLMServer([
+      ...Array.from({ length: 8 }, () => ({ lines: emptyStopResponse() })),
+      { lines: textStopResponse("CHECKPOINT_COMPLETE") },
+    ])
+    try {
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "invalid-checkpoint-writer-bounded" })
+              const result = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "checkpoint-writer",
+                parts: [{ type: "text", text: "Update the checkpoint." }],
+              })
+              expect(stub.captures.length).toBe(SessionRetry.SYSTEM_AGENT_MAX_RETRIES + 1)
+              expect(result.info.role).toBe("assistant")
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
             }),
           ),
       })
