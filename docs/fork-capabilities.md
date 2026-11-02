@@ -2366,8 +2366,9 @@ logged`, and the peer `success`/`failure` variants of
     missing or unknown action.
   - Only a union the flat form can represent qualifies: every branch is an
     object schema, one property holds a distinct string `const` in each branch
-    and no other property holds a `const`, and a property shared by several
-    branches has one `type`. When the branches
+    and no other property holds a distinct `const` in each branch, and a
+    property shared by several branches has one `type`. A `const` present in
+    only some branches (compat's `spawn` `lifecycle`) does not block it. When the branches
     constrain such a property differently (actor's `task_id`), the flat form
     widens it to that type and zod applies each branch's constraint. The union
     node may carry only `type: "object"`, `description` and `title` beside the
@@ -2412,7 +2413,9 @@ logged`, and the peer `success`/`failure` variants of
     `string`, and a shared object property whose inner field is named
     `description` is compared by that field. Accepting a non-string
     discriminator, accepting differing types, skipping the widening, accepting
-    a second `const`, or ignoring nested `description` keys each fails a case.
+    a rival discriminator, or ignoring nested `description` keys each fails a
+    case; rejecting any second `const` fails "flattens when another const
+    appears in only some branches".
   - `packages/cli/test/tool/task.test.ts` and `actor.test.ts`: the same flat
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
