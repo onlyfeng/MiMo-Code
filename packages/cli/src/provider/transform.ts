@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai"
 import { mergeDeep, unique } from "remeda"
-import type { JSONSchema7 } from "@ai-sdk/provider"
+import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import type { JSONSchema } from "zod/v4/core"
 import type * as Provider from "./provider"
 import type * as ModelsDev from "./models"
@@ -1987,6 +1987,37 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
   } as JSONSchema7
 }
 
+// xAI Grok models, matched on the model id so a gateway that serves Grok
+// through another SDK package (e.g. @ai-sdk/openai Responses) still matches.
+function isGrok(model: Provider.Model): boolean {
+  return [model.api?.id, model.id].some((id) => typeof id === "string" && id.toLowerCase().includes("grok"))
+}
+
+// Grok answers a property whose schema is a discriminated union (the cron,
+// task and actor `operation` envelope) with an empty object, every time, so
+// the call never validates (FC-025). Flatten each such top-level property the
+// way the root is flattened above; zod still parses the original union.
+function flattenNestedDiscriminatedUnions(schema: JSONSchema7): JSONSchema7 {
+  if (!schema.properties) return schema
+  let changed = false
+  const properties: Record<string, JSONSchema7Definition> = {}
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    const node = prop as Record<string, any>
+    if (typeof prop !== "object" || !(node.anyOf ?? node.oneOf)) {
+      properties[key] = prop
+      continue
+    }
+    const flat = flattenDiscriminatedUnion(node)
+    if (flat === node) {
+      properties[key] = prop
+      continue
+    }
+    changed = true
+    properties[key] = node.description ? { ...flat, description: node.description } : flat
+  }
+  return changed ? { ...schema, properties } : schema
+}
+
 // Models served by Moonshot AI (Kimi). Matched on both the provider id
 // (moonshotai, moonshotai-cn, kimi-for-coding, …) and the model id (kimi-*), so
 // Kimi models reached through a gateway/proxy still get the schema fixup below.
@@ -2063,6 +2094,7 @@ export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JS
   // Flatten unconditionally — all providers accept a flat `type: "object"` schema,
   // and zod's runtime parse still enforces per-variant required fields strictly.
   schema = flattenDiscriminatedUnion(schema)
+  if (isGrok(model)) schema = flattenNestedDiscriminatedUnions(schema)
 
   // Convert integer enums to string enums for Google/Gemini
   if (model.providerID === "google" || model.api.id.includes("gemini")) {

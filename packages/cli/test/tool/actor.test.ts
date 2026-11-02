@@ -944,6 +944,22 @@ describe("Actor tool subagent_type enum (F36)", () => {
     ),
   )
 
+  // Grok answers the nested operation union with `{}` every time (FC-025).
+  it.live("grok gets the operation envelope as one flat object with an action enum", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const grok = { providerID: "test", id: "grok-4.7", api: { id: "grok-4.7", npm: "@ai-sdk/openai" }, capabilities: { input: {} } } as any
+        const op = (transformSchema(grok, z.toJSONSchema(def.parameters)) as any).properties.operation
+        expect(op.anyOf ?? op.oneOf).toBeUndefined()
+        expect(op.required).toEqual(["action"])
+        expect(op.properties.action.enum).toHaveLength(8)
+        expect(op.properties.action.enum[0]).toBe("spawn")
+      }),
+    ),
+  )
+
   // The union order is behaviour-neutral for PARSING but it is the one part of
   // "spawn is the default" that reaches the model as structure rather than
   // prose: the branch order in the JSON schema handed to the provider. The

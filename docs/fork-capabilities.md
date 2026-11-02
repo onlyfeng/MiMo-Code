@@ -135,6 +135,7 @@ not change their implementation. The preceding review is retained in the
 | FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
 | FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
+| FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2299,3 +2300,47 @@ logged`, and the peer `success`/`failure` variants of
   Reverting any one site fails its case. Inheriting whenever the model matches
   the previous turn fails the named-model case.
 - Retirement condition: upstream continues the variant along with the model.
+
+## FC-025 — Grok receives a flat `operation` envelope
+
+- Status: active
+- Canonical owner: fork `main` tool schema transform in
+  `packages/cli/src/provider/transform.ts` (`isGrok`,
+  `flattenNestedDiscriminatedUnions`, called from `schema`)
+- Observable contract:
+  - For a model whose model id or API id contains `grok`, a top-level tool
+    parameter whose schema is a discriminated union is sent as one object: the
+    discriminator becomes a required string `enum`, every variant's other
+    fields become optional properties tagged "(only when action=…)", and
+    `additionalProperties: false` stays. This applies to the `operation`
+    envelope of `cron`, `task` and `actor`.
+  - The arguments a model sends against that flat object are the same nested
+    shape, so zod still parses them with the original union and rejects a
+    missing or unknown action.
+  - Every other model receives the nested union unchanged. The existing
+    root-level flattening is unchanged for all models.
+- Motivation: Grok answers a property whose schema is `anyOf` of object
+  variants with an empty object. In recorded calls through a Grok gateway
+  (`@ai-sdk/openai` Responses), every `task` (191), `cron` (14) and `actor` (5)
+  call sent `{"operation":{}}` and failed with "Invalid input at
+  operation.action", across 26 sessions, so Grok sessions could not schedule,
+  track tasks or message actors. FC-020 decodes a stringified envelope, which is
+  a different failure.
+- Upstream relationship: upstream sends the nested union to every model. Fork
+  model-specific adaptation; `dev/compat` inherits it unchanged.
+- Watch surfaces: `schema`, `flattenDiscriminatedUnion`,
+  `flattenNestedDiscriminatedUnions` and `isGrok` in
+  `packages/cli/src/provider/transform.ts`; the `operation` envelopes in
+  `packages/cli/src/tool/cron.ts`, `task.ts` and `actor.ts`; the frozen-prefix
+  tool capture in `packages/cli/src/session/llm-request-prefix.ts`, which uses
+  the same `schema`.
+- Tests/evidence:
+  - `packages/cli/test/tool/cron.test.ts` "cron schema: nested operation union
+    for grok": Grok gets a flat `operation` with the six-action enum and a
+    per-action tag, zod still accepts `{ action: "list" }` and rejects `{}`; a
+    non-Grok model keeps the six-branch union. Removing the Grok call fails the
+    Grok case.
+  - `packages/cli/test/tool/task.test.ts` and `actor.test.ts`: the same flat
+    shape for `task` and for `actor` (eight actions, `spawn` first).
+- Retirement condition: Grok fills nested discriminated-union properties, or
+  upstream flattens them for every model.
