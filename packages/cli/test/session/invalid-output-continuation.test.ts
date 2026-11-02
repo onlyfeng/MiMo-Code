@@ -60,7 +60,7 @@ function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Servi
   )
 }
 
-function writeConfig(dir: string, origin: string) {
+function writeConfig(dir: string, origin: string, retry?: Record<string, unknown>) {
   return Bun.write(
     path.join(dir, "mimocode.json"),
     JSON.stringify({
@@ -77,6 +77,7 @@ function writeConfig(dir: string, origin: string) {
       retry: {
         server: { initialDelayMs: 1, maxDelayMs: 1 },
         unknown: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 2000 },
+        ...retry,
       },
     }),
   )
@@ -459,6 +460,43 @@ describe("invalid-output continuation — integration", () => {
               expect(stub.captures.length).toBe(SessionRetry.SYSTEM_AGENT_MAX_RETRIES + 1)
               expect(result.info.role).toBe("assistant")
               if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  })
+
+  test("checkpoint-writer bounds request retries before provider output even when configured persistent", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const unavailable = { lines: [], status: 503 }
+    const stub = startScriptedLLMServer([
+      ...Array.from({ length: 40 }, () => unavailable),
+      { lines: textStopResponse("CHECKPOINT_COMPLETE") },
+    ])
+    try {
+      await writeConfig(tmp.path, stub.origin, {
+        request: { mode: "persistent", initialDelayMs: 1, maxDelayMs: 1 },
+        server: { mode: "persistent", initialDelayMs: 1, maxDelayMs: 1 },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "unavailable-checkpoint-writer-bounded" })
+              const result = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "checkpoint-writer",
+                parts: [{ type: "text", text: "Update the checkpoint." }],
+              })
+              // Each bounded processor attempt runs a bounded request ladder.
+              expect(stub.captures.length).toBe((SessionRetry.SYSTEM_AGENT_MAX_RETRIES + 1) ** 2)
+              expect(result.info.role).toBe("assistant")
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("APIError")
             }),
           ),
       })
