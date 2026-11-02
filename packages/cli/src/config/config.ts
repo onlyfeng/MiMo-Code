@@ -284,10 +284,10 @@ const InfoSchema = Schema.Struct({
     Schema.Struct({
       thresholds: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). Each threshold must be <= window - 20K reserved. Default: [\"40%\", \"60%\", \"80%\"].",
+          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). A threshold above window - reserved is clamped to it once; later ones above it are dropped. Default by context window: none below 25K; 20%, 40%, 60%, 80% up to 200K; every 10% from 10% to 90% up to 500K; every 5% from 5% to 90% above 500K.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
-        description: "Token buffer reserved for checkpoint operations. Default: 20000.",
+        description: "Token buffer reserved for checkpoint operations; thresholds may not exceed window - reserved. Default: 13000.",
       }),
       fork: Schema.optional(Schema.Boolean).annotate({
         description:
