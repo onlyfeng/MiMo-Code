@@ -546,6 +546,8 @@ export function policy(opts: {
   jitterRatio?: number
   initialDelayMs?: number
   budget?: (decision: RetryDecision) => RetryBudget
+  // Applied last, after host and network constraints have widened the budget.
+  cap?: (budget: RetryBudget) => RetryBudget
   replaySafe?: (decision: RetryDecision) => boolean
   onTerminal?: (decision: RetryDecision) => Effect.Effect<void>
   silentRetry?: (error: Err) => boolean
@@ -576,7 +578,8 @@ export function policy(opts: {
         maxDelayMs: RETRY_MAX_DELAY_NO_HEADERS,
         jitterRatio: opts.jitterRatio ?? RETRY_JITTER_RATIO,
       }
-      const budget = constrainBudget(configured, decision)
+      const constrained = constrainBudget(configured, decision)
+      const budget = opts.cap ? opts.cap(constrained) : constrained
       if (
         opts.replaySafe?.(decision) === false ||
         (budget.mode === "bounded" && budget.maxRetries !== undefined && meta.attempt > budget.maxRetries)

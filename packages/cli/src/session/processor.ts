@@ -1144,9 +1144,8 @@ export const layer: Layer.Layer<
               SessionRetry.policy({
                 parse,
                 phase: "stream",
-                budget: (decision) => systemAgent
-                  ? SessionRetry.boundForSystemAgent(SessionRetry.budgetFor(retryConfig, decision))
-                  : SessionRetry.budgetFor(retryConfig, decision),
+                budget: (decision) => SessionRetry.budgetFor(retryConfig, decision),
+                cap: systemAgent ? SessionRetry.boundForSystemAgent : undefined,
                 jitterRatio: retryConfig.jitterRatio,
                 replaySafe: () => ctx.retrySafe,
                 silentRetry: (error) => isMain && SessionRetry.isGptServerOverloadedError(error),
