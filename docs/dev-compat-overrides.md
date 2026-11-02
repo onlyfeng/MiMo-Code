@@ -309,6 +309,7 @@ Follow-up to PR #183, no inherited change and no owner added or retired. Six win
 Evidence (runtime/tests on `fix/compat-sqlite-busy-resilience`, pinned Bun 1.3.14, ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE` unset):
 - Each new case failed when its rule was removed: the deferred sweep fails in about 4 ms with `database is locked` while another process holds the write lock, and with `immediate` it waits for the commit (about 1 s) and settles the row; `Effect.sync` lets the throwing sweep fail the boot; a fatal dispose refresh never retries.
 - Locally `test/inbox`, `test/actor`, `test/cli/tui`, `test/project` and the owner, liveness and execution-ownership session files pass 1010 cases, 5 skip, 3 fail. The three failures (two `poststop-progress-write-permission` cases and one `spawn` read-only GPT tool case) fail identically on the unchanged base `df211e32` on this host. Package typecheck exits 0; root lint reports zero errors.
+- Exact-SHA CI on `2dd59fe0` passes lint, typecheck and the test run dispatched with `windows_runtime: true` (all four unit shards, the dedicated suites and `windows-runtime`). Codex review on `2dd59fe0` reported no findings.
 
 ## 2026-11-01 DC-SESSION-001 Windows lock release
 
