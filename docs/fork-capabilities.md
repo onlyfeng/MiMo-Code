@@ -2372,7 +2372,8 @@ logged`, and the peer `success`/`failure` variants of
     widens it to that type and zod applies each branch's constraint. The union
     node may carry only `type: "object"`, `description` and `title` beside the
     branches, and each branch only `type`, `properties`, `required`,
-    `description`, `title` and a missing or `false` `additionalProperties`. Any
+    `description`, `title` and a missing or `false` `additionalProperties`, with
+    no property named after an `Object.prototype` member. Any
     other union, such as an MCP tool's `string | null`, a numeric discriminator,
     a shared property whose type differs between branches, a node with its own
     `properties` or `required`, or a branch with dynamic properties, is left as
@@ -2403,8 +2404,9 @@ logged`, and the peer `success`/`failure` variants of
   - `packages/cli/test/provider/transform.test.ts` "grok nested unions": a
     `string | null` property, object branches without a discriminator, a
     numeric discriminator, a shared property of differing types, a node with its
-    own required property, a branch with `additionalProperties` and branches
-    with a second `const` property pass through
+    own required property, a branch with `additionalProperties`, branches with
+    a second `const` property and a branch property named `constructor` pass
+    through
     unchanged; a discriminated object union is flattened with its description
     kept; a shared string property constrained differently is widened to
     `string`, and a shared object property whose inner field is named

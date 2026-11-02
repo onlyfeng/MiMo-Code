@@ -2032,7 +2032,9 @@ function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> 
       v.type === "object" &&
       v.properties !== undefined &&
       (v.additionalProperties === undefined || v.additionalProperties === false) &&
-      Object.keys(v).every((key) => NESTED_BRANCH_KEYS.has(key)),
+      Object.keys(v).every((key) => NESTED_BRANCH_KEYS.has(key)) &&
+      // flattenDiscriminatedUnion keys plain objects by property name.
+      Object.keys(v.properties).every((key) => !(key in Object.prototype)),
   )
   if (objects.length !== variants.length) return undefined
   const constOf = (v: JSONSchema7, key: string) => {

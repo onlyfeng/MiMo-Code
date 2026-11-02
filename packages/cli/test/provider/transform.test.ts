@@ -651,6 +651,7 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
   const grok = ProviderTest.model({ id: ModelID.make("grok-4.7"), providerID: ProviderID.make("test") })
 
   test("leaves a union that is not a discriminated object union unchanged", () => {
+    const text: JSONSchema7 = { type: "string" }
     // MCP tools pass external schemas through the same transform.
     const schema: JSONSchema7 = {
       type: "object",
@@ -691,6 +692,13 @@ describe("ProviderTransform.schema - grok nested unions (FC-025)", () => {
           anyOf: [
             { type: "object", properties: { code: { type: "number", const: 1 }, action: { const: "get" } } },
             { type: "object", properties: { code: { type: "number", const: 2 }, action: { const: "set" } } },
+          ],
+        },
+        // The flattener keys plain objects by property name, so `constructor` would throw.
+        inherited: {
+          anyOf: [
+            { type: "object", properties: { action: { const: "get" }, constructor: text } },
+            { type: "object", properties: { action: { const: "list" } } },
           ],
         },
         // A flat object keeps one schema per property, so `value` would lose `number`.
