@@ -124,8 +124,8 @@ The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, 
 | `compaction.preserve_recent_tokens` | Deprecated compatibility setting; optional older API rounds use at most 40000 tokens, also capped by the ratio-based trigger after frozen prefix and projection overhead. New external requests arriving during compaction and their following messages remain even beyond that optional budget; oversized requests still undergo normal overflow handling |
 | `compaction.reserved` | Compatibility buffer for validating `compaction.max_context`, together with any output reservation; not subtracted from the ratio-based trigger |
 | `compaction.max_context` | Compact earlier than the model window. One value for all models, or a map keyed `"<providerID>/<modelID>"` (wildcards allowed, longest pattern wins). Values: token count, `"300K"`, `"1M"`, or `"50%"` of the window. Always clamped to the provider cap — can only lower the trigger, never raise it. `0` = no budget. Set it from the TUI with `/context-limit` |
-| `checkpoint.thresholds` | Context-fill triggers, e.g. `["40%","60%","80%"]` |
-| `checkpoint.reserved` | Token buffer for checkpoint ops (default 20000) |
+| `checkpoint.thresholds` | Context-fill triggers, e.g. `["30%","55%","75%"]`. Default depends on the window: 4 triggers up to 200K, 9 up to 500K, 18 above |
+| `checkpoint.reserved` | Token buffer for checkpoint ops; thresholds stay below window − reserved (default 13000) |
 | `checkpoint.fork` | Fork parent prefix into writer session for cache reuse (default true) |
 | `checkpoint.push_caps.*` | Per-section token caps for rebuild context (tasks_ledger, focus_task, checkpoint, memory, notes, global, recent_user, …) |
 | `checkpoint.task_archive_days` | Days before done/abandoned tasks filtered out (default 7) |
