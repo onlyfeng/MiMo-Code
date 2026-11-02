@@ -135,6 +135,8 @@ not change their implementation. The preceding review is retained in the
 | FC-021 | Checkpoint writer: bounded-agent overflow, writer view sizing, writer step budget                         | Fork hardening of upstream writer loop and fork view             | Stop on overflow; fit the view to the window; keep a finite budget                       |
 | FC-022 | `Log.clone` and the per-service logger cache                                                              | Fork fix of upstream logger tag sharing                          | Clones never reach the shared per-service logger                                         |
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
+| FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
+| FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2271,6 +2273,11 @@ logged`, and the peer `success`/`failure` variants of
   - A shell run's user message keeps the previous user message's variant when
     it runs on that message's model. The shell API has no variant field, and
     later model-less turns continue this message.
+  - A checkpoint rebuild boundary (`insertRebuildBoundary`) keeps the variant
+    of the lane's newest user message when it is written for that message's
+    model, and has none on another model. The boundary becomes the lane's
+    newest user message, so later model-less turns and the TUI's restored
+    selection read their variant from it.
 - Motivation: cron fires (`injectScheduledPrompt`) send no model, and the
   variant was rebuilt from the input and the agent only, so every fire ran at
   the model's default variant. Inbox deliveries and actor notifications copy
@@ -2283,11 +2290,17 @@ logged`, and the peer `success`/`failure` variants of
 - Upstream relationship: upstream `7bc7dc3a` resolves the variant the same way.
   Fork fix of shared code. `dev/compat` applies the same rule in its shared
   model-selection resolver (DC-TUI-001).
+- 2026-11-02: rebuild boundaries kept the model but dropped the variant. After
+  every checkpoint rebuild, inbox deliveries copied the boundary's model and ran
+  at the default, and reopening the session showed no variant. In one
+  multi-agent workspace five sessions lost `max` or `xhigh` this way at their
+  first rebuild and never got it back.
 - Watch surfaces: `previousModel`, `lastModel`, `continuedVariant`,
   `agentVariant`, `createUserMessage`, `shell` and `command` in
   `packages/cli/src/session/prompt.ts`; `resolveDrainSeed` in
   `packages/cli/src/inbox/inbox.ts`; `injectScheduledPrompt`; the session sync
-  in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`.
+  in `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`;
+  `insertRebuildBoundary` in `packages/cli/src/session/checkpoint.ts`.
 - Tests/evidence: `packages/cli/test/session/prompt-continued-variant.test.ts`:
   - a cron-shaped prompt continues `max`, and a named model without a variant
     keeps its default;
@@ -2298,4 +2311,112 @@ logged`, and the peer `success`/`failure` variants of
 
   Reverting any one site fails its case. Inheriting whenever the model matches
   the previous turn fails the named-model case.
+  `packages/cli/test/session/rebuild-boundary-lossless.test.ts` "keeps the
+  variant the previous turn ran at on the same model": a boundary after a
+  `max` turn keeps `max`, one on another model or after a turn without a
+  variant has none. Dropping the variant from the boundary fails it.
 - Retirement condition: upstream continues the variant along with the model.
+
+## FC-024 — boot reconciliation reports a delivered claim as interrupted
+
+- Status: active
+- Canonical owner: fork `main` inbox boot recovery in
+  `packages/cli/src/inbox/controller.ts` (`reconcileOnBoot`)
+- Observable contract:
+  - When a process restarts, `reconcileOnBoot` cancels its session's stale-epoch
+    and crashed `claimed` rows. A row whose input was already delivered into the
+    conversation (`consumed`) settles as `interrupted`; a row not yet delivered
+    settles as `never_ran`. Stale-epoch `accepted` rows are never consumed, so
+    they stay `never_ran`.
+  - This is the rule `cancelInputs` in the same file already applies when a
+    session stops.
+- Motivation: `reconcileOnBoot` wrote `never_ran` for every claimed row, so a
+  sender reading the receipt after a crash could not tell an input the model had
+  already seen and partly acted on from one it never received. Recovery rules
+  such as "resend once when `never_ran` and `consumed=0`" depend on that
+  difference; resending a consumed input replays work that already ran.
+- Upstream relationship: upstream `reconcileOnBoot` writes `never_ran`
+  unconditionally. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: `reconcileOnBoot` and `cancelInputs` in
+  `packages/cli/src/inbox/controller.ts`; the `consumed` anchor in
+  `packages/cli/src/session/prompt.ts`.
+- Tests/evidence: `packages/cli/test/inbox/queue-controller.test.ts`
+  "reconcileOnBoot reports a claim already delivered into the conversation as
+  interrupted" claims two inputs, marks one delivered, and expects
+  `interrupted` and `never_ran` respectively. Writing `never_ran` again fails it.
+  "reconcileOnBoot cancels claimed rows" still expects `never_ran` for an
+  undelivered claim.
+- Retirement condition: upstream distinguishes consumed claims on boot recovery.
+
+## FC-025 — Grok receives a flat `operation` envelope
+
+- Status: active
+- Canonical owner: fork `main` tool schema transform in
+  `packages/cli/src/provider/transform.ts` (`isGrok`,
+  `flattenNestedDiscriminatedUnions`, called from `schema`)
+- Observable contract:
+  - For a model whose model id or API id contains `grok`, a top-level tool
+    parameter whose schema is a discriminated union is sent as one object: the
+    discriminator becomes a required string `enum`, every variant's other
+    fields become optional properties tagged "(only when action=…)", and
+    `additionalProperties: false` stays. This applies to the `operation`
+    envelope of `cron`, `task` and `actor`.
+  - The arguments a model sends against that flat object are the same nested
+    shape, so zod still parses them with the original union and rejects a
+    missing or unknown action.
+  - Only a union the flat form can represent qualifies: every branch is an
+    object schema, one property holds a distinct string `const` in each branch
+    and no other property holds a distinct `const` in each branch, and a
+    property shared by several branches has one `type`. A `const` present in
+    only some branches (compat's `spawn` `lifecycle`) does not block it. When the branches
+    constrain such a property differently (actor's `task_id`), the flat form
+    widens it to that type and zod applies each branch's constraint. The union
+    node may carry only `type: "object"`, `description` and `title` beside the
+    branches, and each branch only `type`, `properties`, `required`,
+    `description`, `title` and a missing or `false` `additionalProperties`, with
+    no property named after an `Object.prototype` member. Any
+    other union, such as an MCP tool's `string | null`, a numeric discriminator,
+    a shared property whose type differs between branches, a node with its own
+    `properties` or `required`, or a branch with dynamic properties, is left as
+    it is, for Grok too.
+  - Every other model receives the nested union unchanged. The existing
+    root-level flattening is unchanged for all models.
+- Motivation: Grok answers a property whose schema is `anyOf` of object
+  variants with an empty object. In recorded calls through a Grok gateway
+  (`@ai-sdk/openai` Responses), every `task` (191), `cron` (14) and `actor` (5)
+  call sent `{"operation":{}}` and failed with "Invalid input at
+  operation.action", across 26 sessions, so Grok sessions could not schedule,
+  track tasks or message actors. FC-020 decodes a stringified envelope, which is
+  a different failure.
+- Upstream relationship: upstream sends the nested union to every model. Fork
+  model-specific adaptation; `dev/compat` inherits it unchanged.
+- Watch surfaces: `schema`, `flattenDiscriminatedUnion`,
+  `flattenNestedDiscriminatedUnions` and `isGrok` in
+  `packages/cli/src/provider/transform.ts`; the `operation` envelopes in
+  `packages/cli/src/tool/cron.ts`, `task.ts` and `actor.ts`; the frozen-prefix
+  tool capture in `packages/cli/src/session/llm-request-prefix.ts`, which uses
+  the same `schema`.
+- Tests/evidence:
+  - `packages/cli/test/tool/cron.test.ts` "cron schema: nested operation union
+    for grok": Grok gets a flat `operation` with the six-action enum and a
+    per-action tag, zod still accepts `{ action: "list" }` and rejects `{}`; a
+    non-Grok model keeps the six-branch union. Removing the Grok call fails the
+    Grok case.
+  - `packages/cli/test/provider/transform.test.ts` "grok nested unions": a
+    `string | null` property, object branches without a discriminator, a
+    numeric discriminator, a shared property of differing types, a node with its
+    own required property, a branch with `additionalProperties`, branches with
+    a second `const` property and a branch property named `constructor` pass
+    through
+    unchanged; a discriminated object union is flattened with its description
+    kept; a shared string property constrained differently is widened to
+    `string`, and a shared object property whose inner field is named
+    `description` is compared by that field. Accepting a non-string
+    discriminator, accepting differing types, skipping the widening, accepting
+    a rival discriminator, or ignoring nested `description` keys each fails a
+    case; rejecting any second `const` fails "flattens when another const
+    appears in only some branches".
+  - `packages/cli/test/tool/task.test.ts` and `actor.test.ts`: the same flat
+    shape for `task` and for `actor` (eight actions, `spawn` first).
+- Retirement condition: Grok fills nested discriminated-union properties, or
+  upstream flattens them for every model.

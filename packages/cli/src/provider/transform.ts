@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai"
 import { mergeDeep, unique } from "remeda"
-import type { JSONSchema7 } from "@ai-sdk/provider"
+import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import type { JSONSchema } from "zod/v4/core"
 import type * as Provider from "./provider"
 import type * as ModelsDev from "./models"
@@ -2003,6 +2003,124 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
   } as JSONSchema7
 }
 
+// xAI Grok models, matched on the model id so a gateway that serves Grok
+// through another SDK package (e.g. @ai-sdk/openai Responses) still matches.
+function isGrok(model: Provider.Model): boolean {
+  return [model.api?.id, model.id].some((id) => typeof id === "string" && id.toLowerCase().includes("grok"))
+}
+
+// Grok answers a property whose schema is a discriminated union (the cron,
+// task and actor `operation` envelope) with an empty object, every time, so
+// the call never validates (FC-025). Flatten each such top-level property the
+// way the root is flattened above; zod still parses the original union.
+//
+// Only a union the flat form can represent qualifies, because MCP tools pass
+// external schemas through here too: every branch is an object schema, and one
+// property holds a distinct string `const` in each branch (the flat form emits
+// a string enum). A property shared by several branches must have one `type`;
+// if the branches constrain it differently, the flat form widens it to that
+// type and zod applies each branch's constraint. The union node itself may hold
+// nothing the flat form would drop. Any other union keeps its shape.
+
+// A property schema without its own annotation, for comparing branch shapes.
+// Only the root `description` goes: nested keys may be real property names.
+function shapeOf(node: JSONSchema7Definition): string {
+  if (typeof node !== "object") return JSON.stringify(node)
+  const { description: _, ...rest } = node
+  return JSON.stringify(rest)
+}
+
+// Keys a qualifying union node may carry: anything else (shared `properties`,
+// `required`, `allOf`, ...) would be lost by replacing the node with the flat form.
+const NESTED_UNION_KEYS = new Set(["type", "anyOf", "oneOf", "description", "title"])
+// Keys a qualifying branch may carry; the flat form keeps only fixed properties
+// and closes the object, so dynamic-property schemas would be lost.
+const NESTED_BRANCH_KEYS = new Set(["type", "properties", "required", "additionalProperties", "description", "title"])
+
+function nestedFlattenPlan(node: JSONSchema7): Map<string, JSONSchema7["type"]> | undefined {
+  if (Object.keys(node).some((key) => !NESTED_UNION_KEYS.has(key))) return undefined
+  if (node.type !== undefined && node.type !== "object") return undefined
+  const variants = node.anyOf ?? node.oneOf
+  if (!variants || variants.length < 2) return undefined
+  const objects = variants.filter(
+    (v): v is JSONSchema7 =>
+      typeof v === "object" &&
+      v.type === "object" &&
+      v.properties !== undefined &&
+      (v.additionalProperties === undefined || v.additionalProperties === false) &&
+      Object.keys(v).every((key) => NESTED_BRANCH_KEYS.has(key)) &&
+      // flattenDiscriminatedUnion keys plain objects by property name.
+      Object.keys(v.properties).every((key) => !(key in Object.prototype)),
+  )
+  if (objects.length !== variants.length) return undefined
+  const constOf = (v: JSONSchema7, key: string) => {
+    const prop = v.properties?.[key]
+    return typeof prop === "object" && typeof prop.const === "string" ? prop.const : undefined
+  }
+  const discriminator = Object.keys(objects[0].properties ?? {}).find((key) => {
+    const values = objects.map((v) => constOf(v, key))
+    return values.every((value) => value !== undefined) && new Set(values).size === objects.length
+  })
+  if (!discriminator) return undefined
+  // flattenDiscriminatedUnion takes the first property with a distinct `const`
+  // in every branch, of any type; a second such property could be taken instead
+  // and keep a single branch's value. A `const` in only some branches cannot.
+  const rival = Object.keys(objects[0].properties ?? {}).some((key) => {
+    if (key === discriminator) return false
+    const values = objects.map((v) => {
+      const prop = v.properties?.[key]
+      return typeof prop === "object" ? prop.const : undefined
+    })
+    return values.every((value) => value !== undefined) && new Set(values).size === objects.length
+  })
+  if (rival) return undefined
+  const shapes = new Map<string, { type: JSONSchema7["type"]; shape: string }>()
+  const widen = new Map<string, JSONSchema7["type"]>()
+  for (const v of objects) {
+    for (const [key, prop] of Object.entries(v.properties ?? {})) {
+      if (key === discriminator) continue
+      const type = typeof prop === "object" ? prop.type : undefined
+      const shape = shapeOf(prop)
+      const seen = shapes.get(key)
+      if (!seen) {
+        shapes.set(key, { type, shape })
+        continue
+      }
+      if (seen.shape === shape) continue
+      if (typeof type !== "string" || type !== seen.type) return undefined
+      widen.set(key, type)
+    }
+  }
+  return widen
+}
+
+function flattenNestedDiscriminatedUnions(schema: JSONSchema7): JSONSchema7 {
+  if (!schema.properties) return schema
+  let changed = false
+  const properties: Record<string, JSONSchema7Definition> = {}
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    const plan = typeof prop === "object" ? nestedFlattenPlan(prop) : undefined
+    if (typeof prop !== "object" || !plan) {
+      properties[key] = prop
+      continue
+    }
+    changed = true
+    const flat = flattenDiscriminatedUnion(prop)
+    const flatProperties = { ...flat.properties }
+    for (const [name, type] of plan) {
+      const current = flatProperties[name]
+      const description = typeof current === "object" ? current.description : undefined
+      flatProperties[name] = description ? { type, description } : { type }
+    }
+    properties[key] = {
+      ...flat,
+      properties: flatProperties,
+      ...(prop.description ? { description: prop.description } : {}),
+    }
+  }
+  return changed ? { ...schema, properties } : schema
+}
+
 // Models served by Moonshot AI (Kimi). Matched on both the provider id
 // (moonshotai, moonshotai-cn, kimi-for-coding, …) and the model id (kimi-*), so
 // Kimi models reached through a gateway/proxy still get the schema fixup below.
@@ -2079,6 +2197,7 @@ export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JS
   // Flatten unconditionally — all providers accept a flat `type: "object"` schema,
   // and zod's runtime parse still enforces per-variant required fields strictly.
   schema = flattenDiscriminatedUnion(schema)
+  if (isGrok(model)) schema = flattenNestedDiscriminatedUnions(schema)
 
   // Convert integer enums to string enums for Google/Gemini
   if (model.providerID === "google" || model.api.id.includes("gemini")) {
