@@ -72,9 +72,18 @@ const owner = (sessionID: SessionID) =>
 
 const kicked = (sessionID: SessionID) => kick.mock.calls.filter(([lane]) => lane.sessionID === sessionID).length
 
+// What a lane run does with its waiting input: claim it, then settle it.
+const consume = (tq: InboxController.Interface) => (lane: Lane) => Effect.gen(function* () {
+  const runId = Date.now()
+  const claim = yield* tq.claimNext(lane, runId)
+  if (!claim) return
+  yield* tq.ack(lane, claim.claimFrontier, claim.receipts.map((receipt) => ({ receiptId: receipt.id, outcome: "success" as const })), runId)
+})
+
 describe("inbox delivery across processes", () => {
   it.live("an input that must not adopt its receiver waits, unowned, until a process opens the session", provideTmpdirInstance(() => Effect.gen(function* () {
     const tq = yield* InboxController.Service
+    kick.mockImplementation(consume(tq))
     const session = yield* (yield* Session.Service).create({})
     const receipt = yield* tq.accept({ ...input(session.id), adoptReceiver: false })
 
@@ -248,10 +257,60 @@ describe("inbox delivery across processes", () => {
 
   it.live("an input that may adopt starts an unowned receiver in this process", provideTmpdirInstance(() => Effect.gen(function* () {
     const tq = yield* InboxController.Service
+    kick.mockImplementation(consume(tq))
     const session = yield* (yield* Session.Service).create({})
     yield* tq.accept(input(session.id))
     expect(kicked(session.id)).toBe(1)
     expect(owner(session.id)?.instance_id).toBe(ProcessLiveness.INSTANCE_ID)
     expect(wakes(session.id)).toHaveLength(0)
+  })), 30_000)
+
+  it.live("input a run leaves unclaimed is kicked again until a run claims it", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    const receipt = yield* tq.accept({ ...input(session.id), adoptReceiver: false })
+    // The first round (the woken kick and its first-run reconciliation kick) ends
+    // without claiming, as runs that fail before their claim do.
+    let first: number | undefined
+    let claimedAt: number | undefined
+    kick.mockImplementation((lane) => {
+      const now = Date.now()
+      first ??= now
+      if (now - first < 1_000) return Effect.void
+      claimedAt ??= now
+      return consume(tq)(lane)
+    })
+
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    yield* until(() => kicked(session.id) > 0)
+    yield* Effect.sleep(300)
+    expect((yield* tq.getReceipt(receipt.id)).state).toBe("accepted")
+    expect(wakes(session.id)).toHaveLength(1)
+
+    for (let waited = 0; (yield* tq.getReceipt(receipt.id)).state !== "settled" && waited < 10_000; waited += 100) yield* Effect.sleep(100)
+    expect((yield* tq.getReceipt(receipt.id)).state).toBe("settled")
+    // The claiming run is the retry, after its backoff, not the first round.
+    expect(claimedAt! - first!).toBeGreaterThanOrEqual(1_400)
+    yield* until(() => wakes(session.id).length === 0)
+    expect(wakes(session.id)).toHaveLength(0)
+  })), 30_000)
+
+  it.live("a lane that keeps leaving its input unclaimed is retried with growing backoff, not on every poll", provideTmpdirInstance(() => Effect.gen(function* () {
+    const tq = yield* InboxController.Service
+    const session = yield* (yield* Session.Service).create({})
+    yield* tq.accept({ ...input(session.id), adoptReceiver: false })
+    // Kicks that start together form one round.
+    const rounds: number[] = []
+    kick.mockImplementation(() => Effect.sync(() => {
+      const now = Date.now()
+      if (rounds.length === 0 || now - rounds[rounds.length - 1]! > 500) rounds.push(now)
+    }))
+
+    Database.use((db) => SessionOwner.claim(db, session.id))
+    for (let waited = 0; rounds.length < 3 && waited < 15_000; waited += 50) yield* Effect.sleep(50)
+    expect(rounds.length).toBeGreaterThanOrEqual(3)
+    // Each retry waits at least its backoff (1.5 s, then 3 s) instead of the 1–1.5 s poll.
+    expect(rounds[1]! - rounds[0]!).toBeGreaterThanOrEqual(1_400)
+    expect(rounds[2]! - rounds[1]!).toBeGreaterThanOrEqual(2_900)
   })), 30_000)
 })

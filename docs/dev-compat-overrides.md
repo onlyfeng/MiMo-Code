@@ -302,6 +302,13 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-02 DC-SESSION-001 unclaimed input retry
+
+Follow-up to PR #187, no inherited change and no owner added or retired. Woken input could stay accepted for hours with its owner alive and idle: a woken run ended without claiming it (it failed before the claim, or claimed nothing), the wake was cleared when the run settled, and `laneKick` requeues only after a success or a claim, so nothing kicked the lane again until the next input. In the six `aistudy` windows this held three lanes for 9 to 10 hours each. Any kick that settles with waiting input still accepted now rings the lane again, and the wake poller retries it with a bounded backoff (contract above). Two delivery cases changed their stand-in scheduler from a no-op to one that claims and settles the input, as a lane does: with a no-op the wake now rightly stays, because the input is still waiting.
+
+Evidence (runtime/tests on `fix/compat-inbox-wake-retention`, pinned Bun 1.3.14, ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE` unset):
+- `test/inbox/session-owner-delivery.test.ts` passes 12/12 twice. Both new cases fail when the settle-time ring is removed (the wake is cleared after the first run and the input is never claimed), and when the poller's backoff gate is removed (the lane is kicked on every poll).
+
 ## 2026-11-02 DC-SESSION-001 write contention
 
 Follow-up to PR #183, no inherited change and no owner added or retired. Six windows over one database file showed two faults. A window exited: its instance was disposed under a running session, the TUI's refresh made the server boot a fresh instance, the boot-time sweep's read-then-write transaction met another process's commit and threw `database is locked`, the throw escaped `Effect.catch` as a defect, and the refresh's fatal bootstrap exited the TUI. Woken input stayed accepted for hours: the inbox claim, a deferred read-then-write, failed the same way, and the failure was neither logged nor retried. `main` is not affected: its sweep is a single write, and only compat reads first. The contract above now covers write contention.
@@ -2742,7 +2749,14 @@ files remain byte-identical to the accepted main correction.
     controller looks at the wakes for its own sessions every 1–1.5 s, kicks the
     lane in the session's own instance, and clears the wake only after that
     run settles (unless it was rung again since), so an owner that exits first
-    leaves it for the next owner. Before the first woken lane of a session it
+    leaves it for the next owner. A run that settles while input that was
+    already waiting when it started is still accepted (it failed before its
+    claim, or claimed nothing) rings the lane's wake again; the poller then
+    waits out a backoff (1.5 s, doubling to 60 s) before kicking it, counts one
+    attempt per round however many runs end together, logs the first retry
+    and gives up with an error after eight rounds; a run that leaves nothing
+    waiting resets the count. `ringWake` makes each ring strictly later than
+    the last, so a wake read before a ring is never cleared by it. Before the first woken lane of a session it
     has not run yet, the controller runs that session's `reconcileOnBoot`, so a
     later first prompt cannot cancel the woken run's claims as crashed work.
     Only the process's current controller (`inboxControllerRef`) takes wakes,
@@ -2800,7 +2814,8 @@ files remain byte-identical to the accepted main correction.
   that session busy, one model request), `test/session/process-liveness.test.ts`,
   `test/session/session-owner.test.ts`, `test/session/session-owner-prompt.test.ts`,
   the six run-entry cases in `test/session/execution-ownership.test.ts`,
-  `test/inbox/session-owner-delivery.test.ts`, the three `delivery` cases in
+  `test/inbox/session-owner-delivery.test.ts` (including the unclaimed-input
+  retry and its backoff), the three `delivery` cases in
   `test/tool/actor-send.test.ts`, the live-instance sweep case in
   `test/actor/registry.test.ts`, `test/actor/zombie-sweep-busy.test.ts` (the
   sweep in one process waits out another process's write lock), the

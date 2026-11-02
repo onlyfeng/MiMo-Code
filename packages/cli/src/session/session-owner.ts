@@ -1,4 +1,4 @@
-import { and, Database, eq, lte } from "@/storage"
+import { and, Database, eq, lte, sql } from "@/storage"
 import { InboxWakeTable } from "@/inbox/inbox.sql"
 import type { Lane } from "@/inbox/schema"
 import { ProcessLiveness } from "./process-liveness"
@@ -60,8 +60,11 @@ export function claim(db: Database.TxOrDb, sessionID: SessionID): Status {
 /** Record that `lane` has input this process accepted but will not run. */
 export function ringWake(db: Database.TxOrDb, lane: Lane): void {
   const now = Date.now()
+  // Strictly later than any earlier ring, so `clearWake` for a wake read before
+  // this call never removes it, even within the same millisecond.
   db.insert(InboxWakeTable).values({ session_id: lane.sessionID, agent_id: lane.agentID, time_created: now })
-    .onConflictDoUpdate({ target: [InboxWakeTable.session_id, InboxWakeTable.agent_id], set: { time_created: now } }).run()
+    .onConflictDoUpdate({ target: [InboxWakeTable.session_id, InboxWakeTable.agent_id],
+      set: { time_created: sql`max(${now}, ${InboxWakeTable.time_created} + 1)` } }).run()
 }
 
 export type Wake = Lane & { readonly time: number }
