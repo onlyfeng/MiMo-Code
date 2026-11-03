@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Bus } from "../../src/bus"
 import { writeCronTasks, type CronTask } from "../../src/cron/cron-task"
 import { Scheduler, defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { Flag } from "../../src/flag/flag"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { schedulerRef } from "../../src/inbox/scheduler"
@@ -33,12 +32,7 @@ const it = testEffect(
   ),
 )
 
-const originalCronFlag = Flag.MIMOCODE_EXPERIMENTAL_CRON
-beforeEach(() => {
-  ;(Flag as { MIMOCODE_EXPERIMENTAL_CRON: boolean }).MIMOCODE_EXPERIMENTAL_CRON = true
-})
 afterEach(async () => {
-  ;(Flag as { MIMOCODE_EXPERIMENTAL_CRON: boolean }).MIMOCODE_EXPERIMENTAL_CRON = originalCronFlag
   await Instance.disposeAll()
 })
 
@@ -85,8 +79,8 @@ describe("durable cron delivery to another session (DC-SESSION-001)", () => {
         const rows = rowsFor(there.id)
         expect(rows).toHaveLength(1)
         expect(rows[0]).toMatchObject({ type: "cron", receiver_actor_id: "main", state: "accepted" })
-        expect(rows[0]!.idempotency_key).toMatch(/^cron:watch1:\d+$/)
-        const message = MessageV2.get({ sessionID: there.id, messageID: rows[0]!.input_message_id! })
+        expect(rows[0].idempotency_key).toMatch(/^cron:watch1:\d+$/)
+        const message = MessageV2.get({ sessionID: there.id, messageID: rows[0].input_message_id! })
         expect(message.parts).toEqual([
           expect.objectContaining({
             type: "text",
