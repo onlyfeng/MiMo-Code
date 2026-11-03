@@ -11,8 +11,15 @@ import { SessionID } from "./schema"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util"
 import { InstanceState } from "@/effect"
+import { inboxServiceRef } from "@/inbox/inbox-ref"
+import type { Inbox } from "@/inbox"
 
 const log = Log.create({ service: "cron-bridge" })
+
+const deliverToInbox = (input: Inbox.AgentInput) => {
+  const inbox = inboxServiceRef.current
+  return inbox ? inbox.accept(input) : Effect.fail(new Error("Inbox service unavailable"))
+}
 
 /**
  * Reads MIMOCODE_DISABLE_CRON from the live environment so a runtime flip stops
@@ -266,15 +273,16 @@ export const layer = Layer.effect(
           const initial = yield* status.get(sessionID)
           if (!handle.gotFirstEvent) handle.loading = initial.type === "busy"
 
-          const onFire = (task: CronTask) => {
+          const onFire = (task: CronTask, due: number) => {
             // Session affinity: inject into the session that created the task.
             // Legacy unmarked tasks fall back to the bridge session (previous
             // behavior) so durable jobs written before the stamp keep firing.
             const targetSessionID = fireTargetSessionId(task, sessionID) as SessionID
+            const elsewhere = targetSessionID !== sessionID
             runDetached(
               Effect.gen(function* () {
                 const resolved = yield* Effect.tryPromise(() =>
-                  resolveAtFireTime(task.prompt, workspaceRoot, targetSessionID),
+                  resolveAtFireTime(task.prompt, workspaceRoot, targetSessionID, !elsewhere),
                 ).pipe(Effect.orElseSucceed(() => task.prompt))
                 // Prepend an ISO fire timestamp so both the user (TUI) and the
                 // model see when each fire happened. Recurring fires especially
@@ -283,18 +291,38 @@ export const layer = Layer.effect(
                 // unambiguous: `[cron fire @ YYYY-MM-DDTHH:MM:SSZ] `.
                 const firedAtISO = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
                 const value = `[cron fire @ ${firedAtISO}] ${resolved}`
-                yield* inject({
-                  sessionID: targetSessionID,
-                  value,
-                  origin: {
-                    kind: "cron",
-                    taskId: task.id,
-                    kindOfTask: task.kind ?? "cron",
-                    firedAt: firedAtISO,
-                  },
-                  priority: "later",
-                  isMeta: true,
-                })
+                const origin = {
+                  kind: "cron" as const,
+                  taskId: task.id,
+                  kindOfTask: task.kind ?? ("cron" as const),
+                  firedAt: firedAtISO,
+                }
+                // DC-SESSION-001: another session runs only in the process that
+                // has it open. Its inbox delivers the fire there, or holds it
+                // until the session is opened. A durable task can be fired by
+                // whichever process holds the lock, so all its fires go through
+                // the inbox keyed by the slot: a second fire of a slot (after a
+                // lock takeover, or a restart before the fire was recorded) is
+                // delivered once, whichever process fires it.
+                if (elsewhere || task.durable !== false) {
+                  yield* deliverToInbox({
+                    receiverSessionID: targetSessionID,
+                    receiverActorID: "main",
+                    content: value,
+                    type: "cron",
+                    adoptReceiver: !elsewhere,
+                    idempotencyKey: `cron:${task.id}:${Math.round(due)}`,
+                    metadata: { origin, priority: "later" },
+                  })
+                } else {
+                  yield* inject({
+                    sessionID: targetSessionID,
+                    value,
+                    origin,
+                    priority: "later",
+                    isMeta: true,
+                  })
+                }
               }),
               "scheduled fire failed",
               { taskId: task.id },
@@ -327,6 +355,7 @@ export const layer = Layer.effect(
             isLoading: () => handle.loading,
             isKilled: () => isCronDisabled(),
             onFire,
+            firesElsewhere: (task) => fireTargetSessionId(task, sessionID) !== sessionID,
             onLoopEnded,
             onArmLoop,
           })
