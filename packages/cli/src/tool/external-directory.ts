@@ -10,6 +10,7 @@ import { Instance } from "../project/instance"
 import { ProjectID } from "../project/schema"
 import { assertMemoryWriteAllowed, assertAgentWriteSandbox } from "./memory-path-guard"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { SnapshotWritten } from "@/snapshot/written"
 
 type Kind = "file" | "directory"
 
@@ -138,6 +139,9 @@ export const assertWriteAllowed = Effect.fn("Tool.assertWriteAllowed")(function*
     taskId: ctx.taskId,
     writeEnabled: yield* memoryWriteEnabled,
   })
+
+  // FC-035: undo reverts only files this message's write tools wrote.
+  SnapshotWritten.record(ctx.messageID, target)
 })
 
 /**

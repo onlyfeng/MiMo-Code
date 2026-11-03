@@ -210,6 +210,8 @@ export const PatchPart = PartBase.extend({
   type: z.literal("patch"),
   hash: z.string(),
   files: z.string().array(),
+  // FC-035: the files in `files` this session's write tools wrote; absent on older patches.
+  written: z.string().array().optional(),
 }).meta({
   ref: "PatchPart",
 })

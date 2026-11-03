@@ -146,6 +146,7 @@ not change their implementation. The preceding review is retained in the
 | FC-032 | Bash timeout note for a command run over ssh                                                              | Fork fix of upstream timeout guidance                            | Say the remote side may still run; do not advise a longer retry                          |
 | FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
 | FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
+| FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2840,3 +2841,68 @@ logged`, and the peer `success`/`failure` variants of
   serialization, or accepting `permanent` on the tool each fails a case.
 - Retirement condition: upstream retries the scheduler lock after start and
   exposes permanent durable jobs.
+
+## FC-035 — undo reverts only the files the session's write tools wrote
+
+- Status: active
+- Canonical owner: fork `main` undo scope — `SnapshotWritten` in
+  `packages/cli/src/snapshot/written.ts` and its `record` call at the end of
+  `assertWriteAllowed` in `packages/cli/src/tool/external-directory.ts`; the
+  patch part's `written` field, filled at the two patch sites (finish-step and
+  `cleanup`) in `packages/cli/src/session/processor.ts`; `revert` and
+  `unrevert` in `packages/cli/src/session/revert.ts` and the revert's `files`
+- Observable contract:
+  - A patch part keeps `files`, every file that changed in the worktree during
+    its step, and adds `written`: the ones this session's write tools wrote
+    (edit, write, apply_patch, notebook_edit, including calls made from exec),
+    recorded at the write gate against the calling assistant message.
+  - Undo puts back only `written` files, each to its state before the step.
+    Files changed by bash or exec commands, or by other processes sharing the
+    worktree, keep their contents. A patch recorded before `written` existed
+    reverts all its files, as before.
+  - The revert stores the files it changed as `files`. Redo (unrevert), and a
+    further undo while one is in place, restore only those files from the
+    pre-undo snapshot, so edits other processes made after the undo survive.
+    A revert stored before `files` existed restores the whole snapshot, as
+    before.
+  - A sanitized export redacts `written` entries with the same token as the
+    file's entry in `files`, and redacts `revert.files`.
+- Motivation: a patch's file list comes from a whole-worktree snapshot diff.
+  With several agent processes in one worktree, a step's patch also listed
+  files other agents edited during that step, so `/undo` reverted their work,
+  and redo restored the entire pre-undo snapshot, rolling back everything they
+  had written since the undo. Bash and exec commands report no file list, so
+  their writes cannot be told apart from another process's.
+- Known limits: files this session changed only through bash or exec commands
+  (`sed -i`, a generator, `rm`) are no longer reverted by undo. A subagent
+  running as a peer child session records against its own session, so the
+  parent's undo leaves its files; same-session lanes count as this session.
+- Upstream relationship: upstream reverts every file in a patch and unreverts
+  by restoring the whole snapshot. Fork fix of shared code; `dev/compat`
+  inherits it unchanged.
+- Watch surfaces: the files above; `patch`, `revert` and `restore` in
+  `packages/cli/src/snapshot/index.ts`; `PatchPart` in
+  `packages/cli/src/session/message-v2.ts` and the session `revert` schema in
+  `session.ts` and `session.sql.ts`; `sanitize` in
+  `packages/cli/src/cli/cmd/export.ts`. A new write tool must call
+  `assertWriteAllowed` for its writes to be undone.
+- Tests/evidence: `packages/cli/test/session/snapshot-tool-race.test.ts` "undo
+  reverts the files the turn's write tools wrote and keeps the rest" runs the
+  write tool and then bash through the prompt loop, expects `written` to name
+  only the written file, undo to remove it but keep the bash file, and redo to
+  bring it back without touching the bash file's later contents;
+  `packages/cli/test/session/revert-compact.test.ts` "undo and redo leave alone
+  the files another process writes in the worktree" covers an undo, a further
+  undo and a redo with another writer between each;
+  `packages/cli/test/snapshot/written.test.ts` covers per-message records that
+  a patch claims once and a new file written through a symlinked directory,
+  including directories the write creates (recorded under the real path of
+  the nearest existing ancestor);
+  `packages/cli/test/cli/export-import.test.ts` "sanitizes real tool errors,
+  session prompts and assistant error/result payloads" covers the redaction.
+  Dropping the record call, the `written` field, the filter in revert, the
+  file-scoped restore or the stored `files`, the real-path keys, or clearing a
+  record when taken each fails a case, as does leaving either new field
+  unredacted.
+- Retirement condition: upstream attributes patch files to the tools that
+  wrote them, or scopes undo and redo to the session's own writes.

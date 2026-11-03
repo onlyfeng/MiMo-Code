@@ -152,6 +152,8 @@ function part(part: MessageV2.Part): MessageV2.Part {
         ...part,
         hash: redact("patch", part.id, part.hash),
         files: part.files.map((item: string, i: number) => redact("patch-file", `${part.id}-${i}`, item)),
+        // Same token as the file's entry in `files`.
+        written: part.written?.map((item) => redact("patch-file", `${part.id}-${part.files.indexOf(item)}`, item)),
       }
     case "snapshot":
       return {
@@ -237,6 +239,7 @@ export function sanitize(data: ReturnType<typeof captureExportData>) {
               data.info.revert.diff === undefined
                 ? undefined
                 : redact("revert-diff", data.info.id, data.info.revert.diff),
+            files: data.info.revert.files?.map((item, i) => redact("revert-file", `${data.info.id}-${i}`, item)),
           },
     },
     messages: data.messages.map((msg) => ({
