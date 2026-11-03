@@ -143,6 +143,7 @@ not change their implementation. The preceding review is retained in the
 | FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
 | FC-030 | TUI session resume variant: restore from the last user message, saved per-model choice                    | Fork fix of upstream TUI resume                                  | Show the resumed variant without saving it; no recorded variant keeps the saved choice   |
 | FC-031 | Actor send sender id: the inbox row and the rendered `from` of a send                                     | Fork fix of upstream sender identity                             | Record the lane actor id; never an agent name                                            |
+| FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2716,3 +2717,37 @@ logged`, and the peer `success`/`failure` variants of
   the rendered sender is accepted, and a subagent lane's send records its actor
   id. Restoring the agent name fails it.
 - Retirement condition: upstream records the sending lane's actor id.
+
+## FC-033 — a tool part records when its run started
+
+- Status: active
+- Canonical owner: fork `main` tool timing — gate admission in `executeTool`
+  in `packages/cli/src/session/processor.ts`, and the tool context's `metadata`
+  callback in `packages/cli/src/session/prompt.ts`
+- Observable contract:
+  - A tool part's `state.time.start` is the moment its run began: when the
+    step's tool gate admitted it, after any wait behind earlier tools in that
+    step, not when the model emitted the call.
+  - A progress update from a running tool (`ctx.metadata`, which bash sends for
+    its output) keeps that start; only a call still `pending` gets one from it.
+  - So `time.end - time.start` is the run's own duration.
+- Motivation: the `metadata` callback rebuilt the running state with
+  `time: { start: Date.now() }`, so every progress update moved the start to
+  that moment. A bash command that slept 400 ms and then printed one line was
+  recorded as running for about 10 ms, and a long command's recorded start
+  trailed its last output. Calls queued behind a barrier tool counted the
+  queue wait as their own run.
+- Upstream relationship: upstream rebuilds the state the same way; the gate is
+  a fork addition. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `completeToolCall` and `failToolCall` in
+  `processor.ts`, which keep the start; the orphan sweep in `prompt.ts`, which
+  compares a running part's start with its cutoff; tool duration display in
+  `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`.
+- Tests/evidence: `packages/cli/test/session/tool-gate-orchestration.test.ts`
+  "a tool records when its run started: after any wait in the gate, unmoved by
+  progress updates" runs a 400 ms bash command and a quick one in one step and
+  expects the first to span at least 400 ms and the second to start after the
+  first ends. Restoring either the reset in the callback or the call-time start
+  fails it.
+- Retirement condition: upstream keeps a running tool's start across progress
+  updates.
