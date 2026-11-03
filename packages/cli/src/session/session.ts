@@ -201,6 +201,8 @@ export const Info = z
         partID: PartID.zod.optional(),
         snapshot: z.string().optional(),
         diff: z.string().optional(),
+        // FC-035: the files the revert changed, which unrevert puts back.
+        files: z.string().array().optional(),
       })
       .optional(),
   })

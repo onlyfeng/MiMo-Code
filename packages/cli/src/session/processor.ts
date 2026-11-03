@@ -8,6 +8,7 @@ import { Config } from "@/config"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
+import { SnapshotWritten } from "@/snapshot/written"
 import * as Session from "./session"
 import { classifyAssistantStep } from "./classify"
 import { LLM } from "./llm"
@@ -772,6 +773,7 @@ export const layer: Layer.Layer<
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               stepFilesChanged = patch.files.length
+              const written = SnapshotWritten.take(ctx.assistantMessage.id, patch.files)
               if (patch.files.length) {
                 yield* session.updatePart({
                   id: PartID.ascending(),
@@ -780,6 +782,7 @@ export const layer: Layer.Layer<
                   type: "patch",
                   hash: patch.hash,
                   files: patch.files,
+                  written,
                 })
               }
               ctx.snapshot = undefined
@@ -915,10 +918,13 @@ export const layer: Layer.Layer<
               type: "patch",
               hash: patch.hash,
               files: patch.files,
+              written: SnapshotWritten.take(ctx.assistantMessage.id, patch.files),
             })
           }
           ctx.snapshot = undefined
         }
+        // Writes no patch claimed, e.g. with snapshots disabled.
+        SnapshotWritten.clear(ctx.assistantMessage.id)
 
         if (ctx.currentText) {
           if (ctx.currentText.text) {
