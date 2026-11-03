@@ -137,6 +137,7 @@ not change their implementation. The preceding review is retained in the
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
 | FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
 | FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
+| FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2420,3 +2421,43 @@ logged`, and the peer `success`/`failure` variants of
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
   upstream flattens them for every model.
+
+## FC-027 — the checkpoint writer closes with one line
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer prompt in
+  `packages/cli/src/agent/prompt/checkpoint-writer.txt` (Turn 2, constraint 8)
+  and the writer task in `packages/cli/src/session/checkpoint.ts`
+  (`composeWriterPrompt`)
+- Observable contract:
+  - After its edits the writer is told to end with one short line such as
+    `Checkpoint updated.`, without a summary and never with an empty reply. The
+    last instruction of the writer task says the same.
+  - Nothing else about the writer changes: its tools, the edit pass, its budgets
+    and the success rule (the watermark advances only when the run succeeds).
+- Motivation: a final step with no text, no reasoning and no tool call is
+  invalid output. The processor retries it, and for a background system agent
+  the bounded retries (FC-013) then fail the run. The writer prompt said "then
+  stop", "your response is complete. Do not summarize what you wrote" and "stop
+  immediately". Most models still closed with a line; a GPT-family model behind
+  a gateway took it literally. In recorded runs one session's writers on that
+  model failed 16 of 21 times in about 16 hours, all with "empty output", and
+  the failed runs cost $85 of the $108 its writers spent. The inspected failure
+  had already rewritten checkpoint.md when its empty reply failed the run. The
+  watermark stayed at the last success for twelve hours, so every later writer
+  and rebuild covered the same growing range again.
+- Upstream relationship: upstream's prompt and task carry the same three
+  "stop" instructions and the same empty-output handling. Fork fix of shared
+  prompt text; `dev/compat` inherits it unchanged.
+- Watch surfaces: Turn 2 and constraint 8 in `checkpoint-writer.txt`; the last
+  line of `composeWriterPrompt`; the empty-output retry in
+  `packages/cli/src/session/processor.ts` and `classifyAssistantStep` in
+  `packages/cli/src/session/classify.ts`; the system-agent retry bound (FC-013).
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  "writer is told to close with one line, not to end with an empty reply" reads
+  the spawned writer's task and expects the closing-line instructions and none
+  of the old "stop" wording; restoring the old wording fails it. The case pins
+  the instruction, not a model's compliance, which is read from recorded writer
+  outcomes.
+- Retirement condition: upstream asks the writer for a closing line, or the
+  runtime accepts an empty final reply from a writer whose edits applied.
