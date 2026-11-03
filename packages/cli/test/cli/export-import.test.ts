@@ -129,10 +129,16 @@ describe("CLI session transport", () => {
     yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: assistant.id, type: "tool", callID: "tool-result", tool: "read",
       state: { status: "completed", input: {}, output: "SECRET_OUTPUT", title: "title", metadata: {}, time: { start: 1, end: 2 },
         providerOutput: { text: "SECRET_PROVIDER_OUTPUT" }, providerMetadata: { key: "SECRET_PROVIDER_METADATA" } } })
+    yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: assistant.id, type: "patch",
+      hash: "SECRET_PATCH_HASH", files: ["SECRET_PATCH_FILE", "SECRET_OTHER_FILE"], written: ["SECRET_PATCH_FILE"] })
     const data = yield* Effect.sync(() => captureExportData(session.id))
     data.info.prompt = { system: "SECRET_SYSTEM", systemMode: "append", harness: "default" }
+    data.info.revert = { messageID: assistant.id, files: ["SECRET_REVERT_FILE"] }
     const redacted = sanitize(data)
     expect(JSON.stringify(redacted)).not.toContain("SECRET_")
+    const patch = redacted.messages.flatMap((message) => message.parts).find((part) => part.type === "patch")
+    if (patch?.type !== "patch") throw new Error("Expected patch part")
+    expect(patch.written).toEqual([patch.files[0]])
     for (const message of redacted.messages) {
       expect(MessageV2.Info.safeParse(message.info).success).toBe(true)
       for (const part of message.parts) expect(MessageV2.Part.safeParse(part).success).toBe(true)
