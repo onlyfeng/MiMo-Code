@@ -140,6 +140,7 @@ not change their implementation. The preceding review is retained in the
 | FC-026 | Cron bridge across instance recycling: remount from instance bootstrap                                    | Fork fix of upstream bridge lifecycle                            | Remount the last mount after a recycle; an explicit stop stays stopped                   |
 | FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
 | FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
+| FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2560,3 +2561,63 @@ logged`, and the peer `success`/`failure` variants of
   the reset case.
 - Retirement condition: upstream rebuilds the ladder after a restart and starts
   one writer per evaluation.
+
+## FC-029 — the checkpoint writer is given the text it edits
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer inputs — `renderCurrentFiles`
+  and `composeWriterPrompt` in `packages/cli/src/session/checkpoint.ts`,
+  `renderCurrentFile`, `readCurrentFiles`, `buildExtractionReflection` and
+  `buildReflectionMessage` in `packages/cli/src/session/checkpoint-retry.ts`,
+  the `actor.preStop` hook in `packages/cli/src/plugin/checkpoint-splitover.ts`,
+  and Turn 1 and the notes.md instruction in
+  `packages/cli/src/agent/prompt/checkpoint-writer.txt`
+- Observable contract:
+  - The writer task carries a CURRENT FILES block: the text of CHECKPOINT_PATH,
+    MEMORY_PATH and NOTES_PATH read when the writer starts, each between
+    `<current-file name="…" path="…">` tags, followed by NOTES_TEMPLATE. Turn 1
+    tells the writer to work from that block and not to read those three files
+    again; the notes.md reset uses the template block.
+  - A validation re-prompt from the `actor.preStop` hook carries the current
+    text of each file it names: the over-budget files for an extraction, the
+    files with errors otherwise. A file within its budget and without errors is
+    not repeated.
+  - A file longer than `CURRENT_FILE_CHAR_LIMIT` (100,000 characters) is shown
+    up to its last whole line within the limit, never splitting a surrogate
+    pair, followed by a line saying how much is shown.
+- Motivation: on the Codex harness (GPT-family models) the tool set has no
+  `read`, `write` or `edit`; files are read through `exec`'s `files`, whose jail
+  is the worktree and the OS temp directory. The memory directory is outside
+  it, so a writer on that harness could not read the checkpoint it was told to
+  read and edit, nor see the result of its own `apply_patch` edits. In recorded
+  runs such writers reported reads failing with "path outside allowed roots",
+  found no read tool in `ALL_TOOLS`, and declined the extraction re-prompts
+  because they could not see the section to extract. One session's checkpoint
+  grew to 62,876 characters (its whole budget is about 44,000) with §5 at
+  22,372, while its writers spent every re-prompt on refusals.
+- Upstream relationship: upstream's writer prompt and re-prompts point at the
+  paths only, and its Codex harness has the same `files` jail. Fork fix of
+  shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; the writer's tool whitelist
+  `CHECKPOINT_WRITER_TOOLS`; `available` and `tools` in
+  `packages/cli/src/tool/registry.ts` (which tools the Codex harness drops);
+  `resolveJailed` in `packages/cli/src/tool/tool-script.ts`; FC-021's writer view
+  sizing, which does not count the task.
+- Known limit: the block is not counted in FC-021's view projection. It is at
+  most three files of `CURRENT_FILE_CHAR_LIMIT` characters, and a writer that
+  can read would read the same text into its context anyway.
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  "writer task carries the current text of the files it edits and the notes
+  template" seeds the three files (notes.md empty) and expects each verbatim
+  between its tags, the template, and none of the old "Read BOTH" wording.
+  `packages/cli/test/plugin/checkpoint-splitover.test.ts`: the extraction case
+  expects the over-budget checkpoint verbatim and no MEMORY block; the
+  duplicate-title case expects the erroring checkpoint verbatim instead of
+  "Read your output". `packages/cli/test/session/checkpoint-retry.test.ts`
+  "renderCurrentFile": a file within the limit is shown whole, a longer one is
+  cut after its last whole line, and a single over-long line is cut before a
+  surrogate pair. Dropping the block from the task, the text from either
+  re-prompt, the files from the hook, the line cut or the surrogate guard each
+  fails its case.
+- Retirement condition: upstream gives the writer the files' text, or the
+  Codex harness can read the memory directory.
