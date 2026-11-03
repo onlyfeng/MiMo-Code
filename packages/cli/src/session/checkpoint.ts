@@ -510,10 +510,11 @@ function renderCurrentFiles(input: {
   notes: string
 }): string {
   return [
-    "CURRENT FILES — the exact text of these files when this writer started. Work from it; do not read these three files again.",
+    "CURRENT FILES — the exact text of these files when this writer started. Work from it; do not read these three files again unless a block says it is cut short.",
     renderCurrentFile("CHECKPOINT_PATH", input.checkpointFile, input.checkpoint),
     renderCurrentFile("MEMORY_PATH", input.memoryFile, input.memory),
-    renderCurrentFile("NOTES_PATH", input.notesFile, input.notes),
+    // Turn 2 resets notes.md, so a part not shown here would be lost unreconciled.
+    renderCurrentFile("NOTES_PATH", input.notesFile, input.notes, Number.POSITIVE_INFINITY),
     "NOTES_TEMPLATE — what NOTES_PATH is reset to in Turn 2, byte for byte:",
     `<notes-template>\n${NOTES_TEMPLATE}</notes-template>`,
   ].join("\n")

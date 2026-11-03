@@ -14,6 +14,7 @@ import { TaskRegistry } from "../../src/task/registry"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { checkpointPath, memoryPath, notesPath } from "../../src/session/checkpoint-paths"
 import { NOTES_TEMPLATE } from "../../src/session/checkpoint-templates"
+import { CURRENT_FILE_CHAR_LIMIT } from "../../src/session/checkpoint-retry"
 import { Instance } from "../../src/project/instance"
 import { SessionPrune } from "../../src/session/prune"
 import { Database } from "../../src/storage"
@@ -279,6 +280,35 @@ describe("checkpoint writer child-session isolation", () => {
         expect(task).toContain(`<notes-template>\n${NOTES_TEMPLATE}</notes-template>`)
         expect(task).toContain("do not read them again")
         expect(task).not.toContain("Read BOTH")
+      }),
+    ),
+  )
+
+  // FC-029: the writer resets notes.md after reconciling it, so a part left out
+  // of the task would be deleted without ever being read.
+  it.live(
+    "writer task shows notes.md whole even past the current-file limit",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const { info } = yield* seedParentSession()
+        const entry = "## [turn 1 · 2026-01-01T00:00Z]\nExample note entry.\n"
+        const notes = entry.repeat(Math.ceil(CURRENT_FILE_CHAR_LIMIT / entry.length) + 1)
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.dirname(notesPath(info.id)), { recursive: true })
+          await Bun.write(notesPath(info.id), notes)
+        })
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task).toContain(`<current-file name="NOTES_PATH" path="${notesPath(info.id)}">\n${notes}</current-file>`)
+        expect(task).not.toContain(`of this file's ${notes.length} characters are shown`)
       }),
     ),
   )

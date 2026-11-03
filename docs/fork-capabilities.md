@@ -2582,9 +2582,14 @@ logged`, and the peer `success`/`failure` variants of
     text of each file it names: the over-budget files for an extraction, the
     files with errors otherwise. A file within its budget and without errors is
     not repeated.
-  - A file longer than `CURRENT_FILE_CHAR_LIMIT` (100,000 characters) is shown
-    up to its last whole line within the limit, never splitting a surrogate
-    pair, followed by a line saying how much is shown.
+  - CHECKPOINT_PATH and MEMORY_PATH, which the writer edits in place, are shown
+    up to `CURRENT_FILE_CHAR_LIMIT` (100,000 characters): to the last whole line
+    within the limit, never splitting a surrogate pair, followed by a line
+    saying how much is shown. Turn 1 then has a writer that can read read the
+    rest, and one that cannot leave the unseen part as it is. NOTES_PATH is
+    always shown whole, because Turn 2 resets it and a part not shown would be
+    deleted unreconciled; it is emptied at every checkpoint, so it holds only
+    what was appended since the last writer.
 - Motivation: on the Codex harness (GPT-family models) the tool set has no
   `read`, `write` or `edit`; files are read through `exec`'s `files`, whose jail
   is the worktree and the OS temp directory. The memory directory is outside
@@ -2603,13 +2608,15 @@ logged`, and the peer `success`/`failure` variants of
   `packages/cli/src/tool/registry.ts` (which tools the Codex harness drops);
   `resolveJailed` in `packages/cli/src/tool/tool-script.ts`; FC-021's writer view
   sizing, which does not count the task.
-- Known limit: the block is not counted in FC-021's view projection. It is at
-  most three files of `CURRENT_FILE_CHAR_LIMIT` characters, and a writer that
-  can read would read the same text into its context anyway.
+- Known limit: the block is not counted in FC-021's view projection. It holds
+  at most two files of `CURRENT_FILE_CHAR_LIMIT` characters plus notes.md, and
+  a writer that can read would read the same text into its context anyway.
 - Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
   "writer task carries the current text of the files it edits and the notes
   template" seeds the three files (notes.md empty) and expects each verbatim
-  between its tags, the template, and none of the old "Read BOTH" wording.
+  between its tags, the template, and none of the old "Read BOTH" wording;
+  "writer task shows notes.md whole even past the current-file limit" seeds a
+  notes.md longer than the limit and expects all of it.
   `packages/cli/test/plugin/checkpoint-splitover.test.ts`: the extraction case
   expects the over-budget checkpoint verbatim and no MEMORY block; the
   duplicate-title case expects the erroring checkpoint verbatim instead of
@@ -2617,7 +2624,7 @@ logged`, and the peer `success`/`failure` variants of
   "renderCurrentFile": a file within the limit is shown whole, a longer one is
   cut after its last whole line, and a single over-long line is cut before a
   surrogate pair. Dropping the block from the task, the text from either
-  re-prompt, the files from the hook, the line cut or the surrogate guard each
-  fails its case.
+  re-prompt, the files from the hook, the line cut, the surrogate guard or the
+  whole-notes exception each fails its case.
 - Retirement condition: upstream gives the writer the files' text, or the
   Codex harness can read the memory directory.

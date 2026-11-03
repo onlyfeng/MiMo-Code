@@ -32,15 +32,15 @@ export const CURRENT_FILE_CHAR_LIMIT = 100_000
 /** The current text of a file the writer edits, keyed by the name violations use. */
 export type CurrentFiles = Record<string, { name: string; path: string; text: string }>
 
-/** One file's text as the writer sees it: whole lines, at most CURRENT_FILE_CHAR_LIMIT characters. */
-export function renderCurrentFile(name: string, file: string, text: string): string {
+/** One file's text as the writer sees it: whole lines, at most `limit` characters. */
+export function renderCurrentFile(name: string, file: string, text: string, limit = CURRENT_FILE_CHAR_LIMIT): string {
   let shown = text
-  if (text.length > CURRENT_FILE_CHAR_LIMIT) {
+  if (text.length > limit) {
     // Cut after a whole line so no edit is made against a partial one. A first
     // line longer than the limit is cut inside, but never between a surrogate pair.
-    const newline = text.lastIndexOf("\n", CURRENT_FILE_CHAR_LIMIT - 1)
-    const high = text.charCodeAt(CURRENT_FILE_CHAR_LIMIT - 1)
-    const end = newline >= 0 ? newline + 1 : high >= 0xd800 && high <= 0xdbff ? CURRENT_FILE_CHAR_LIMIT - 1 : CURRENT_FILE_CHAR_LIMIT
+    const newline = text.lastIndexOf("\n", limit - 1)
+    const high = text.charCodeAt(limit - 1)
+    const end = newline >= 0 ? newline + 1 : high >= 0xd800 && high <= 0xdbff ? limit - 1 : limit
     shown = text.slice(0, end)
   }
   return [

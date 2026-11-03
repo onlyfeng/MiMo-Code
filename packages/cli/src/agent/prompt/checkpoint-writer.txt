@@ -31,7 +31,7 @@ MEMORY_PATH structure (4 sections):
 PROCEDURE:
 
 Turn 1 - Read all sources:
-  CHECKPOINT_PATH, MEMORY_PATH and NOTES_PATH: their text is in the CURRENT FILES block above, exact as of this writer's start; do not read them again (an empty NOTES_PATH block is an empty file)
+  CHECKPOINT_PATH, MEMORY_PATH and NOTES_PATH: their text is in the CURRENT FILES block above, exact as of this writer's start; do not read them again (an empty NOTES_PATH block is an empty file). When a block says it is cut short, read the rest if you can; otherwise leave the part you cannot see as it is
   (also Read any spillover files referenced in either main file's index lines, if you can read them)
 
 Turn 2a - Reconcile pass (read sources, decide migrations, then plan Edits):
