@@ -13,8 +13,9 @@ import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, FailureInfo, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
-import { Database, and, eq, inArray, isNull, not, or } from "@/storage"
+import { Database, and, desc, eq, inArray, isNull, not, or } from "@/storage"
 import { InboxTable } from "@/inbox/inbox.sql"
+import { ActorRegistryTable } from "@/actor/actor.sql"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
 import { MessageTable, SessionTable } from "./session.sql"
@@ -2048,6 +2049,30 @@ export async function lastBoundary(input: { sessionID: SessionID }) {
 
 export async function isWriterRunning(input: { sessionID: SessionID }) {
   return runPromise((svc) => svc.isWriterRunning(input.sessionID))
+}
+
+/**
+ * When this session last started a checkpoint writer that succeeded: the
+ * creation time of that writer's child session (FC-028).
+ */
+export function lastSucceededWriterStart(sessionID: SessionID): number | undefined {
+  const row = Database.use((db) =>
+    db
+      .select({ time: SessionTable.time_created })
+      .from(SessionTable)
+      .innerJoin(ActorRegistryTable, eq(ActorRegistryTable.session_id, SessionTable.id))
+      .where(
+        and(
+          eq(SessionTable.parent_id, sessionID),
+          eq(ActorRegistryTable.agent, "checkpoint-writer"),
+          eq(ActorRegistryTable.last_outcome, "success"),
+        ),
+      )
+      .orderBy(desc(SessionTable.time_created))
+      .limit(1)
+      .get(),
+  )
+  return row?.time
 }
 
 export * as SessionCheckpoint from "./checkpoint"
