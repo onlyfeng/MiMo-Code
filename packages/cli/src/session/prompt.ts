@@ -55,7 +55,7 @@ import { SessionCheckpoint } from "./checkpoint"
 import { isBoundaryUser, isRebuildBoundary } from "./tail-digest"
 import { SessionCompaction } from "./compaction"
 import { SessionModelSelection } from "./model-selection"
-import { classifyRequestOverflow, usable, isOverflow as overflowCheck } from "./overflow"
+import { classifyRequestOverflow, measuredRequest, usable, isOverflow as overflowCheck } from "./overflow"
 import { Config } from "@/config"
 import { isMemoryWriteEnabled } from "@/memory/write-gate"
 import { NotFoundError, Database, eq, and, inArray, isNull } from "@/storage"
@@ -6675,6 +6675,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       const descriptors = yield* Effect.tryPromise(() =>
                         LLM.materializeWireToolDescriptors(wireTools),
                       ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                      // The lane's last provider count, plus what this request adds
+                      // after it: that step's output and tool results, later
+                      // messages, the turn context and request-local messages.
+                      const measured = measuredRequest(msgs, processArgs.model)
                       const overflow = descriptors
                         ? classifyRequestOverflow({
                             ...processArgs,
@@ -6687,6 +6691,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                             ),
                             tools: descriptors,
                             model: processArgs.model,
+                            ...(measured
+                              ? {
+                                  measured: {
+                                    inputTokens: measured.inputTokens,
+                                    added: [
+                                      measured.tail.map((message) => message.parts),
+                                      LLM.turnContextMessages(processArgs.user),
+                                      ...(isLastStep ? [MAX_STEPS] : []),
+                                    ],
+                                  },
+                                }
+                              : {}),
                           })
                         : { type: "unserializable" as const }
                       if (overflow.type === "unserializable") {
@@ -6697,6 +6713,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       }
                       if (overflow.type === "ok") {
                         preflightOverflowRecovery = undefined
+                        if (overflow.measured)
+                          yield* slog.info("request preflight: the measured request fits", {
+                            sessionID,
+                            agentID: processArgs.agentID ?? "main",
+                            requestTokens: overflow.measured.requestTokens,
+                            measuredTokens: overflow.measured.measuredTokens,
+                          })
                       } else {
                         if (overflow.type === "overflow-static") {
                           yield* slog.warn("request preflight overflow: recovery floor exceeds usable context", {
@@ -6757,6 +6780,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                           sessionID,
                           agentID: processArgs.agentID ?? "main",
                           requestTokens: overflow.requestTokens,
+                          measuredTokens: overflow.measuredTokens,
                           recoveryFloorTokens: overflow.recoveryFloorTokens,
                           recoveryAttempt: preflightOverflowRecovery.attempts,
                         })

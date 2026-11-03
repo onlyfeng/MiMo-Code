@@ -4,6 +4,7 @@ import type { Provider } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import { Log, Token, Wildcard } from "@/util"
 import type { MessageV2 } from "./message-v2"
+import { isBoundaryUser } from "./tail-digest"
 import type { ModelMessage } from "ai"
 
 const COMPACTION_BUFFER = 33_000
@@ -21,11 +22,19 @@ type RequestEstimateInput = {
   toolChoice?: unknown
 }
 
+/** A request sized from the provider's count for an earlier step on the lane. */
+export type MeasuredRequest = {
+  /** Input the provider reported for that step: uncached, cache-read and cache-write together. */
+  inputTokens: number
+  /** Everything sent after that step's request, estimated like a whole request. */
+  added: unknown
+}
+
 export type RequestOverflowClassification =
-  | { type: "ok" }
+  | { type: "ok"; measured?: { requestTokens: number; measuredTokens: number } }
   | { type: "unserializable" }
-  | { type: "overflow"; requestTokens: number; recoveryFloorTokens: number }
-  | { type: "overflow-static"; requestTokens: number; recoveryFloorTokens: number }
+  | { type: "overflow"; requestTokens: number; recoveryFloorTokens: number; measuredTokens?: number }
+  | { type: "overflow-static"; requestTokens: number; recoveryFloorTokens: number; measuredTokens?: number }
 
 // Compaction fires when usage reaches a fraction of the working window, leaving
 // the remaining headroom for the summary generation. The default 0.9 keeps the
@@ -120,19 +129,48 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
   return count >= usable(input)
 }
 
+function estimateSerialized(value: unknown) {
+  const serialized = JSON.stringify(value)
+  const charEstimate = Token.estimate(serialized)
+  const byteEstimate = Math.round(Buffer.byteLength(serialized, "utf8") / 3)
+  return Math.max(charEstimate, byteEstimate)
+}
+
 export function estimateRequestTokens(input: RequestEstimateInput) {
   // Estimate complete descriptors using the same JSON semantics as dispatch.
   // Truncation and circular-reference placeholders can hide an oversized or
   // invalid request; shared objects must be counted at every wire occurrence.
-  const serialized = JSON.stringify({
+  return estimateSerialized({
     system: input.prebuiltSystem ?? input.system ?? [],
     messages: input.messages,
     tools: input.tools ?? {},
     toolChoice: input.toolChoice,
   })
-  const charEstimate = Token.estimate(serialized)
-  const byteEstimate = Math.round(Buffer.byteLength(serialized, "utf8") / 3)
-  return Math.max(charEstimate, byteEstimate)
+}
+
+// The whole-request estimate runs well above what providers count — 1.3 to 2
+// times in recorded sessions — so on its own it sends requests that fit into
+// recovery. A lane's newest step with a provider count is exact for everything
+// that step was sent; only what came after it needs estimating. Undefined when
+// no step since the last rebuild or compaction boundary has a count, or when the
+// newest such step ran on another model, whose tokenizer differs.
+export function measuredRequest(
+  messages: readonly MessageV2.WithParts[],
+  model: Pick<Provider.Model, "providerID" | "id">,
+): { inputTokens: number; tail: MessageV2.WithParts[] } | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (isBoundaryUser(message)) return undefined
+    const info = message.info
+    if (info.role !== "assistant") continue
+    // A compaction summary's count covers the history it replaced.
+    if (info.summary) return undefined
+    const inputTokens = info.tokens.input + info.tokens.cache.read + info.tokens.cache.write
+    if (inputTokens <= 0) continue
+    if (info.providerID !== model.providerID || info.modelID !== model.id) return undefined
+    return { inputTokens, tail: messages.slice(index) }
+  }
+  return undefined
 }
 
 export function isRequestOverflow(input: { cfg: Config.Info; model: Provider.Model; requestTokens: number }) {
@@ -148,16 +186,28 @@ export function classifyRequestOverflow(
     cfg: Config.Info
     model: Provider.Model
     recoveryFloorMessages: ModelMessage[]
+    measured?: MeasuredRequest
   },
 ): RequestOverflowClassification {
   if (input.cfg.compaction?.auto === false || input.model.limit.context === 0) return { type: "ok" }
   try {
     const requestTokens = estimateRequestTokens(input)
     if (!isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens })) return { type: "ok" }
+    // Measure only once the estimate reaches the trigger, and only to clear it:
+    // a measured request that also reaches it keeps the estimate's recovery path.
+    const measuredTokens = input.measured
+      ? input.measured.inputTokens + estimateSerialized(input.measured.added)
+      : undefined
+    if (
+      measuredTokens !== undefined &&
+      !isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: measuredTokens })
+    )
+      return { type: "ok", measured: { requestTokens, measuredTokens } }
+    const measured = measuredTokens === undefined ? {} : { measuredTokens }
     const recoveryFloorTokens = estimateRequestTokens({ ...input, messages: input.recoveryFloorMessages })
     return isRequestOverflow({ cfg: input.cfg, model: input.model, requestTokens: recoveryFloorTokens })
-      ? { type: "overflow-static", requestTokens, recoveryFloorTokens }
-      : { type: "overflow", requestTokens, recoveryFloorTokens }
+      ? { type: "overflow-static", requestTokens, recoveryFloorTokens, ...measured }
+      : { type: "overflow", requestTokens, recoveryFloorTokens, ...measured }
   } catch {
     // An invalid request cannot be sized or repaired by context compaction.
     return { type: "unserializable" }

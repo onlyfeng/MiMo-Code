@@ -1726,6 +1726,7 @@ files remain byte-identical to the accepted main correction.
 
 ## DC-CONTEXT-001 — model-visible content caps and request preflight
 
+- 2026-11-03 measured request preflight: the whole-request estimate ran 1.3 to 2.0 times above the provider's count for the previous step in every preflight overflow recorded that day — seven of seven, across claude-opus-5-5 (1.31, 1.62), kimi-k3.1-pro (1.70), grok-4.7 (1.56) and gpt-6-astra (2.04, 2.00, and once 9.4) — so each routed a request that fit into recovery; gpt-6-astra sessions were rebuilt at about 390K of an 872K window. An estimate that reaches the trigger is now checked against the measured request described below (`measuredRequest` and `classifyRequestOverflow` in `packages/cli/src/session/overflow.ts`, the preflight in `runStep` in `packages/cli/src/session/prompt.ts`). Known limit: tool or system prompt growth since the counted step is not measured; it stays within the trigger's headroom, and a provider overflow error still routes to recovery. Tests: `packages/cli/test/session/overflow.test.ts` "request preflight measured from provider usage" and `packages/cli/test/session/prompt-effect.test.ts` "request preflight measures the request from the previous step's provider count" (under and near the trigger). Ignoring the measurement, dropping what came after the counted step, measuring across a boundary, from a summary or another model, counting output, or letting a measurement raise the estimate each fails a case.
 - 2026-11-03 FC-029 propagation (`main` PR #201): the writer task grows by the CURRENT FILES block. Compat's request preflight skips bounded computation agents (`!isBoundedComputation`), the writer among them, so it does not see the block; as on `main`, a writer request that overflows still stops through FC-021, and the block is bounded by `CURRENT_FILE_CHAR_LIMIT` for checkpoint.md and MEMORY.md (notes.md is shown whole because the writer resets it). The 50 KiB model-visible caps (tool output and input replay, skill, MCP and shell text, compaction summary and manifest, inbox content, instructions) do not touch it: the writer task and the `actor.preStop` re-prompts reach the writer as plain user text parts (`spawn.ts` `runAgentLoop`), so a checkpoint above 50 KiB is shown up to `CURRENT_FILE_CHAR_LIMIT`, not cut at the cap.
 - 2026-11-03 FC-027 and FC-028 propagation (`main` PRs #198, #199): no interaction with the caps or the request preflight. The writer task gains one sentence, and prune's restart seeding reads persisted messages and actor rows, not request estimates.
 - 2026-10-31 FC-021 propagation: main makes a bounded computation agent's provider-signalled overflow terminal (`ContextOverflowError`, actor failure `kind: "overflow"`). Compat's `runStep` therefore no longer writes the empty overflow-recovery placeholder for bounded agents: that `MessageAbortedError` would classify the writer's failure as an abort, and `recoverOverflowPlaceholder` (which includes `isBoundedComputation`) would resume it. Request preflight still skips bounded agents. For every other agent, the placeholder, its exact-message classification, and the no-progress and two-recovery limits are unchanged. The fork and regular paths keep the `"overflow-static"` break ahead of main's new bounded-overflow break.
@@ -1860,9 +1861,18 @@ files remain byte-identical to the accepted main correction.
   or compaction retry. The estimate remains heuristic rather than an exact
   provider token count or a guarantee that every request fits.
   Preflight compares the estimate directly with that
-  trigger, without its former additional 5K/10% advance. Estimation can still
-  observe a larger current request than the previous provider usage record;
-  shared thresholds do not imply identical trigger timing. It routes recoverable
+  trigger, without its former additional 5K/10% advance. An estimate that
+  reaches the trigger is then checked against a measured request: the input
+  the provider counted for the lane's newest step with a count (uncached,
+  cache-read and cache-write together), plus the estimate of everything sent
+  after that step's request — its output and tool results, later messages, the
+  turn context and request-local messages. A measured request under the trigger
+  is sent. No measurement is made across a rebuild or compaction boundary,
+  from a compaction summary, or from a step on another model; the estimate then
+  decides, as it does when the measured request also reaches the trigger. A
+  measurement never raises an estimate. The recovery floor and the no-progress
+  test keep using the estimate. Shared thresholds do not imply identical
+  trigger timing. It routes recoverable
   overflow to existing recovery and distinguishes an unrecoverable static prefix.
   The shared rebuild helper reloads the latest persisted same-actor messages
   immediately before inserting its boundary, including a high-usage assistant
