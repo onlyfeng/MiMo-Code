@@ -111,6 +111,10 @@ describe("CheckpointSplitoverPlugin", () => {
     expect(output.reason).toBeDefined()
     expect(output.reason!).toContain("EXTRACTION REQUIRED")
     expect(output.reason!).toContain("spillover")
+    // FC-029: the writer may have no way to read the file it must extract from.
+    expect(output.reason!).toContain(`<current-file name="CHECKPOINT_PATH" path="${checkpointPath(sessionID)}">\n${oversized}</current-file>`)
+    // MEMORY.md is within budget, so its text is not repeated.
+    expect(output.reason!).not.toContain('<current-file name="MEMORY_PATH"')
   })
 
   test("regular error → buildReflectionMessage in reason", async () => {
@@ -297,6 +301,9 @@ describe("CheckpointSplitoverPlugin", () => {
     expect(output.reason).toContain("<system-reminder>")
     expect(output.reason).toContain("duplicates a prior checkpoint")
     expect(output.reason).toContain("Reuse Bun.file() not fs.readFile")
+    // FC-029: the text to fix travels with the errors.
+    expect(output.reason).toContain(`<current-file name="CHECKPOINT_PATH" path="${checkpointPath(sessionID)}">\n${dupCheckpoint}</current-file>`)
+    expect(output.reason).not.toContain("Read your output")
   })
 
   test("no CheckpointContext entry: fallback to empty (D₁ behaviour)", async () => {
