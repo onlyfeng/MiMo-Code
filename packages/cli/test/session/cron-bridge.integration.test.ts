@@ -28,6 +28,8 @@ import { clearAllLoopStates, getLoopState, getStrikes, setLoopState } from "@/cr
 import { addSessionCronTask, getSessionCronTasks, readCronTasks, removeSessionCronTasks, writeCronTasks } from "@/cron/cron-task"
 import { getLockFilePath } from "@/cron/cron-lock"
 import { CronBridge, layer as cronBridgeLayer, type Interface as CronBridgeInterface } from "@/session/cron-bridge"
+import { inboxServiceRef } from "@/inbox/inbox-ref"
+import type { Inbox } from "@/inbox"
 
 import * as PromptModule from "@/session/prompt"
 
@@ -430,6 +432,15 @@ for (const teardown of ["stop", "scope close"] as const) {
     }
     const mounts: StartOpts[] = []
     const dir = freshDir()
+    const delivered: Inbox.AgentInput[] = []
+    const previousInbox = inboxServiceRef.current
+    inboxServiceRef.current = {
+      accept: (input) =>
+        Effect.sync(() => {
+          delivered.push(input)
+          return { inboxID: "inb_cronbridge_test", inputMessageID: MessageID.ascending() }
+        }),
+    }
     try {
       const escaped = await harness(
         captured,
@@ -447,23 +458,26 @@ for (const teardown of ["stop", "scope close"] as const) {
               yield* Deferred.succeed(release, undefined)
               yield* addDueTask(scheduler, "after stop")
               yield* scheduler.tickOnce()
-              mounts[0]!.onFire(task)
+              mounts[0]!.onFire(task, Date.now())
               yield* Effect.sleep("30 millis")
               expect(attempts).toBe(1)
               expect(captured.value).toHaveLength(0)
               const nextSession = SessionID.make("ses_cronbridge_restarted")
               yield* bridge.start(nextSession, dir, inject)
-              mounts[0]!.onFire(task)
+              mounts[0]!.onFire(task, Date.now())
               yield* Effect.sleep("30 millis")
               expect(attempts).toBe(1)
               expect(captured.value).toHaveLength(0)
+              expect(delivered).toHaveLength(0)
               yield* scheduler.tickOnce()
-              yield* waitFor(() => captured.value.length === 1)
+              yield* waitFor(() => delivered.length === 1)
               // Session affinity: the task was created under `sid`, so a fire
               // after restart still targets the creating session even though
-              // the bridge is remounted for `nextSession`.
-              expect(captured.value[0]!.sessionID).toBe(sid)
-              expect(attempts).toBe(2)
+              // the bridge is remounted for `nextSession`. That is another
+              // session now, so the fire goes to its inbox (DC-SESSION-001).
+              expect(delivered[0]!.receiverSessionID).toBe(sid)
+              expect(captured.value).toHaveLength(0)
+              expect(attempts).toBe(1)
               yield* bridge.stop()
             }
             return { scheduler, task }
@@ -477,7 +491,7 @@ for (const teardown of ["stop", "scope close"] as const) {
             yield* Deferred.succeed(release, undefined)
             yield* addDueTask(escaped.scheduler, "after scope close")
             yield* escaped.scheduler.tickOnce()
-            mounts[0]!.onFire(escaped.task)
+            mounts[0]!.onFire(escaped.task, Date.now())
             yield* Effect.sleep("30 millis")
           }),
         )
@@ -485,6 +499,7 @@ for (const teardown of ["stop", "scope close"] as const) {
         expect(captured.value).toHaveLength(0)
       }
     } finally {
+      inboxServiceRef.current = previousInbox
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -523,7 +538,7 @@ lifecycleTest.live("instance disposal interrupts delivery and permits the same d
   const task = yield* addDueTask(scheduler, "after instance disposal")
   yield* scheduler.tickOnce()
   expect(getSessionCronTasks().some((row) => row.id === task.id)).toBe(true)
-  mounts[0]!.onFire(first.task)
+  mounts[0]!.onFire(first.task, Date.now())
   yield* Effect.sleep("30 millis")
   expect(captured.value).toHaveLength(0)
 
@@ -532,7 +547,7 @@ lifecycleTest.live("instance disposal interrupts delivery and permits the same d
     expect(instance.generation).not.toBe(first.instance.generation)
     yield* bridge.start(sid, dir, inject)
     expect(mounts).toHaveLength(2)
-    mounts[0]!.onFire(first.task)
+    mounts[0]!.onFire(first.task, Date.now())
     yield* scheduler.tickOnce()
     yield* waitFor(() => captured.value.length === 1)
     expect(captured.value[0]!.sessionID).toBe(sid)

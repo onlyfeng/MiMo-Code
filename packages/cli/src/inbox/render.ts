@@ -30,6 +30,9 @@ export function renderInboxRow(row: {
     const content = row.content
     return capActorNotificationText(blankTo(content?.text, "(no notification body)"))
   }
+  // DC-SESSION-001: a durable cron fire delivered to a session another process
+  // may hold reads exactly as the fire injected in-process does.
+  if (row.type === "cron") return capInboxText(blankTo(row.content?.text, "(empty)"))
   // Default: type === "text" or unknown — wrap as <inbox> element so
   // the LLM can route by sender; the wrapper format mirrors the
   // <actor-notification> convention from the legacy completion.ts.

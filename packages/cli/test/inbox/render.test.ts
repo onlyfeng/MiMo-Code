@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { renderActorNotification, renderInboxRow } from "../../src/inbox/render"
 
 describe("inbox.render", () => {
+  test("renders a cron fire exactly as an in-process fire, without an inbox wrapper", () => {
+    const text = "[cron fire @ 2026-01-01T00:00:00Z] check the lanes"
+    expect(renderInboxRow({ type: "cron", content: { text }, created_at: Date.now() })).toBe(text)
+  })
+
   test("applies blank fallbacks before the model-visible byte cap", () => {
     const row = {
       content: { text: " ".repeat(60 * 1024) },

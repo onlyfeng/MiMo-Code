@@ -633,3 +633,62 @@ test("a permanent durable task outlives the recurring age limit; others age out"
   )
   rmSync(dir, { recursive: true, force: true })
 })
+
+// DC-SESSION-001: a fire for another session is queued in that session's inbox.
+test("a busy session still fires a task due for another session; its own due task waits", async () => {
+  const dir = freshDir()
+  const past = Date.now() - 61_000
+  addSessionCronTask({ id: "own", cron: "* * * * *", prompt: "own", createdAt: past, recurring: true, createdBySessionId: "ses_test" })
+  addSessionCronTask({ id: "other", cron: "* * * * *", prompt: "other", createdAt: past, recurring: true, createdBySessionId: "ses_other" })
+  let busy = true
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      yield* sched.start(
+        baseStartOpts(dir, {
+          isLoading: () => busy,
+          onFire: (task) => fired.push(task.id),
+          firesElsewhere: (task) => task.createdBySessionId !== "ses_test",
+          jitterConfig: { ...DEFAULT_JITTER, recurringFrac: 0 },
+        }),
+      )
+      yield* sched.tickOnce()
+      yield* sched.tickOnce()
+      expect(fired).toEqual(["other"])
+
+      busy = false
+      yield* sched.tickOnce()
+      expect(fired).toEqual(["other", "own"])
+      yield* sched.stop()
+    }),
+  )
+  removeSessionCronTasks(["own", "other"])
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("a fire is given its slot, the same one a restarted scheduler computes for an unrecorded fire", async () => {
+  const dir = freshDir()
+  const task = durableTask({ createdAt: Date.now() - 5 * 60_000 })
+  await provided(writeCronTasks([task], dir))
+  const slots: number[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      const opts = baseStartOpts(dir, { isLoading: () => false, onFire: (_task, due) => slots.push(due) })
+      yield* sched.start(opts)
+      yield* sched.tickOnce()
+      yield* sched.stop()
+      // The process stopped before the fire was recorded: the slot is fired again.
+      yield* writeCronTasks([task], dir)
+      yield* Effect.sleep("5 millis")
+      yield* sched.start(opts)
+      yield* sched.tickOnce()
+      yield* sched.stop()
+    }),
+  )
+  expect(slots).toHaveLength(2)
+  expect(slots[1]).toBe(slots[0])
+  expect(slots[0]).toBeLessThanOrEqual(Date.now())
+  rmSync(dir, { recursive: true, force: true })
+})

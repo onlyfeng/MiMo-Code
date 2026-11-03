@@ -41,7 +41,14 @@ export type StartOpts = {
   sessionID: string
   isLoading: () => boolean
   isKilled: () => boolean
-  onFire: (task: CronTask) => void
+  /** `due` is the slot being fired, the same in every process that fires it. */
+  onFire: (task: CronTask, due: number) => void
+  /**
+   * DC-SESSION-001: whether a task fires to a session other than this one.
+   * Such a fire is queued in that session's inbox, so this session's turn
+   * holds back only its own tasks.
+   */
+  firesElsewhere?: (task: CronTask) => boolean
   onLoopEnded: (e: LoopEndedEvent) => void
   /**
    * Fires when the model successfully re-arms a loop via `armLoop` from a
@@ -180,8 +187,9 @@ const makeImpl = (): Interface => {
     ownership.withPermits(1)(Effect.gen(function* () {
       if (!rt) return
       if (rt.opts.isKilled()) return
-      if (rt.opts.isLoading()) return
-      yield* takeOverLock(rt)
+      const elsewhere = rt.opts.firesElsewhere
+      if (rt.opts.isLoading() && !elsewhere) return
+      if (!rt.opts.isLoading()) yield* takeOverLock(rt)
 
       const sessionTasks = getSessionCronTasks()
       const sessionIds = new Set(sessionTasks.map((t) => t.id))
@@ -201,9 +209,9 @@ const makeImpl = (): Interface => {
 
       for (const task of tasks) {
         if (firedThisTick) break
-        if (rt.opts.isLoading()) break
         if (rt.opts.isKilled()) break
         if (rt.inFlight.has(task.id)) continue
+        if (rt.opts.isLoading() && !elsewhere?.(task)) continue
 
         if (!rt.nextFireAt.has(task.id)) {
           const anchor = task.lastFiredAt ?? task.createdAt
@@ -225,7 +233,7 @@ const makeImpl = (): Interface => {
         // actually trust.
         const isFileTask = !sessionIds.has(task.id)
 
-        rt.opts.onFire(task)
+        rt.opts.onFire(task, due)
         firedThisTick = true
 
         if (task.recurring === true && !aged) {
@@ -285,7 +293,7 @@ const makeImpl = (): Interface => {
         const all = yield* readCronTasks(opts.dir)
         const missed = findMissedTasks(all, Date.now())
         for (const task of missed) {
-          opts.onFire(task)
+          opts.onFire(task, computeNextFireFor(task, task.lastFiredAt ?? task.createdAt, cfg))
           // Remove durable one-shot from disk after surfacing so it doesn't
           // re-surface on the next start.
           const remaining = (yield* readCronTasks(opts.dir)).filter((t) => t.id !== task.id)
