@@ -13,6 +13,8 @@ import type { Provider } from "../../src/provider"
 import { ProviderTest } from "../fake/provider"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ActorRegistry } from "../../src/actor/registry"
+import { MessageID, PartID, type SessionID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 
 void Log.init({ print: false })
 
@@ -498,18 +500,187 @@ describe("SessionPrune.fireCheckpoints writer failure is not retried in place", 
           // final threshold would let it fire ahead of its own successors.
           yield* svc.resetThresholds(info.id)
 
-          // Post-reset the ladder replays in order: this crossing enqueues for
-          // 20K and 30K, and NOT a third time for the stale gate.
+          // Post-reset the ladder is armed again: this crossing passes 20K and 30K
+          // together and starts one writer for both (FC-028), and none for the
+          // stale gate.
           yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(41_000), promptOps })
           yield* Effect.sleep(150)
-          expect(harness.state.enqueueCount).toBe(4)
+          expect(harness.state.enqueueCount).toBe(3)
 
           // And the replayed final threshold is back to one-shot. A gate that
           // survived the reset would still read 41_000 here — `already` now holds
           // 30K again, so the stale gate would be exactly what admits a re-fire.
           yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(41_000), promptOps })
           yield* Effect.sleep(100)
-          expect(harness.state.enqueueCount).toBe(4)
+          expect(harness.state.enqueueCount).toBe(3)
+        }),
+        { checkpoint: { thresholds: ["20K", "30K"] } },
+      )
+    })
+  })
+
+  // FC-028: `crossed` is process memory, so after a restart every threshold the
+  // session had passed looked newly crossed. Each layer below starts with an
+  // empty `crossed`, as a restarted process does; the session's history says
+  // what the previous process had already started a writer for.
+  describe("after a process restart", () => {
+    const ref = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }
+    // The stubbed writer start never reaches the prompt.
+    const promptOps = {} as never
+
+    const seedAssistant = (sessionID: SessionID, tokens: number, created: number) =>
+      Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const user = yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID,
+          agent: "build",
+          model: ref,
+          time: { created: created - 1 },
+        })
+        yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "assistant",
+          sessionID,
+          parentID: user.id,
+          agentID: "main",
+          agent: "build",
+          mode: "build",
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          path: { cwd: "/tmp/example", root: "/tmp/example" },
+          cost: 0,
+          finish: "stop",
+          tokens: { total: tokens, input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created, completed: created },
+        })
+      })
+
+    // A writer runs in a child session named for it (checkpoint.ts).
+    const startWriter = (parentID: SessionID) =>
+      SessionNs.Service.use((ssn) => ssn.create({ parentID, title: "checkpoint-writer: example range" }))
+
+    const seedRebuild = (sessionID: SessionID, created: number) =>
+      Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const user = yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID,
+          agent: "build",
+          model: ref,
+          time: { created },
+        })
+        yield* ssn.updatePart({
+          id: PartID.ascending(),
+          messageID: user.id,
+          sessionID,
+          type: "checkpoint",
+          checkpointDir: "",
+          checkpointNumber: 1,
+          coveredUpTo: user.id,
+        })
+      })
+
+    test("a threshold the last writer was started for does not fire again", async () => {
+      const harness = makeRetryHarness()
+
+      await runWithHarness(
+        harness,
+        Effect.gen(function* () {
+          const svc = yield* SessionPrune.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const model = createModel({ context: 100_000, output: 32_000 })
+
+          // The previous process started the 30K writer when the context was 35K.
+          yield* seedAssistant(info.id, 35_000, Date.now() - 1_000)
+          yield* startWriter(info.id)
+
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(36_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(0)
+
+          // The next threshold still fires.
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(46_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(1)
+        }),
+        { checkpoint: { thresholds: ["30K", "45K"] } },
+      )
+    })
+
+    test("the context reached is read from before the writer started, not after", async () => {
+      const harness = makeRetryHarness()
+
+      await runWithHarness(
+        harness,
+        Effect.gen(function* () {
+          const svc = yield* SessionPrune.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const model = createModel({ context: 100_000, output: 32_000 })
+
+          // The session grew past 45K after the 30K writer started; no writer
+          // was started for 45K before the restart.
+          yield* seedAssistant(info.id, 35_000, Date.now() - 1_000)
+          yield* startWriter(info.id)
+          yield* seedAssistant(info.id, 46_000, Date.now() + 1_000)
+
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(46_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(1)
+        }),
+        { checkpoint: { thresholds: ["30K", "45K"] } },
+      )
+    })
+
+    test("a rebuild after the last writer arms the whole ladder again", async () => {
+      const harness = makeRetryHarness()
+
+      await runWithHarness(
+        harness,
+        Effect.gen(function* () {
+          const svc = yield* SessionPrune.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const model = createModel({ context: 100_000, output: 32_000 })
+
+          // After the rebuild the ladder measures the new context, as after
+          // resetThresholds in the process that rebuilt.
+          yield* seedAssistant(info.id, 35_000, Date.now() - 1_000)
+          yield* startWriter(info.id)
+          yield* seedRebuild(info.id, Date.now() + 1_000)
+
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(36_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(1)
+        }),
+        { checkpoint: { thresholds: ["30K", "45K"] } },
+      )
+    })
+
+    test("thresholds crossed together start one writer", async () => {
+      const harness = makeRetryHarness()
+
+      await runWithHarness(
+        harness,
+        Effect.gen(function* () {
+          const svc = yield* SessionPrune.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const model = createModel({ context: 100_000, output: 32_000 })
+
+          // No writer history: 20K and 30K are both due. One writer covers the
+          // range up to now; a second would queue behind it for the same range.
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(31_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(1)
+
+          yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(31_000), promptOps })
+          yield* Effect.sleep(100)
+          expect(harness.state.enqueueCount).toBe(1)
         }),
         { checkpoint: { thresholds: ["20K", "30K"] } },
       )

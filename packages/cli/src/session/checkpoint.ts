@@ -13,7 +13,7 @@ import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, FailureInfo, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
-import { Database, and, eq, inArray, isNull, not, or } from "@/storage"
+import { Database, and, desc, eq, inArray, isNull, like, not, or } from "@/storage"
 import { InboxTable } from "@/inbox/inbox.sql"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
@@ -54,6 +54,8 @@ const log = Log.create({ service: "session.checkpoint" })
 // (renderTaskSnapshot) and never changes task state.
 const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep"] as const
 const checkpointWriterToolContract = `The ${CHECKPOINT_WRITER_TOOLS.join(", ")} tools are available; do not invoke others.`
+// FC-028: prune finds the last writer a session started by this child-session title.
+const WRITER_TITLE_PREFIX = "checkpoint-writer: "
 const TASK_SNAPSHOT_LIMIT = 300
 
 /** The session's tasks, including finished ones, for the writer's §4. */
@@ -1158,7 +1160,7 @@ export const layer: Layer.Layer<
       // See spec 2026-06-09-checkpoint-writer-child-session-and-no-fork-fallback-design.md §2.
       const writerChildSession = yield* session.create({
         parentID: input.sessionID,
-        title: `checkpoint-writer: ${rangeDesc}`,
+        title: `${WRITER_TITLE_PREFIX}${rangeDesc}`,
       })
 
       // Estimate delta tokens for observability. forkCtx.inheritedMessages is
@@ -2047,6 +2049,20 @@ export async function lastBoundary(input: { sessionID: SessionID }) {
 
 export async function isWriterRunning(input: { sessionID: SessionID }) {
   return runPromise((svc) => svc.isWriterRunning(input.sessionID))
+}
+
+/** When this session last started a checkpoint writer: its child session's creation time (FC-028). */
+export function lastWriterStart(sessionID: SessionID): number | undefined {
+  const row = Database.use((db) =>
+    db
+      .select({ time: SessionTable.time_created })
+      .from(SessionTable)
+      .where(and(eq(SessionTable.parent_id, sessionID), like(SessionTable.title, `${WRITER_TITLE_PREFIX}%`)))
+      .orderBy(desc(SessionTable.time_created))
+      .limit(1)
+      .get(),
+  )
+  return row?.time
 }
 
 export * as SessionCheckpoint from "./checkpoint"

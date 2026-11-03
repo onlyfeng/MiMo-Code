@@ -137,6 +137,7 @@ not change their implementation. The preceding review is retained in the
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
 | FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
 | FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
+| FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation          | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2420,3 +2421,44 @@ logged`, and the peer `success`/`failure` variants of
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
   upstream flattens them for every model.
+
+## FC-028 — the checkpoint ladder survives a restart and starts one writer at a time
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`) and
+  `lastWriterStart` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - The first time a process evaluates a session's ladder, every threshold at or
+    below the context size the session had reached when it last started a
+    writer counts as crossed. That size is the main lane's newest assistant
+    usage from before the writer's child session was created. With no writer,
+    or with a rebuild or compaction boundary after it, the whole ladder stays
+    armed, as `resetThresholds` leaves it after a rebuild.
+  - When one evaluation finds several thresholds newly crossed, it starts one
+    writer, for the highest, and marks them all crossed. The final-threshold
+    recovery gate is unchanged.
+- Motivation: `crossed` is process memory, so a restarted process treated every
+  threshold a session had passed as new. In recorded restarts three sessions
+  each started a writer at their first turn after the restart for a threshold
+  passed before it (for example 270000 at 609251 tokens), and two sessions also
+  queued a second writer behind the first for the same range. Each writer is a
+  pass over the whole context.
+- Upstream relationship: upstream keeps `crossed` in memory only and starts a
+  writer per newly crossed threshold. Fork fix of shared code; `dev/compat`
+  inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; `WRITER_TITLE_PREFIX`, the writer child session created in
+  `tryStartCheckpointWriter`, its pending-writer slot, and `lastWriterStart` in
+  `checkpoint.ts`; `isBoundaryUser` in `packages/cli/src/session/tail-digest.ts`.
+- Tests/evidence: `packages/cli/test/session/prune.test.ts` "after a process
+  restart": "a threshold the last writer was started for does not fire again",
+  "the context reached is read from before the writer started, not after", "a
+  rebuild after the last writer arms the whole ladder again" and "thresholds
+  crossed together start one writer". "resetThresholds drops a pending gate"
+  now expects one writer for the two thresholds its replay crosses together.
+  Ignoring the writer history, the rebuild boundary or the before-the-writer
+  filter each fails its case; a writer per threshold fails the last case and
+  the reset case.
+- Retirement condition: upstream rebuilds the ladder after a restart and starts
+  one writer per evaluation.
