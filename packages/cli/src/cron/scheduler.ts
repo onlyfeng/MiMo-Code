@@ -54,6 +54,8 @@ export type StartOpts = {
   onArmLoop?: (prompt: string) => void
   dir?: string
   jitterConfig?: JitterConfig
+  /** How often a scheduler without the lock tries to take it. Defaults to 30 seconds. */
+  lockRetryMs?: number
 }
 
 export type NewCronTask = {
@@ -62,6 +64,8 @@ export type NewCronTask = {
   prompt: string
   recurring: boolean
   durable: boolean
+  /** Keep a durable recurring task past the recurring age limit (FC-034). */
+  permanent?: boolean
   kind?: "loop"
 }
 
@@ -130,7 +134,10 @@ type Runtime = {
   inFlight: Set<string>
   nextFireAt: Map<string, number>
   isOwner: boolean
+  lockTriedAt: number
 }
+
+const LOCK_RETRY_MS = 30_000
 
 const newId = () => randomUUID().replace(/-/g, "").slice(0, 8)
 
@@ -149,11 +156,32 @@ const makeImpl = (): Interface => {
     return fn(task.cron, anchor, task.id, cfg) ?? Number.POSITIVE_INFINITY
   }
 
+  // A scheduler that started while another process held the lock keeps trying
+  // for it, so durable tasks still fire once that process's scheduler stops
+  // (FC-034). Tried only while idle, like firing; the tick that follows fires
+  // whatever came due meanwhile, missed one-shots included.
+  const takeOverLock = Effect.gen(function* () {
+    const current = rt
+    if (!current || current.isOwner) return
+    if (Date.now() - current.lockTriedAt < (current.opts.lockRetryMs ?? LOCK_RETRY_MS)) return
+    current.lockTriedAt = Date.now()
+    const acquired = yield* tryAcquireSchedulerLock({ dir: current.opts.dir })
+    if (!acquired) return
+    if (rt !== current) {
+      yield* releaseSchedulerLock({ dir: current.opts.dir }).pipe(Effect.orElseSucceed(() => undefined))
+      return
+    }
+    current.isOwner = true
+    log.info("scheduler.lock_taken_over", { sessionID: current.opts.sessionID })
+  })
+
   const tick = (): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (!rt) return
       if (rt.opts.isKilled()) return
       if (rt.opts.isLoading()) return
+      yield* takeOverLock
+      if (!rt) return
 
       const sessionTasks = getSessionCronTasks()
       const sessionIds = new Set(sessionTasks.map((t) => t.id))
@@ -243,6 +271,7 @@ const makeImpl = (): Interface => {
         inFlight: new Set(),
         nextFireAt: new Map(),
         isOwner,
+        lockTriedAt: Date.now(),
       }
       log.info("scheduler.start", { sessionID: opts.sessionID, isOwner })
 
@@ -296,6 +325,7 @@ const makeImpl = (): Interface => {
         prompt: input.prompt,
         createdAt: Date.now(),
         recurring: input.recurring,
+        ...(input.durable && input.recurring && input.permanent ? { permanent: true } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.session_id ? { createdBySessionId: input.session_id } : {}),
         durable: input.durable,
