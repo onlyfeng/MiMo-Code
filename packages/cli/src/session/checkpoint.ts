@@ -547,7 +547,8 @@ function composeWriterPrompt(input: {
     "",
     input.rangeDesc,
     "",
-    "Do not change task state: §4 comes from the TASK SNAPSHOT above. Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, stop immediately.",
+    // FC-027: an empty closing reply fails the writer, so it closes with one line.
+    "Do not change task state: §4 comes from the TASK SNAPSHOT above. Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, end with one short line such as `Checkpoint updated.` and stop.",
   ].join("\n")
 }
 
