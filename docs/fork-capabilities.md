@@ -141,6 +141,7 @@ not change their implementation. The preceding review is retained in the
 | FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
 | FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 | FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
+| FC-030 | TUI session resume variant: restore from the last user message, saved per-model choice                    | Fork fix of upstream TUI resume                                  | Show the resumed variant without saving it; no recorded variant keeps the saved choice   |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2585,7 +2586,7 @@ logged`, and the peer `success`/`failure` variants of
   - CHECKPOINT_PATH and MEMORY_PATH, which the writer edits in place, are shown
     up to `CURRENT_FILE_CHAR_LIMIT` (100,000 characters): to the last whole line
     within the limit, never splitting a surrogate pair, followed by a line
-    saying how much is shown. Turn 1 then has a writer that can read read the
+    saying how much is shown. Turn 1 then has a writer that can read the
     rest, and one that cannot leave the unseen part as it is. NOTES_PATH is
     always shown whole, because Turn 2 resets it and a part not shown would be
     deleted unreconciled; it is emptied at every checkpoint, so it holds only
@@ -2628,3 +2629,55 @@ logged`, and the peer `success`/`failure` variants of
   whole-notes exception each fails its case.
 - Retirement condition: upstream gives the writer the files' text, or the
   Codex harness can read the memory directory.
+
+## FC-030 — a resumed session shows its variant without overwriting the saved choice
+
+- Status: active
+- Canonical owner: fork `main` TUI — `variant.resume`, `variant.selected` and
+  `variant.set` in `packages/cli/src/cli/cmd/tui/context/local.tsx`, and the
+  session restore effect in
+  `packages/cli/src/cli/cmd/tui/component/prompt/index.tsx`
+- Observable contract:
+  - Opening a session shows the variant its last main-lane user message ran at,
+    while that message's model is the current model. It is held in memory only:
+    `model.json`, the per-model choice every TUI process on the machine shares,
+    is not rewritten.
+  - A last user message without a variant is no choice: the saved choice for
+    the model shows, and a variant shown for an earlier session is dropped.
+  - A message whose model is not available leaves the fallback model's saved
+    choice as it is.
+  - An explicit choice (the variant dialog, Default included, or the cycle key)
+    replaces the shown variant and is saved, as before.
+- Motivation: the restore called `variant.set(msg.model.variant)`, which turns
+  a missing variant into `"default"` and saves the whole map. Messages without
+  a variant are common: deliveries copy the last user message's model (FC-023),
+  so one break in that chain — such as a checkpoint rebuild boundary before
+  FC-023's extension — leaves every later delivery without one. In recorded
+  restarts five sessions whose last user messages were such deliveries came
+  back at Default and overwrote the saved `max`/`xhigh` for their models, and
+  each needed the variant chosen again by hand. The same call also wrote a
+  missing model's variant onto the fallback model's key.
+- Upstream relationship: upstream restores with the same `variant.set` call.
+  Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `save` and the `model.json` load in
+  `local.tsx`; `lastUserMessage` in `prompt/index.tsx`; FC-023's continued
+  variant in `packages/cli/src/session/prompt.ts` and the rebuild boundary in
+  `packages/cli/src/session/checkpoint.ts`, which decide whether history
+  carries a variant at all.
+- Known limit: history cannot tell an explicit Default from a message that lost
+  its variant, as both record none; both show the saved choice. The saved
+  choice is per model and shared across processes, so a later choice of the
+  same model in another session shows instead.
+- Tests/evidence: `packages/cli/test/cli/tui/variant-resume.test.tsx` mounts the
+  production App with `-s` against a fake server and a seeded `model.json`,
+  holding the history until the saved choice has loaded: "a last message
+  without a variant keeps the saved choice", "a recorded variant shows without
+  replacing the saved choice, and a later choice replaces it", "switching to a
+  session whose last message has no variant shows the saved choice again" and
+  "the variant of a model that is not available is not given to the fallback
+  model". The old `variant.set` call fails all four; saving the resumed
+  variant, ignoring it, matching it to any model, keeping it past a choice or
+  past a session without one, or reading a missing variant as Default each
+  fails its case.
+- Retirement condition: upstream restores the variant without saving it and
+  keeps the saved choice when history records none.

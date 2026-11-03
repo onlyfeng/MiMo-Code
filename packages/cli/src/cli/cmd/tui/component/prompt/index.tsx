@@ -714,7 +714,7 @@ export function Prompt(props: PromptProps) {
         if (!args.agent) local.agent.set(msg.agent)
         if (msg.model) {
           local.model.set(msg.model)
-          local.model.variant.set(msg.model.variant)
+          local.model.variant.resume(msg.model)
         }
       }
     }
