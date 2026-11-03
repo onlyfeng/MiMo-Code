@@ -143,6 +143,7 @@ not change their implementation. The preceding review is retained in the
 | FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
 | FC-030 | TUI session resume variant: restore from the last user message, saved per-model choice                    | Fork fix of upstream TUI resume                                  | Show the resumed variant without saving it; no recorded variant keeps the saved choice   |
 | FC-031 | Actor send sender id: the inbox row and the rendered `from` of a send                                     | Fork fix of upstream sender identity                             | Record the lane actor id; never an agent name                                            |
+| FC-032 | Bash timeout note for a command run over ssh                                                              | Fork fix of upstream timeout guidance                            | Say the remote side may still run; do not advise a longer retry                          |
 | FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -2717,6 +2718,40 @@ logged`, and the peer `success`/`failure` variants of
   the rendered sender is accepted, and a subagent lane's send records its actor
   id. Restoring the agent name fails it.
 - Retirement condition: upstream records the sending lane's actor id.
+
+## FC-032 — a timed-out ssh command is reported as possibly still running remotely
+
+- Status: active
+- Canonical owner: fork `main` bash tool — `runsOverSsh` and the timeout note
+  in `run` in `packages/cli/src/tool/bash.ts`
+- Observable contract:
+  - When the bash tool stops a command at its timeout and the command line
+    starts `ssh` — directly, or behind `env`, `nohup`, `sudo`, `command`,
+    `exec`, `time`, `timeout` or `sshpass`, by any path — the note says that
+    stopping the local ssh client does not stop what it started on the remote
+    host, that the remote work may still be running, to check the remote host
+    before running it again, and to run long remote work detached with its
+    output in a file. It does not advise retrying with a larger timeout.
+  - Any other timed-out command keeps the existing note.
+- Motivation: killing the local client leaves the remote command running. In
+  recorded collaboration 17 of 33 bash timeouts were ssh commands to a remote
+  Windows host running Python or PowerShell. The note told the agent to retry
+  with a larger timeout, so a retry started the same work a second time beside
+  the first; idle PowerShell processes were found left on that host.
+- Upstream relationship: upstream gives the same retry advice for every
+  timeout. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the timeout note in `run`, `parts` and `commands` in
+  `packages/cli/src/tool/bash.ts`.
+- Known limit: only the command's own words are read, so ssh started from a
+  script or another program is not recognized.
+- Tests/evidence: `packages/cli/test/tool/bash.test.ts` "a timed-out ssh command
+  is reported as possibly still running remotely" runs a stand-in `ssh` that
+  sleeps, called by path and behind `env`, and expects the remote note without
+  the retry advice; "terminates command on timeout" now also expects no remote
+  note. Ignoring the detection, dropping the command runners, reading the path
+  as the name, or treating every command as remote each fails a case.
+- Retirement condition: upstream distinguishes remote commands in its timeout
+  note.
 
 ## FC-033 — a tool part records when its run started
 
