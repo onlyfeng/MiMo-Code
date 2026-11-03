@@ -2,7 +2,7 @@ import type { Hooks, PluginInput } from "@mimo-ai/plugin"
 import { Log } from "../util"
 import type { ProjectID } from "../project/schema"
 import type { SessionID } from "../session/schema"
-import { runValidatorsForCkpt, buildExtractionReflection, buildReflectionMessage } from "../session/checkpoint-retry"
+import { runValidatorsForCkpt, buildExtractionReflection, buildReflectionMessage, readCurrentFiles } from "../session/checkpoint-retry"
 import { checkpointPath, memoryPath } from "../session/checkpoint-paths"
 import * as CheckpointContext from "../session/checkpoint-context"
 
@@ -33,21 +33,27 @@ export async function CheckpointSplitoverPlugin(pluginInput: PluginInput): Promi
             projectID,
           })
           if (violations.length === 0) return
+          // FC-029: the writer may have no way to read what it just wrote.
+          const current = await readCurrentFiles(sessionID, projectID)
 
           const extractRequired = violations.filter((v) => v.severity === "extract-required")
           if (extractRequired.length > 0) {
             output.continue = true
-            output.reason = buildExtractionReflection(extractRequired)
+            output.reason = buildExtractionReflection(extractRequired, current)
             return
           }
 
           const errors = violations.filter((v) => v.severity === "error")
           if (errors.length > 0) {
             output.continue = true
-            output.reason = buildReflectionMessage(errors, {
-              checkpoint: checkpointPath(sessionID),
-              memory: memoryPath(projectID),
-            })
+            output.reason = buildReflectionMessage(
+              errors,
+              {
+                checkpoint: checkpointPath(sessionID),
+                memory: memoryPath(projectID),
+              },
+              current,
+            )
             return
           }
           // warn-only → fall through, leave output untouched

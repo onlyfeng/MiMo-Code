@@ -12,7 +12,10 @@ import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { TaskRegistry } from "../../src/task/registry"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
-import { checkpointPath } from "../../src/session/checkpoint-paths"
+import { checkpointPath, memoryPath, notesPath } from "../../src/session/checkpoint-paths"
+import { NOTES_TEMPLATE } from "../../src/session/checkpoint-templates"
+import { CURRENT_FILE_CHAR_LIMIT } from "../../src/session/checkpoint-retry"
+import { Instance } from "../../src/project/instance"
 import { SessionPrune } from "../../src/session/prune"
 import { Database } from "../../src/storage"
 import { SessionTable, MessageTable } from "../../src/session/session.sql"
@@ -235,6 +238,77 @@ describe("checkpoint writer child-session isolation", () => {
         expect(task).toContain(`- ${parent.id} 🔵 open — Example parent task`)
         expect(task).toContain(`  - ${child.id} ✅ done — Example finished subtask`)
         expect(task).not.toContain("Use the `task` tool")
+      }),
+    ),
+  )
+
+  // FC-029: a writer on the Codex harness has no read tool, and its exec jail
+  // excludes the memory directory, so the task carries the text it edits.
+  it.live(
+    "writer task carries the current text of the files it edits and the notes template",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const { info } = yield* seedParentSession()
+        const files = {
+          checkpoint: checkpointPath(info.id),
+          memory: memoryPath(Instance.project.id),
+          notes: notesPath(info.id),
+        }
+        const checkpoint = "# example checkpoint\n\n## §4 Task tree\n- 🔵 T1 example open task\n"
+        const memory = "## Rules\n- example project rule\n"
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.dirname(files.checkpoint), { recursive: true })
+          await fs.mkdir(path.dirname(files.memory), { recursive: true })
+          await Bun.write(files.checkpoint, checkpoint)
+          await Bun.write(files.memory, memory)
+          await Bun.write(files.notes, "")
+        })
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task).toContain(`<current-file name="CHECKPOINT_PATH" path="${files.checkpoint}">\n${checkpoint}</current-file>`)
+        expect(task).toContain(`<current-file name="MEMORY_PATH" path="${files.memory}">\n${memory}</current-file>`)
+        // An emptied notes.md still gets its template back.
+        expect(task).toContain(`<current-file name="NOTES_PATH" path="${files.notes}">\n</current-file>`)
+        expect(task).toContain(`<notes-template>\n${NOTES_TEMPLATE}</notes-template>`)
+        expect(task).toContain("do not read them again")
+        expect(task).not.toContain("Read BOTH")
+      }),
+    ),
+  )
+
+  // FC-029: the writer resets notes.md after reconciling it, so a part left out
+  // of the task would be deleted without ever being read.
+  it.live(
+    "writer task shows notes.md whole even past the current-file limit",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const { info } = yield* seedParentSession()
+        const entry = "## [turn 1 · 2026-01-01T00:00Z]\nExample note entry.\n"
+        const notes = entry.repeat(Math.ceil(CURRENT_FILE_CHAR_LIMIT / entry.length) + 1)
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.dirname(notesPath(info.id)), { recursive: true })
+          await Bun.write(notesPath(info.id), notes)
+        })
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task).toContain(`<current-file name="NOTES_PATH" path="${notesPath(info.id)}">\n${notes}</current-file>`)
+        expect(task).not.toContain(`of this file's ${notes.length} characters are shown`)
       }),
     ),
   )

@@ -20,6 +20,55 @@ import {
 import { CHECKPOINT_SECTION_BUDGETS, MEMORY_SECTION_BUDGETS } from "./checkpoint-templates"
 
 /**
+ * FC-029: a writer on the Codex harness has no read tool, and its exec `files`
+ * jail excludes the memory directory, so it can see neither the files it edits
+ * nor the result of its own edits. Every writer prompt therefore carries their
+ * current text. A file longer than this (the checkpoint's whole budget is about
+ * 44,000 characters) is shown up to it; the writer extracts from that part and
+ * a later writer sees the rest.
+ */
+export const CURRENT_FILE_CHAR_LIMIT = 100_000
+
+/** The current text of a file the writer edits, keyed by the name violations use. */
+export type CurrentFiles = Record<string, { name: string; path: string; text: string }>
+
+/** One file's text as the writer sees it: whole lines, at most `limit` characters. */
+export function renderCurrentFile(name: string, file: string, text: string, limit = CURRENT_FILE_CHAR_LIMIT): string {
+  let shown = text
+  if (text.length > limit) {
+    // Cut after a whole line so no edit is made against a partial one. A first
+    // line longer than the limit is cut inside, but never between a surrogate pair.
+    const newline = text.lastIndexOf("\n", limit - 1)
+    const high = text.charCodeAt(limit - 1)
+    const end = newline >= 0 ? newline + 1 : high >= 0xd800 && high <= 0xdbff ? limit - 1 : limit
+    shown = text.slice(0, end)
+  }
+  return [
+    `<current-file name="${name}" path="${file}">`,
+    `${shown}${shown.length === 0 || shown.endsWith("\n") ? "" : "\n"}</current-file>`,
+    ...(shown.length < text.length ? [`Only the first ${shown.length} of this file's ${text.length} characters are shown.`] : []),
+  ].join("\n")
+}
+
+/** checkpoint.md and MEMORY.md as they stand now, for a validation re-prompt. */
+export async function readCurrentFiles(sessionID: SessionID, projectID: ProjectID): Promise<CurrentFiles> {
+  const read = (file: string) => fs.readFile(file, "utf-8").catch(() => "")
+  const checkpoint = checkpointPath(sessionID)
+  const memory = memoryPath(projectID)
+  return {
+    "checkpoint.md": { name: "CHECKPOINT_PATH", path: checkpoint, text: await read(checkpoint) },
+    "MEMORY.md": { name: "MEMORY_PATH", path: memory, text: await read(memory) },
+  }
+}
+
+function currentFilesFor(violations: Violation[], current: CurrentFiles): string[] {
+  return [...new Set(violations.map((v) => v.file))].flatMap((file) => {
+    const entry = current[file]
+    return entry ? [renderCurrentFile(entry.name, entry.path, entry.text)] : []
+  })
+}
+
+/**
  * Returns the set of every Discovered-section title currently present in
  * the single `checkpoint.md` file. In v5, checkpoints are not numbered —
  * the writer overwrites `checkpoint.md` each pass (carrying forward prior
@@ -141,7 +190,9 @@ export async function quarantineCheckpoint(
 export function buildReflectionMessage(
   errors: Violation[],
   paths: { checkpoint: string; memory: string },
+  current: CurrentFiles = {},
 ): string {
+  const shown = currentFilesFor(errors, current)
   const grouped = new Map<string, string[]>()
   for (const e of errors) {
     const list = grouped.get(e.file) ?? []
@@ -153,12 +204,15 @@ export function buildReflectionMessage(
   )
   return [
     "<system-reminder>",
-    "The previous attempt at this checkpoint had validation errors. Read your output at the absolute paths below, fix ONLY the issues listed, and write again. Other content may stay the same.",
+    shown.length > 0
+      ? "The previous attempt at this checkpoint had validation errors. The current text of each file with errors follows the absolute paths below; fix ONLY the issues listed, and write again. Other content may stay the same."
+      : "The previous attempt at this checkpoint had validation errors. Read your output at the absolute paths below, fix ONLY the issues listed, and write again. Other content may stay the same.",
     "",
     sections.join("\n\n"),
     "",
     `CHECKPOINT_PATH = ${paths.checkpoint}`,
     `MEMORY_PATH     = ${paths.memory}`,
+    ...(shown.length > 0 ? ["", ...shown] : []),
     "</system-reminder>",
   ].join("\n")
 }
@@ -168,9 +222,10 @@ export function buildReflectionMessage(
  * the writer to split over-budget files into spillover files rather than
  * fixing structural errors.
  */
-export function buildExtractionReflection(violations: Violation[]): string {
+export function buildExtractionReflection(violations: Violation[], current: CurrentFiles = {}): string {
   const overBudget = violations.filter((v) => v.severity === "extract-required")
   const files = overBudget.map((v) => `${v.file} (${v.detail})`).join(", ")
+  const shown = currentFilesFor(overBudget, current)
   return `EXTRACTION REQUIRED: The following files exceed their token budget: ${files}.
 
 Extract the LESS-IMPORTANT topic cluster from the over-budget file into a new spillover file:
@@ -188,5 +243,9 @@ After extraction, edit the main file to:
   - INSERT an index line near the bottom:
     "- See <spillover-filename>.md (N entries) — short summary"
 
-Re-validation will run after this single extraction.`
+Re-validation will run after this single extraction.${
+    shown.length > 0
+      ? `\n\nThe current text of each over-budget file follows. Move the lines you extract exactly as they appear here.\n\n${shown.join("\n\n")}`
+      : ""
+  }`
 }

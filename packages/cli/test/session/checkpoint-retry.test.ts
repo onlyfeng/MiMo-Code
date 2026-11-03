@@ -8,6 +8,8 @@ import {
   runValidatorsForCkpt,
   runTaskProgressValidators,
   loadPriorDiscoveredTitles,
+  renderCurrentFile,
+  CURRENT_FILE_CHAR_LIMIT,
 } from "../../src/session/checkpoint-retry"
 import { checkpointPath, memoryPath, metaDir } from "../../src/session/checkpoint-paths"
 import type { SessionID } from "../../src/session/schema"
@@ -146,5 +148,34 @@ describe("buildExtractionReflection", () => {
     expect(msg).toContain("EXTRACTION REQUIRED")
     expect(msg).toContain("checkpoint.md (12000 tokens > 8000 budget)")
     expect(msg).toContain("spillover")
+  })
+})
+
+describe("renderCurrentFile", () => {
+  const file = "/tmp/example/checkpoint.md"
+
+  test("shows a file within the limit whole between the tags", () => {
+    expect(renderCurrentFile("CHECKPOINT_PATH", file, "## §1 Active intent\n> \"example\"\n")).toBe(
+      `<current-file name="CHECKPOINT_PATH" path="${file}">\n## §1 Active intent\n> "example"\n</current-file>`,
+    )
+  })
+
+  test("cuts a longer file after its last whole line and says how much is shown", () => {
+    const line = "- 🔵 T1 example line\n"
+    const text = line.repeat(Math.ceil(CURRENT_FILE_CHAR_LIMIT / line.length) + 10)
+    const shown = line.repeat(Math.floor(CURRENT_FILE_CHAR_LIMIT / line.length))
+    expect(renderCurrentFile("CHECKPOINT_PATH", file, text)).toBe(
+      `<current-file name="CHECKPOINT_PATH" path="${file}">\n${shown}</current-file>\n` +
+        `Only the first ${shown.length} of this file's ${text.length} characters are shown.`,
+    )
+  })
+
+  test("cuts a single over-long line without splitting a surrogate pair", () => {
+    const text = "x".repeat(CURRENT_FILE_CHAR_LIMIT - 1) + "🔵 tail"
+    const shown = "x".repeat(CURRENT_FILE_CHAR_LIMIT - 1)
+    expect(renderCurrentFile("CHECKPOINT_PATH", file, text)).toBe(
+      `<current-file name="CHECKPOINT_PATH" path="${file}">\n${shown}\n</current-file>\n` +
+        `Only the first ${shown.length} of this file's ${text.length} characters are shown.`,
+    )
   })
 })

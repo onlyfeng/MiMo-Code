@@ -46,7 +46,7 @@ import { computeLastMessageInfo, type LastMessageInfo } from "./last-message-inf
 import { CHECKPOINT_TEMPLATE, MEMORY_TEMPLATE, NOTES_TEMPLATE, CHECKPOINT_SECTION_BUDGETS } from "./checkpoint-templates"
 import { adjustBoundaryForApiInvariants } from "./boundary"
 import { alignToNonToolResultUser } from "./checkpoint-align"
-import { loadPriorDiscoveredTitles } from "./checkpoint-retry"
+import { loadPriorDiscoveredTitles, renderCurrentFile } from "./checkpoint-retry"
 import * as CheckpointContext from "./checkpoint-context"
 import { buildProgressDiff } from "./checkpoint-progress-reconcile"
 import { collapseCheckpointTail, isBoundaryUser, isRebuildBoundary, renderTailDigest } from "./tail-digest"
@@ -501,6 +501,29 @@ function renderSectionBudgets(budgets: Record<string, number>): string {
 }
 
 /**
+ * The CURRENT FILES block: the text of the three files the writer edits, read
+ * when it starts, and the template it writes notes.md back to (FC-029).
+ */
+function renderCurrentFiles(input: {
+  checkpointFile: string
+  memoryFile: string
+  notesFile: string
+  checkpoint: string
+  memory: string
+  notes: string
+}): string {
+  return [
+    "CURRENT FILES — the exact text of these files when this writer started. Work from it; do not read these three files again unless a block says it is cut short.",
+    renderCurrentFile("CHECKPOINT_PATH", input.checkpointFile, input.checkpoint),
+    renderCurrentFile("MEMORY_PATH", input.memoryFile, input.memory),
+    // Turn 2 resets notes.md, so a part not shown here would be lost unreconciled.
+    renderCurrentFile("NOTES_PATH", input.notesFile, input.notes, Number.POSITIVE_INFINITY),
+    "NOTES_TEMPLATE — what NOTES_PATH is reset to in Turn 2, byte for byte:",
+    `<notes-template>\n${NOTES_TEMPLATE}</notes-template>`,
+  ].join("\n")
+}
+
+/**
  * Composes the full writer prompt for the checkpoint subagent.
  *
  * The body wraps PROMPT_CHECKPOINT_WRITER with an ABSOLUTE-PATHS preamble
@@ -516,6 +539,7 @@ function composeWriterPrompt(input: {
   rangeDesc: string
   progressDiff: string  // Spec ② Chain 2: empty string when nothing to reconcile
   taskSnapshot: string  // renderTaskSnapshot of the parent session
+  currentFiles: string  // renderCurrentFiles: the edited files' text at writer start (FC-029)
 }): string {
   return [
     "<system-reminder>",
@@ -543,6 +567,8 @@ function composeWriterPrompt(input: {
     input.progressDiff,
     "",
     input.taskSnapshot,
+    "",
+    input.currentFiles,
     "",
     PROMPT_CHECKPOINT_WRITER.replace("{{SECTION_BUDGETS}}", renderSectionBudgets(CHECKPOINT_SECTION_BUDGETS)),
     "</system-reminder>",
@@ -986,7 +1012,7 @@ export const layer: Layer.Layer<
         ? [
             `Previous checkpoint: ${checkpointFile}`,
             memoryExists ? `Previous memory: ${memoryFile}` : "",
-            "Read BOTH the prior checkpoint (to dedupe Discovered/Dead-end titles AND to carry forward Live Resources, Execution-context frames, and Session-metadata fields that are still alive) AND the prior memory (project memory) before writing yours.",
+            "Use BOTH the prior checkpoint (to dedupe Discovered/Dead-end titles AND to carry forward Live Resources, Execution-context frames, and Session-metadata fields that are still alive) AND the prior memory (project memory), both in the CURRENT FILES block, before writing yours.",
           ]
             .filter((s) => s.length > 0)
             .join("\n")
@@ -994,7 +1020,17 @@ export const layer: Layer.Layer<
 
       const progressDiff = yield* Effect.promise(() => buildProgressDiff(input.sessionID))
       const taskSnapshot = renderTaskSnapshot(yield* taskRegistry.list({ session_id: input.sessionID, include_terminal: true }))
-      const promptText = composeWriterPrompt({ checkpointFile, memoryFile, taskMemDir, notesFile, rangeDesc, progressDiff, taskSnapshot })
+      // FC-029: a writer on the Codex harness cannot read the memory directory.
+      const read = (file: string) => Effect.promise(() => fs.readFile(file, "utf-8").catch(() => ""))
+      const currentFiles = renderCurrentFiles({
+        checkpointFile,
+        memoryFile,
+        notesFile,
+        checkpoint: yield* read(checkpointFile),
+        memory: yield* read(memoryFile),
+        notes: yield* read(notesFile),
+      })
+      const promptText = composeWriterPrompt({ checkpointFile, memoryFile, taskMemDir, notesFile, rangeDesc, progressDiff, taskSnapshot, currentFiles })
 
       // v6: spawn writer as subagent — shared sessionID, automatic
       // ActorRegistry registration, automatic tool whitelist enforcement
