@@ -2800,6 +2800,11 @@ logged`, and the peer `success`/`failure` variants of
     started while another process held the lock tries for it again every 30
     seconds (`StartOpts.lockRetryMs`) while its session is idle, and on
     getting it fires what came due meanwhile, missed one-shots included.
+  - A scheduler's start, stop and ticks run one at a time. The lock names the
+    process, not the scheduler, so a takeover interleaved with a stop and a
+    restart could otherwise end with the restarted scheduler believing it held
+    a lock file that had been removed; a stop during a tick also cleared the
+    runtime the tick was still reading.
   - `cron schedule` accepts `permanent: true` together with `durable: true` on
     a recurring job; such a job is not ended by the 7-day recurring age limit
     and runs until deleted. `permanent` on a session-only or one-shot job is
@@ -2825,11 +2830,13 @@ logged`, and the peer `success`/`failure` variants of
   without the lock takes it over once the holder lets go, then fires durable
   tasks", "a durable one-shot missed while nobody held the lock fires once
   after the lock is taken over", "a scheduler without the lock waits out its
-  retry interval before trying again" and "a permanent durable task outlives
+  retry interval before trying again", "a takeover racing a stop and a
+  restart leaves the restarted scheduler holding the lock" (20 rounds) and "a
+  permanent durable task outlives
   the recurring age limit; others age out";
   `packages/cli/test/tool/cron.test.ts` "permanent on a session-only / one-shot
   job is refused". Dropping the takeover, ignoring the interval, not storing
-  `permanent`, storing it on a session-only task, or accepting it on the tool
-  each fails a case.
+  `permanent`, storing it on a session-only task, running ticks outside the
+  serialization, or accepting `permanent` on the tool each fails a case.
 - Retirement condition: upstream retries the scheduler lock after start and
   exposes permanent durable jobs.

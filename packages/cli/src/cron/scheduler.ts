@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Semaphore } from "effect"
 import { randomUUID } from "crypto"
 import { Log } from "@/util"
 import {
@@ -156,32 +156,32 @@ const makeImpl = (): Interface => {
     return fn(task.cron, anchor, task.id, cfg) ?? Number.POSITIVE_INFINITY
   }
 
+  // Start, stop and each tick run one at a time. The lock names this process,
+  // not a scheduler, so a takeover interleaved with a stop and a restart could
+  // not tell whose lock it acquired; a stop inside a tick also left the tick
+  // reading a cleared runtime.
+  const ownership = Semaphore.makeUnsafe(1)
+
   // A scheduler that started while another process held the lock keeps trying
   // for it, so durable tasks still fire once that process's scheduler stops
-  // (FC-034). Tried only while idle, like firing; the tick that follows fires
+  // (FC-034). Tried only while idle, like firing; the rest of the tick fires
   // whatever came due meanwhile, missed one-shots included.
-  const takeOverLock = Effect.gen(function* () {
-    const current = rt
-    if (!current || current.isOwner) return
-    if (Date.now() - current.lockTriedAt < (current.opts.lockRetryMs ?? LOCK_RETRY_MS)) return
-    current.lockTriedAt = Date.now()
-    const acquired = yield* tryAcquireSchedulerLock({ dir: current.opts.dir })
-    if (!acquired) return
-    if (rt !== current) {
-      yield* releaseSchedulerLock({ dir: current.opts.dir }).pipe(Effect.orElseSucceed(() => undefined))
-      return
-    }
-    current.isOwner = true
-    log.info("scheduler.lock_taken_over", { sessionID: current.opts.sessionID })
-  })
+  const takeOverLock = (current: Runtime) =>
+    Effect.gen(function* () {
+      if (current.isOwner) return
+      if (Date.now() - current.lockTriedAt < (current.opts.lockRetryMs ?? LOCK_RETRY_MS)) return
+      current.lockTriedAt = Date.now()
+      if (!(yield* tryAcquireSchedulerLock({ dir: current.opts.dir }))) return
+      current.isOwner = true
+      log.info("scheduler.lock_taken_over", { sessionID: current.opts.sessionID })
+    })
 
   const tick = (): Effect.Effect<void> =>
-    Effect.gen(function* () {
+    ownership.withPermits(1)(Effect.gen(function* () {
       if (!rt) return
       if (rt.opts.isKilled()) return
       if (rt.opts.isLoading()) return
-      yield* takeOverLock
-      if (!rt) return
+      yield* takeOverLock(rt)
 
       const sessionTasks = getSessionCronTasks()
       const sessionIds = new Set(sessionTasks.map((t) => t.id))
@@ -257,10 +257,10 @@ const makeImpl = (): Interface => {
           rt.opts.onLoopEnded({ reason: "aged_out", prompt: task.prompt })
         }
       }
-    })
+    }))
 
   const start: Interface["start"] = (opts) =>
-    Effect.gen(function* () {
+    ownership.withPermits(1)(Effect.gen(function* () {
       if (rt) return
       const cfg = opts.jitterConfig ?? DEFAULT_JITTER
       const isOwner = yield* tryAcquireSchedulerLock({ dir: opts.dir })
@@ -301,10 +301,10 @@ const makeImpl = (): Interface => {
         })
       }
       rt.interval = setInterval(runTick, 1000)
-    })
+    }))
 
   const stop: Interface["stop"] = () =>
-    Effect.gen(function* () {
+    ownership.withPermits(1)(Effect.gen(function* () {
       if (!rt) return
       if (rt.interval) clearInterval(rt.interval)
       const owned = rt.isOwner
@@ -314,7 +314,7 @@ const makeImpl = (): Interface => {
         yield* releaseSchedulerLock({ dir }).pipe(Effect.orElseSucceed(() => undefined))
       }
       log.info("scheduler.stop")
-    })
+    }))
 
   const add: Interface["add"] = (input) =>
     Effect.gen(function* () {

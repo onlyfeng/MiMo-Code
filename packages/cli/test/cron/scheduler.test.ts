@@ -539,6 +539,32 @@ test("a durable one-shot missed while nobody held the lock fires once after the 
   rmSync(dir, { recursive: true, force: true })
 })
 
+test("a takeover racing a stop and a restart leaves the restarted scheduler holding the lock", async () => {
+  const dir = freshDir()
+  plantForeignLock(dir)
+  await provided(writeCronTasks([durableTask({})], dir))
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      const opts = baseStartOpts(dir, { isLoading: () => false, onFire: (task) => fired.push(task.id), lockRetryMs: 0 })
+      // The interleaving varies from run to run, so race it repeatedly.
+      for (let round = 0; round < 20; round++) {
+        plantForeignLock(dir)
+        yield* sched.start(opts)
+        rmSync(lockPath(dir))
+        yield* Effect.all([sched.tickOnce(), sched.stop().pipe(Effect.andThen(sched.start(opts)))], {
+          concurrency: "unbounded",
+        })
+        expect(JSON.parse(readFileSync(lockPath(dir), "utf-8")).pid).toBe(process.pid)
+        yield* sched.stop()
+        expect(existsSync(lockPath(dir))).toBe(false)
+      }
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
 test("a scheduler without the lock waits out its retry interval before trying again", async () => {
   const dir = freshDir()
   plantForeignLock(dir)
