@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect"
 import { ActorRegistry } from "../../src/actor/registry"
 import { Bus } from "../../src/bus"
 import { writeCronTasks, type CronTask } from "../../src/cron/cron-task"
+import { AUTONOMOUS_LOOP_SENTINEL } from "../../src/cron/sentinel"
 import { Scheduler, defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Inbox } from "../../src/inbox"
@@ -99,6 +100,48 @@ describe("durable cron delivery through the inbox (DC-SESSION-001)", () => {
         yield* scheduler.tickOnce()
         yield* Effect.sleep(200)
         expect(rowsFor(there.id)).toHaveLength(1)
+        yield* bridge.stop()
+      }),
+    ),
+    30_000,
+  )
+
+  it.live(
+    "a sentinel fired into another session's inbox is expanded in full every time",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const bridge = yield* CronBridge
+        const scheduler = yield* Scheduler
+        const here = yield* sessions.create({ title: "holds the cron lock" })
+        const there = yield* sessions.create({ title: "runs an autonomous loop" })
+        const previous = schedulerRef.current
+        schedulerRef.current = { kick: () => Effect.void }
+        yield* Effect.addFinalizer(() => Effect.sync(() => void (schedulerRef.current = previous)))
+
+        // Two tasks with the same sentinel: the second fire would get the short
+        // reminder if this process cached what the other session has seen.
+        const createdAt = Date.now() - 5 * 60_000
+        const loop = (id: string): CronTask => ({
+          id,
+          cron: "* * * * *",
+          prompt: AUTONOMOUS_LOOP_SENTINEL,
+          createdAt,
+          recurring: true,
+          durable: true,
+          createdBySessionId: there.id,
+        })
+        yield* writeCronTasks([loop("loop1"), loop("loop2")], dir)
+        yield* bridge.start(here.id, dir, () => Effect.die("nothing is injected here"))
+        yield* scheduler.tickOnce()
+        yield* scheduler.tickOnce()
+        for (let waited = 0; rowsFor(there.id).length < 2 && waited < 2_000; waited += 20) yield* Effect.sleep(20)
+
+        const texts = rowsFor(there.id).map(
+          (row) => MessageV2.get({ sessionID: there.id, messageID: row.input_message_id! }).parts[0],
+        )
+        expect(texts).toHaveLength(2)
+        for (const part of texts) expect(part).toMatchObject({ type: "text", text: expect.stringContaining("You are in an autonomous loop") })
         yield* bridge.stop()
       }),
     ),

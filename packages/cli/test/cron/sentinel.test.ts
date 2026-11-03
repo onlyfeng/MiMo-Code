@@ -184,3 +184,28 @@ test("resetOnCompaction(sessionID) is scoped, does not clear sibling sessions", 
 
   rmSync(dir, { recursive: true, force: true })
 })
+
+// DC-SESSION-001: a fire for a session another process may hold.
+test("a fire that must not remember expands in full and leaves the cache alone", async () => {
+  const full = /You are in an autonomous loop/
+  // A remembering fire caches the delivery...
+  expect(await resolveAtFireTime(AUTONOMOUS_LOOP_SENTINEL, "/tmp/x", "ses_remote")).toMatch(full)
+  // ...which a fire that must not remember ignores,
+  expect(await resolveAtFireTime(AUTONOMOUS_LOOP_SENTINEL, "/tmp/x", "ses_remote", false)).toMatch(full)
+  resetOnCompaction("ses_remote")
+  // and it leaves nothing behind for the next remembering fire.
+  expect(await resolveAtFireTime(AUTONOMOUS_LOOP_SENTINEL, "/tmp/x", "ses_remote", false)).toMatch(full)
+  expect(await resolveAtFireTime(AUTONOMOUS_LOOP_SENTINEL, "/tmp/x", "ses_remote")).toMatch(full)
+})
+
+test("a loop.md fire that must not remember sends the file every time and caches nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sentinel-"))
+  mkdirSync(join(dir, ".mimocode"), { recursive: true })
+  writeFileSync(join(dir, ".mimocode", "loop.md"), "tasks here")
+  expect(await resolveAtFireTime(LOOP_FILE_SENTINEL, dir, "ses_remote")).toContain("Loop tasks (from")
+  expect(await resolveAtFireTime(LOOP_FILE_SENTINEL, dir, "ses_remote", false)).toContain("Loop tasks (from")
+  resetOnCompaction("ses_remote")
+  expect(await resolveAtFireTime(LOOP_FILE_SENTINEL, dir, "ses_remote", false)).toContain("Loop tasks (from")
+  expect(await resolveAtFireTime(LOOP_FILE_SENTINEL, dir, "ses_remote")).toContain("Loop tasks (from")
+  rmSync(dir, { recursive: true, force: true })
+})

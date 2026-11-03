@@ -278,10 +278,11 @@ export const layer = Layer.effect(
             // Legacy unmarked tasks fall back to the bridge session (previous
             // behavior) so durable jobs written before the stamp keep firing.
             const targetSessionID = fireTargetSessionId(task, sessionID) as SessionID
+            const elsewhere = targetSessionID !== sessionID
             runDetached(
               Effect.gen(function* () {
                 const resolved = yield* Effect.tryPromise(() =>
-                  resolveAtFireTime(task.prompt, workspaceRoot, targetSessionID),
+                  resolveAtFireTime(task.prompt, workspaceRoot, targetSessionID, !elsewhere),
                 ).pipe(Effect.orElseSucceed(() => task.prompt))
                 // Prepend an ISO fire timestamp so both the user (TUI) and the
                 // model see when each fire happened. Recurring fires especially
@@ -303,7 +304,6 @@ export const layer = Layer.effect(
                 // the inbox keyed by the slot: a second fire of a slot (after a
                 // lock takeover, or a restart before the fire was recorded) is
                 // delivered once, whichever process fires it.
-                const elsewhere = targetSessionID !== sessionID
                 if (elsewhere || task.durable !== false) {
                   yield* deliverToInbox({
                     receiverSessionID: targetSessionID,

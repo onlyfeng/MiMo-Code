@@ -79,18 +79,22 @@ export const resolveAtFireTime = async (
   stored: string,
   workspaceRoot: string,
   sessionID?: string,
+  // DC-SESSION-001: false for a fire delivered to a session another process may
+  // hold. This process never sees that session's compaction, so it expands in
+  // full every time and leaves the cache alone.
+  remember = true,
 ): Promise<string> => {
   const key = keyFor(sessionID, workspaceRoot)
   if (isAutonomous(stored)) {
-    if (autonomousDelivered.has(key)) return AUTONOMOUS_LOOP_SHORT_REMINDER
-    autonomousDelivered.add(key)
+    if (remember && autonomousDelivered.has(key)) return AUTONOMOUS_LOOP_SHORT_REMINDER
+    if (remember) autonomousDelivered.add(key)
     return AUTONOMOUS_LOOP_PREAMBLE
   }
   if (isLoopFile(stored)) {
     const file = await readLoopFile(workspaceRoot)
     if (!file) return LOOP_FILE_ABSENT_REMINDER
-    if (lastLoopFileContent.get(key) === file.content) return LOOP_FILE_UNCHANGED_REMINDER
-    lastLoopFileContent.set(key, file.content)
+    if (remember && lastLoopFileContent.get(key) === file.content) return LOOP_FILE_UNCHANGED_REMINDER
+    if (remember) lastLoopFileContent.set(key, file.content)
     return formatLoopFileFire(file.path, file.content, isDynamic(stored))
   }
   return stored
