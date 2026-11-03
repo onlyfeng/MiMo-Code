@@ -142,6 +142,10 @@ not change their implementation. The preceding review is retained in the
 | FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 | FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
 | FC-030 | TUI session resume variant: restore from the last user message, saved per-model choice                    | Fork fix of upstream TUI resume                                  | Show the resumed variant without saving it; no recorded variant keeps the saved choice   |
+| FC-031 | Actor send sender id: the inbox row and the rendered `from` of a send                                     | Fork fix of upstream sender identity                             | Record the lane actor id; never an agent name                                            |
+| FC-032 | Bash timeout note for a command run over ssh                                                              | Fork fix of upstream timeout guidance                            | Say the remote side may still run; do not advise a longer retry                          |
+| FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
+| FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2681,3 +2685,158 @@ logged`, and the peer `success`/`failure` variants of
   fails its case.
 - Retirement condition: upstream restores the variant without saving it and
   keeps the saved choice when history records none.
+
+## FC-031 — an actor send names the sending lane, so it can be answered
+
+- Status: active
+- Canonical owner: fork `main` actor tool — the `send` action's
+  `senderActorID` in `packages/cli/src/tool/actor.ts`, and the `send` entry of
+  `packages/cli/src/tool/actor.txt`
+- Observable contract:
+  - An `actor send` records the sending lane's actor id as the inbox row's
+    `sender_actor_id`: `main` for a session's main lane, the actor id (such as
+    `general-1`) for a subagent or peer lane, for direct and `exec` calls alike.
+  - The receiver sees `<inbox from="<session_id>:<actor_id>">`, and a send to
+    that session and actor reaches the sender. The tool description says so.
+- Motivation: a direct call recorded `ctx.agent`, the agent's name, while an
+  `exec` call recorded the actor id. A main lane running agent `build`
+  therefore signed its messages `<session>:build`, and a reply to
+  `to_actor_id: "build"` failed with receiver not found, since the main lane's
+  actor id is `main`. In recorded collaboration 565 rows carried `build` as the
+  sender, 391 of them across sessions, so every such receiver had to know the
+  sender's lane out of band to answer.
+- Upstream relationship: upstream records `ctx.agent` for every send; the fork
+  already used the actor id for `exec` calls. Fork fix of shared code;
+  `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `ctx.actorID` in the tool context built in
+  `packages/cli/src/session/prompt.ts`; `renderInboxRow` in
+  `packages/cli/src/inbox/render.ts`; receiver lookup in `Inbox.accept`
+  (`packages/cli/src/inbox/inbox.ts`).
+- Known limit: rows written before the fix keep the agent name.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "the sender is the
+  lane's actor id, so the receiver can reply to it": a main lane running `build`
+  sends across sessions, the row and the rendered `from` name `main`, a reply to
+  the rendered sender is accepted, and a subagent lane's send records its actor
+  id. Restoring the agent name fails it.
+- Retirement condition: upstream records the sending lane's actor id.
+
+## FC-032 — a timed-out ssh command is reported as possibly still running remotely
+
+- Status: active
+- Canonical owner: fork `main` bash tool — `runsOverSsh` and the timeout note
+  in `run` in `packages/cli/src/tool/bash.ts`
+- Observable contract:
+  - When the bash tool stops a command at its timeout and the command line
+    starts `ssh` — directly, or behind `env`, `nohup`, `sudo`, `command`,
+    `exec`, `time`, `timeout` or `sshpass`, by any path — the note says that
+    stopping the local ssh client does not stop what it started on the remote
+    host, that the remote work may still be running, to check the remote host
+    before running it again, and to run long remote work detached with its
+    output in a file. It does not advise retrying with a larger timeout.
+  - Any other timed-out command keeps the existing note.
+- Motivation: killing the local client leaves the remote command running. In
+  recorded collaboration 17 of 33 bash timeouts were ssh commands to a remote
+  Windows host running Python or PowerShell. The note told the agent to retry
+  with a larger timeout, so a retry started the same work a second time beside
+  the first; idle PowerShell processes were found left on that host.
+- Upstream relationship: upstream gives the same retry advice for every
+  timeout. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the timeout note in `run`, `parts` and `commands` in
+  `packages/cli/src/tool/bash.ts`.
+- Known limit: only the command's own words are read, so ssh started from a
+  script or another program is not recognized.
+- Tests/evidence: `packages/cli/test/tool/bash.test.ts` "a timed-out ssh command
+  is reported as possibly still running remotely" runs a stand-in `ssh` that
+  sleeps, called by path and behind `env`, and expects the remote note without
+  the retry advice; "terminates command on timeout" now also expects no remote
+  note. Ignoring the detection, dropping the command runners, reading the path
+  as the name, or treating every command as remote each fails a case.
+- Retirement condition: upstream distinguishes remote commands in its timeout
+  note.
+
+## FC-033 — a tool part records when its run started
+
+- Status: active
+- Canonical owner: fork `main` tool timing — gate admission in `executeTool`
+  in `packages/cli/src/session/processor.ts`, and the tool context's `metadata`
+  callback in `packages/cli/src/session/prompt.ts`
+- Observable contract:
+  - A tool part's `state.time.start` is the moment its run began: when the
+    step's tool gate admitted it, after any wait behind earlier tools in that
+    step, not when the model emitted the call.
+  - A progress update from a running tool (`ctx.metadata`, which bash sends for
+    its output) keeps that start; only a call still `pending` gets one from it.
+  - So `time.end - time.start` is the run's own duration.
+- Motivation: the `metadata` callback rebuilt the running state with
+  `time: { start: Date.now() }`, so every progress update moved the start to
+  that moment. A bash command that slept 400 ms and then printed one line was
+  recorded as running for about 10 ms, and a long command's recorded start
+  trailed its last output. Calls queued behind a barrier tool counted the
+  queue wait as their own run.
+- Upstream relationship: upstream rebuilds the state the same way; the gate is
+  a fork addition. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `completeToolCall` and `failToolCall` in
+  `processor.ts`, which keep the start; the orphan sweep in `prompt.ts`, which
+  compares a running part's start with its cutoff; tool duration display in
+  `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`.
+- Tests/evidence: `packages/cli/test/session/tool-gate-orchestration.test.ts`
+  "a tool records when its run started: after any wait in the gate, unmoved by
+  progress updates" runs a 400 ms bash command and a quick one in one step and
+  expects the first to span at least 400 ms and the second to start after the
+  first ends. Restoring either the reset in the callback or the call-time start
+  fails it.
+- Retirement condition: upstream keeps a running tool's start across progress
+  updates.
+
+## FC-034 — durable cron keeps firing after its lock holder stops
+
+- Status: active
+- Canonical owner: fork `main` cron scheduler — `takeOverLock` in `tick` and
+  `add` in `packages/cli/src/cron/scheduler.ts`, and the `schedule` action of
+  `packages/cli/src/tool/cron.ts` and `cron.txt`
+- Observable contract:
+  - Durable tasks (`.mimocode/scheduled_tasks.json`) are read and fired only
+    by the scheduler holding the workspace's `.cron-lock`. A scheduler that
+    started while another process held the lock tries for it again every 30
+    seconds (`StartOpts.lockRetryMs`) while its session is idle, and on
+    getting it fires what came due meanwhile, missed one-shots included.
+  - A scheduler's start, stop and ticks run one at a time. The lock names the
+    process, not the scheduler, so a takeover interleaved with a stop and a
+    restart could otherwise end with the restarted scheduler believing it held
+    a lock file that had been removed; a stop during a tick also cleared the
+    runtime the tick was still reading.
+  - `cron schedule` accepts `permanent: true` together with `durable: true` on
+    a recurring job; such a job is not ended by the 7-day recurring age limit
+    and runs until deleted. `permanent` on a session-only or one-shot job is
+    refused.
+- Motivation: the lock was tried only when a scheduler started. Every other
+  process stayed a non-owner for its whole life, so once the holder's
+  scheduler stopped — its process exited, or its instance was recycled — no
+  durable task fired until some scheduler started again. In recorded
+  collaboration all six processes in one workspace logged `lock held by live
+  process` at start and never retried, and the lock passed between processes
+  only through restarts. Without `permanent`, a durable recurring job used as
+  a long-running wake source would also end after a week.
+- Upstream relationship: upstream tries the lock at start only, and its tool
+  does not expose the task's existing `permanent` field. Fork fix of shared
+  code; `dev/compat` inherits it and adds its own delivery of a durable task
+  to a session another process owns.
+- Watch surfaces: the files above; `tryAcquireSchedulerLock` and
+  `releaseSchedulerLock` in `packages/cli/src/cron/cron-lock.ts`;
+  `recurringMaxAgeMs` in `packages/cli/src/cron/cron-jitter.ts`.
+- Known limit: firing stays fire-and-forget; a task is marked fired, or a
+  one-shot removed, when it is handed to delivery, not when delivery commits.
+- Tests/evidence: `packages/cli/test/cron/scheduler.test.ts` "a scheduler
+  without the lock takes it over once the holder lets go, then fires durable
+  tasks", "a durable one-shot missed while nobody held the lock fires once
+  after the lock is taken over", "a scheduler without the lock waits out its
+  retry interval before trying again", "a takeover racing a stop and a
+  restart leaves the restarted scheduler holding the lock" (20 rounds) and "a
+  permanent durable task outlives
+  the recurring age limit; others age out";
+  `packages/cli/test/tool/cron.test.ts` "permanent on a session-only / one-shot
+  job is refused". Dropping the takeover, ignoring the interval, not storing
+  `permanent`, storing it on a session-only task, running ticks outside the
+  serialization, or accepting `permanent` on the tool each fails a case.
+- Retirement condition: upstream retries the scheduler lock after start and
+  exposes permanent durable jobs.

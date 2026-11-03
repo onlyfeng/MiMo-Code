@@ -528,7 +528,9 @@ export const layer: Layer.Layer<
                 part.execution !== "not-started" || part.metadata?.providerExecuted) {
                 throw new Error("Tool execution has no trusted input boundary")
               }
-              return { ...part, execution: "started" }
+              // The call may have waited behind earlier tools in the gate; its
+              // run starts here (FC-033).
+              return { ...part, execution: "started", state: { ...part.state, time: { start: Date.now() } } }
             })
             const settled: { callID: string; result?: Effect.Effect<unknown, unknown> } = { callID }
             return yield* Effect.uninterruptibleMask((restore) => restore(body.pipe(

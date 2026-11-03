@@ -49,6 +49,10 @@ Use `loop` when cadence depends on what you observed and may change next turn.
 Default durable:false — job dies with the session. Pass durable:true ONLY when
 the user explicitly asks the job to persist across sessions.
 
+A recurring job ends after 7 days. Pass permanent:true with durable:true only
+when the user asks for a job that runs until it is deleted; stop it with
+`delete`.
+
 ## JSON examples
 
 {"operation":{"action":"schedule","cron":"*/5 * * * *","prompt":"/babysit-prs"}}

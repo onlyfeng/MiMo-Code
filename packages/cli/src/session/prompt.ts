@@ -2239,7 +2239,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 metadata: val.metadata,
                 status: "running",
                 input: args,
-                time: { start: Date.now() },
+                // A progress update does not restart the run (FC-033).
+                time: { start: match.state.status === "running" ? match.state.time.start : Date.now() },
               },
             }
           }),

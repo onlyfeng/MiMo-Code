@@ -17,6 +17,7 @@ import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
+import { renderInboxRow } from "../../src/inbox/render"
 import { Team } from "../../src/team"
 import { Truncate } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
@@ -54,9 +55,10 @@ const it = testEffect(
   ),
 )
 
-function ctxFor(sessionID: SessionID) {
+function ctxFor(sessionID: SessionID, actorID?: string) {
   return {
     sessionID,
+    ...(actorID ? { actorID } : {}),
     messageID: MessageID.ascending(),
     agent: "build",
     abort: new AbortController().signal,
@@ -272,6 +274,58 @@ describe("actor tool — send action", () => {
         )
         expect(rows).toHaveLength(1)
         expect(rows[0].receiver_session_id).toBe(chat.id)
+      }),
+    ),
+  )
+
+  it.live(
+    "the sender is the lane's actor id, so the receiver can reply to it",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const a = yield* sessions.create({ title: "a" })
+        const b = yield* sessions.create({ title: "b" })
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const rowOf = (id: string) =>
+          Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, id)).get())
+
+        // The main lane of a, running agent "build", writes to b's main lane.
+        const sent = yield* def.execute(
+          { operation: { action: "send", to_actor_id: "main", to_session_id: b.id, content: "ping" } },
+          ctxFor(a.id, "main"),
+        )
+        const row = rowOf(JSON.parse(sent.output).inboxID)
+        expect(row?.sender_actor_id).toBe("main")
+        const from = row ? renderInboxRow(row).match(/<inbox from="([^"]+)"/)?.[1] : undefined
+        expect(from).toBe(`${a.id}:main`)
+
+        // Replying to the rendered sender reaches it.
+        const [session, actor] = (from ?? "").split(":")
+        const reply = yield* def.execute(
+          { operation: { action: "send", to_actor_id: actor, to_session_id: session, content: "pong" } },
+          ctxFor(b.id, "main"),
+        )
+        expect(JSON.parse(reply.output).inboxID).toBeTruthy()
+
+        // A subagent lane is named by its actor id, not its agent name.
+        const child = yield* registry.allocateActorID(a.id, "general")
+        yield* registry.register({
+          sessionID: a.id,
+          actorID: child,
+          mode: "subagent",
+          agent: "general",
+          description: "child",
+          contextMode: "none",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+        const fromChild = yield* def.execute(
+          { operation: { action: "send", to_actor_id: "main", content: "progress" } },
+          { ...ctxFor(a.id, child), agent: "general" },
+        )
+        expect(rowOf(JSON.parse(fromChild.output).inboxID)?.sender_actor_id).toBe(child)
       }),
     ),
   )

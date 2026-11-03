@@ -4,6 +4,7 @@ import z from "zod"
 import { Effect } from "effect"
 import { Scheduler } from "@/cron/scheduler"
 import { computeNextCronRun } from "@/cron/cron-expr"
+import { RecoverableError } from "./recoverable"
 import type { SessionID } from "../session/schema"
 
 const id = "cron"
@@ -17,6 +18,10 @@ const scheduleOperation = z.strictObject({
   prompt: z.string().min(1).describe("Prompt to send to the agent when the job fires."),
   one_shot: z.boolean().optional().describe("If true, run once and remove."),
   durable: z.boolean().optional().describe("If true, persist across session restart."),
+  permanent: z
+    .boolean()
+    .optional()
+    .describe("With durable, keep a recurring job past the 7-day age limit until it is deleted."),
   session_id: sessionFlag,
 })
 
@@ -92,12 +97,19 @@ export const CronTool = Tool.define<typeof parameters, Metadata, Scheduler>(
       const sessionID = (op.session_id || ctx.sessionID) as SessionID
 
       if (op.action === "schedule") {
+        if (op.permanent && (!op.durable || op.one_shot))
+          return yield* Effect.fail(
+            new RecoverableError(
+              "permanent applies only to a durable recurring job: a session-only job ends with its session, and a one-shot job ends when it fires.",
+            ),
+          )
         const t = yield* scheduler.add({
           session_id: sessionID,
           cron: op.cron,
           prompt: op.prompt,
           recurring: !op.one_shot,
           durable: op.durable ?? false,
+          ...(op.permanent ? { permanent: true } : {}),
         })
         // Sanity-check the cron: warn on two shapes the user is unlikely to
         // want, both of which the parser/scheduler will otherwise accept
@@ -123,7 +135,7 @@ export const CronTool = Tool.define<typeof parameters, Metadata, Scheduler>(
         }
         return {
           title: `Scheduled ${t.id}`,
-          output: `Scheduled ${t.id} (${op.cron}${op.one_shot ? ", one-shot" : ", recurring"}${op.durable ? ", durable" : ""}): ${op.prompt}${warning}`,
+          output: `Scheduled ${t.id} (${op.cron}${op.one_shot ? ", one-shot" : ", recurring"}${op.durable ? ", durable" : ""}${t.permanent ? ", permanent" : ""}): ${op.prompt}${warning}`,
           metadata: {
             id: t.id,
             kind: t.kind ?? "cron",

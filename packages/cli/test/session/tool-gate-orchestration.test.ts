@@ -116,4 +116,47 @@ describe("tool gate orchestration", () => {
       }),
     20000,
   )
+
+  ;(process.platform === "win32" ? it.live.skip : it.live)(
+    "a tool records when its run started: after any wait in the gate, unmoved by progress updates",
+    () =>
+      Effect.gen(function* () {
+        const slow = "sleep 0.4; echo first done"
+        const server = startScriptedLLMServer([
+          {
+            lines: toolCallsResponse([
+              { id: "first-call", name: "bash", args: JSON.stringify({ command: slow, description: "Slow command" }) },
+              { id: "second-call", name: "bash", args: JSON.stringify({ command: "echo second", description: "Quick command" }) },
+            ]),
+          },
+          { lines: textStopResponse("Finished") },
+        ])
+        yield* Effect.addFinalizer(() => Effect.promise(() => server.stop()))
+        yield* provideTmpdirInstance(
+          () =>
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "Gate start time" })
+              yield* prompt
+                .prompt({ sessionID: session.id, agent: "build", parts: [{ type: "text", text: "Run both commands" }] })
+                .pipe(Effect.timeout("10 seconds"))
+              const tools = (yield* sessions.messages({ sessionID: session.id }))
+                .flatMap((message) => message.parts)
+                .flatMap((part) => (part.type === "tool" && part.state.status === "completed" ? [part] : []))
+              const first = tools.find((part) => part.callID === "first-call")
+              const second = tools.find((part) => part.callID === "second-call")
+              if (!first || first.state.status !== "completed" || !second || second.state.status !== "completed")
+                throw new Error("Missing completed tool parts")
+              // Output arriving at the end of the first run does not move its start.
+              expect(first.state.time.end - first.state.time.start).toBeGreaterThanOrEqual(400)
+              // bash is barrier-class: the second call runs only after the first ends.
+              expect(second.state.time.start).toBeGreaterThanOrEqual(first.state.time.end)
+              expect(second.state.time.end - second.state.time.start).toBeLessThan(400)
+            }),
+          { git: true, config: config(server.origin) },
+        )
+      }),
+    20000,
+  )
 })
