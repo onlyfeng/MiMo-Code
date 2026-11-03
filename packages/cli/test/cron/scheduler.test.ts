@@ -1,6 +1,6 @@
 import { test, expect, beforeEach } from "bun:test"
 import { Effect } from "effect"
-import { mkdtempSync, rmSync } from "fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 import {
@@ -10,7 +10,14 @@ import {
   type StartOpts,
 } from "@/cron/scheduler"
 import { clearAllLoopStates } from "@/cron/loop-state"
-import { removeSessionCronTasks, getSessionCronTasks, addSessionCronTask } from "@/cron/cron-task"
+import {
+  removeSessionCronTasks,
+  getSessionCronTasks,
+  addSessionCronTask,
+  readCronTasks,
+  writeCronTasks,
+  type CronTask,
+} from "@/cron/cron-task"
 import { DEFAULT_JITTER } from "@/cron/cron-jitter"
 
 const provided = <A, E>(eff: Effect.Effect<A, E, Scheduler>) =>
@@ -438,6 +445,189 @@ test("keepalive armLoop after fire retains owner via LoopState", async () => {
       expect(after[0]!.createdBySessionId).toBe("ses_b")
       expect(yield* sched.list({ kind: "loop", session_id: "ses_a" })).toEqual([])
 
+      yield* sched.stop()
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+// FC-034: a scheduler that started while another process held the lock keeps
+// trying for it, so durable tasks fire after that process's scheduler stops.
+const lockPath = (dir: string) => join(dir, ".mimocode", ".cron-lock")
+
+// pid 1 is always alive; on Linux the lock must also carry its real start time.
+const plantForeignLock = (dir: string) => {
+  mkdirSync(join(dir, ".mimocode"), { recursive: true })
+  const startedAt = process.platform === "linux" ? Math.floor(pidStartMs(1)) : Date.now()
+  writeFileSync(lockPath(dir), JSON.stringify({ pid: 1, startedAt }))
+}
+
+const pidStartMs = (pid: number): number => {
+  const rest = (stat: string) => stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/)
+  const other = parseInt(rest(readFileSync(`/proc/${pid}/stat`, "utf-8"))[19] ?? "0", 10)
+  const self = parseInt(rest(readFileSync(`/proc/${process.pid}/stat`, "utf-8"))[19] ?? "0", 10)
+  const boot = Date.now() - Math.floor(parseFloat(readFileSync("/proc/uptime", "utf-8").split(/\s+/)[0] ?? "0") * 1000)
+  const started = Date.now() - Math.floor(process.uptime() * 1000)
+  return boot + other * ((started - boot) / Math.max(1, self))
+}
+
+const durableTask = (overrides: Partial<CronTask>): CronTask => ({
+  id: "durable1",
+  cron: "* * * * *",
+  prompt: "durable job",
+  createdAt: Date.now() - 3 * 60_000,
+  recurring: true,
+  durable: true,
+  createdBySessionId: "ses_other",
+  ...overrides,
+})
+
+test("a scheduler without the lock takes it over once the holder lets go, then fires durable tasks", async () => {
+  const dir = freshDir()
+  plantForeignLock(dir)
+  await provided(writeCronTasks([durableTask({})], dir))
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      yield* sched.start(
+        baseStartOpts(dir, { isLoading: () => false, onFire: (task) => fired.push(task.id), lockRetryMs: 0 }),
+      )
+      // Held by a live process: no takeover, and durable tasks are not read.
+      yield* sched.tickOnce()
+      expect(fired).toEqual([])
+
+      rmSync(lockPath(dir))
+      yield* sched.tickOnce()
+      expect(fired).toEqual(["durable1"])
+      expect(JSON.parse(readFileSync(lockPath(dir), "utf-8")).pid).toBe(process.pid)
+
+      yield* sched.stop()
+      expect(existsSync(lockPath(dir))).toBe(false)
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("a durable one-shot missed while nobody held the lock fires once after the lock is taken over", async () => {
+  const dir = freshDir()
+  plantForeignLock(dir)
+  // Due five minutes ago, so its next run after creation has already passed.
+  const due = new Date(Date.now() - 5 * 60_000)
+  const missed = durableTask({
+    id: "missed1",
+    cron: `${due.getUTCMinutes()} ${due.getUTCHours()} * * *`,
+    createdAt: due.getTime() - 5 * 60_000,
+    recurring: false,
+  })
+  await provided(writeCronTasks([missed], dir))
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      yield* sched.start(
+        baseStartOpts(dir, { isLoading: () => false, onFire: (task) => fired.push(task.id), lockRetryMs: 0 }),
+      )
+      rmSync(lockPath(dir))
+      yield* sched.tickOnce()
+      yield* sched.tickOnce()
+      expect(fired).toEqual(["missed1"])
+      expect(yield* readCronTasks(dir)).toEqual([])
+      yield* sched.stop()
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("a takeover racing a stop and a restart leaves the restarted scheduler holding the lock", async () => {
+  const dir = freshDir()
+  plantForeignLock(dir)
+  await provided(writeCronTasks([durableTask({})], dir))
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      const opts = baseStartOpts(dir, { isLoading: () => false, onFire: (task) => fired.push(task.id), lockRetryMs: 0 })
+      // The interleaving varies from run to run, so race it repeatedly.
+      for (let round = 0; round < 20; round++) {
+        plantForeignLock(dir)
+        yield* sched.start(opts)
+        rmSync(lockPath(dir))
+        yield* Effect.all([sched.tickOnce(), sched.stop().pipe(Effect.andThen(sched.start(opts)))], {
+          concurrency: "unbounded",
+        })
+        expect(JSON.parse(readFileSync(lockPath(dir), "utf-8")).pid).toBe(process.pid)
+        yield* sched.stop()
+        expect(existsSync(lockPath(dir))).toBe(false)
+      }
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("a scheduler without the lock waits out its retry interval before trying again", async () => {
+  const dir = freshDir()
+  plantForeignLock(dir)
+  await provided(writeCronTasks([durableTask({})], dir))
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      yield* sched.start(
+        baseStartOpts(dir, { isLoading: () => false, onFire: (task) => fired.push(task.id), lockRetryMs: 60_000 }),
+      )
+      rmSync(lockPath(dir))
+      yield* sched.tickOnce()
+      expect(fired).toEqual([])
+      expect(existsSync(lockPath(dir))).toBe(false)
+      yield* sched.stop()
+    }),
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("a permanent durable task outlives the recurring age limit; others age out", async () => {
+  const dir = freshDir()
+  const fired: string[] = []
+  await provided(
+    Effect.gen(function* () {
+      const sched = yield* Scheduler
+      yield* sched.start(
+        baseStartOpts(dir, {
+          isLoading: () => false,
+          onFire: (task) => fired.push(task.id),
+          jitterConfig: { ...DEFAULT_JITTER, recurringMaxAgeMs: 60_000 },
+        }),
+      )
+      const keep = yield* sched.add({
+        session_id: "ses_test",
+        cron: "* * * * *",
+        prompt: "keep",
+        recurring: true,
+        durable: true,
+        permanent: true,
+      })
+      const expire = yield* sched.add({ session_id: "ses_test", cron: "* * * * *", prompt: "expire", recurring: true, durable: true })
+      const sessionOnly = yield* sched.add({
+        session_id: "ses_test",
+        cron: "* * * * *",
+        prompt: "session only",
+        recurring: true,
+        durable: false,
+        permanent: true,
+      })
+      expect(keep.permanent).toBe(true)
+      expect(expire.permanent).toBeUndefined()
+      // permanent only applies to a durable task.
+      expect(sessionOnly.permanent).toBeUndefined()
+      yield* sched.remove(sessionOnly.id)
+
+      // Age both past the limit and make them due.
+      const old = Date.now() - 3 * 60_000
+      yield* writeCronTasks((yield* readCronTasks(dir)).map((task) => ({ ...task, createdAt: old })), dir)
+      for (let i = 0; i < 3; i++) yield* sched.tickOnce()
+      expect(fired.sort()).toEqual([expire.id, keep.id].sort())
+      expect((yield* readCronTasks(dir)).map((task) => task.id)).toEqual([keep.id])
       yield* sched.stop()
     }),
   )

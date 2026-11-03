@@ -244,6 +244,22 @@ function commands(node: Node) {
   return node.descendantsOfType("command").filter((child): child is Node => Boolean(child))
 }
 
+// Commands that run their arguments as another command, so an ssh behind one of
+// them still starts work on another host.
+const COMMAND_RUNNERS = new Set(["env", "nohup", "sudo", "command", "exec", "time", "timeout", "sshpass"])
+
+// True when the line starts work on another host over ssh (FC-032).
+function runsOverSsh(root: Node, ps: boolean) {
+  const name = (text: string) => {
+    const base = text.replace(/^["']|["']$/g, "").split(/[\\/]/).at(-1) ?? ""
+    return ps ? base.toLowerCase().replace(/\.exe$/, "") : base
+  }
+  return commands(root).some((node) => {
+    const tokens = parts(node).map((item) => name(item.text))
+    return tokens[0] === "ssh" || (COMMAND_RUNNERS.has(tokens[0] ?? "") && tokens.includes("ssh"))
+  })
+}
+
 // Commands whose primary purpose is creating/mutating files. Matched against
 // the command head (case-folded for PowerShell). `sed` is special-cased below:
 // it only writes with -i/--in-place.
@@ -1042,6 +1058,7 @@ export const BashTool = Tool.define(
         description: string
         fileWrite?: boolean
         mainWorktreeHits?: string[]
+        remote?: boolean
       },
       ctx: Tool.Context,
     ) {
@@ -1155,7 +1172,9 @@ export const BashTool = Tool.define(
       const meta: string[] = []
       if (expired) {
         meta.push(
-          `bash tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
+          input.remote
+            ? `bash tool terminated command after exceeding timeout ${input.timeout} ms. The command ran over ssh: stopping the local ssh client does not stop what it started on the remote host, which may still be running. Check the remote host before running it again. For long remote work, start it detached there with its output written to a file, then poll that file.`
+            : `bash tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
         )
       }
       if (aborted) meta.push("User aborted the command")
@@ -1276,6 +1295,7 @@ export const BashTool = Tool.define(
               const ps = PS.has(name)
               const root = yield* parse(params.command, ps)
               const fileWrite = isFileWrite(root, ps)
+              const remote = runsOverSsh(root, ps)
               const hits = mainWorktreeHits(root, cwd, ps)
               const scan = yield* collect(root, cwd, ps, shell)
               if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
@@ -1338,6 +1358,7 @@ export const BashTool = Tool.define(
                   description: params.description,
                   fileWrite,
                   mainWorktreeHits: hits,
+                  remote,
                 },
                 ctx,
               )

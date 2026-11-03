@@ -434,7 +434,8 @@ export const ActorTool = Tool.define(
               receiverSessionID: targetSid,
               receiverActorID: op.to_actor_id,
               senderSessionID: ctx.sessionID,
-              senderActorID: ctx.extra?.fromExec ? ctx.actorID ?? "main" : ctx.agent ?? "main",
+              // The lane's actor id, so the receiver can reply to it (FC-031).
+              senderActorID: ctx.actorID ?? "main",
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
               ...(across ? { adoptReceiver: false } : {}),

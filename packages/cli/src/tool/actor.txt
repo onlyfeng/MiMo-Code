@@ -65,7 +65,8 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           remains reusable.
           required: to_actor_id, content.
           optional: to_session_id, type (default "text").
-          Receiver sees wrapped in <inbox from="..." sent_at="...">...</inbox> at next iteration.
+          Receiver sees wrapped in <inbox from="<session_id>:<actor_id>" sent_at="...">...</inbox> at next iteration;
+          reply with to_session_id=<session_id>, to_actor_id=<actor_id>.
           Returns once queued, not when the woken turn finishes — that turn's result arrives as a completion notification.
 
 ## When to use actor

@@ -30,6 +30,7 @@ describe("cron.execute: schedule sanity warnings", () => {
     prompt: string
     one_shot?: boolean
     durable?: boolean
+    permanent?: boolean
   }) => {
     const info = await runtime.runPromise(CronTool)
     const def = await runtime.runPromise(info.init())
@@ -53,6 +54,18 @@ describe("cron.execute: schedule sanity warnings", () => {
       rmSync(instanceDir, { recursive: true, force: true })
     }
   }
+
+  // FC-034: permanent lifts the age limit of a durable recurring job only.
+  test.each([
+    { name: "session-only", input: { permanent: true } },
+    { name: "one-shot", input: { permanent: true, durable: true, one_shot: true } },
+  ])("permanent on a $name job is refused", async ({ input }) => {
+    const refused = await runSchedule({ cron: "*/5 * * * *", prompt: "x", ...input }).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    )
+    expect(refused).toContain("permanent applies only to a durable recurring job")
+  })
 
   test("Feb 30 (never matches) emits a warning even for recurring", async () => {
     const out = await runSchedule({ cron: "0 0 30 2 *", prompt: "impossible" })
