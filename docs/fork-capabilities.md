@@ -137,6 +137,7 @@ not change their implementation. The preceding review is retained in the
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
 | FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
 | FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
+| FC-026 | Cron bridge across instance recycling: remount from instance bootstrap                                    | Fork fix of upstream bridge lifecycle                            | Remount the last mount after a recycle; an explicit stop stays stopped                   |
 | FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -2421,6 +2422,51 @@ logged`, and the peer `success`/`failure` variants of
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
   upstream flattens them for every model.
+
+## FC-026 — the cron bridge survives instance recycling
+
+- Status: active
+- Canonical owner: fork `main` cron bridge in
+  `packages/cli/src/session/cron-bridge.ts` (`resume`) and instance bootstrap in
+  `packages/cli/src/project/bootstrap.ts` (`InstanceBootstrap`)
+- Observable contract:
+  - The bridge remembers the last mount this process made: session, workspace
+    root, directory and inject. Disposing the instance stops the bridge but keeps
+    that record; an explicit `stop()` clears it.
+  - `InstanceBootstrap` calls `resume()`. When the new instance has the
+    remembered directory and no bridge is mounted, the bridge mounts again for
+    the remembered session, takes the scheduler lock and fires due jobs without
+    waiting for a prompt. Another directory, a mounted bridge, or a bridge
+    stopped on purpose is left as it is.
+  - The worktree bootstrap runtime has no cron bridge, so bootstrap skips the
+    call there.
+- Motivation: the hourly models catalog reload disposes every instance, and a
+  busy session defers that disposal until it goes idle. The scheduler fires a
+  due job only on an idle tick, so it was stopped at exactly the moment its jobs
+  could fire, and the prompt loop mounted it again only when the next turn had
+  already made the session busy. In recorded runs a coordinator session's bridge
+  stopped at the hourly reload and stayed down until the next prompt, once for
+  an hour and a half, and its 10-minute session-only fallback job did not fire
+  once in the following hours.
+- Upstream relationship: upstream stops the bridge with the instance and mounts
+  it only from the prompt loop. Fork fix of shared code; `dev/compat` inherits
+  it unchanged.
+- Watch surfaces: `start`, `stop`, the instance-owner finalizer and `resume` in
+  `cron-bridge.ts`; `InstanceBootstrap`; the `cronBridge.start` call in
+  `packages/cli/src/session/prompt.ts`; `Instance.provide` callers that pass no
+  `init`.
+- Known gap: an instance created by a caller that passes no `init` skips
+  bootstrap, so the bridge then mounts at the next prompt, as before. Recorded
+  recycles were recreated through bootstrap in all but one case.
+- Tests/evidence: `packages/cli/test/session/cron-bridge.integration.test.ts`
+  "a recycled instance resumes the last mount without a new start" disposes the
+  instance, resumes, and expects a second mount, the lock file and a fired due
+  job; a second resume mounts nothing. "resume does not restart a bridge stopped
+  on purpose or mount another directory" covers the other cases. Dropping the
+  record on instance disposal fails the first; keeping it after `stop()` fails
+  the second.
+- Retirement condition: upstream keeps the scheduler across instance recycling
+  or mounts it on instance creation.
 
 ## FC-027 — the checkpoint writer closes with one line
 

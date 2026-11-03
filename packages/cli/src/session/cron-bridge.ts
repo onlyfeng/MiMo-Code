@@ -46,6 +46,13 @@ export interface Interface {
    * production wiring uses. Returns early if no session is mounted.
    */
   readonly runKeepaliveSweep: () => Effect.Effect<void>
+  /**
+   * Remount the last bridge this process started, in the current instance, if
+   * that instance has the same directory and nothing stopped the bridge on
+   * purpose. Instance recycling (e.g. a models catalog reload) stops a mounted
+   * bridge; without this, session-only jobs wait for the next prompt (FC-026).
+   */
+  readonly resume: () => Effect.Effect<void>
 }
 
 export class CronBridge extends Context.Service<CronBridge, Interface>()("@mimocode/CronBridge") {}
@@ -75,6 +82,16 @@ export const layer = Layer.effect(
       armedThisTurn: Set<string>
     }
     let started: Handle | null = null
+    // The last mount this process made, kept across instance recycling and
+    // cleared only by an explicit stop(), so resume() can restore it (FC-026).
+    let resumable:
+      | {
+          sessionID: SessionID
+          workspaceRoot: string
+          directory: string
+          inject: (input: InjectScheduledPromptInput) => Effect.Effect<void, unknown>
+        }
+      | undefined
     const owners = yield* InstanceState.make(() => Effect.gen(function* () {
       const owner: { closed: boolean; handle?: Handle } = { closed: false }
       yield* Effect.addFinalizer(() => Effect.gen(function* () {
@@ -313,6 +330,7 @@ export const layer = Layer.effect(
             onLoopEnded,
             onArmLoop,
           })
+          resumable = { sessionID, workspaceRoot, directory: yield* InstanceState.directory, inject }
 
           yield* Effect.sync(() => log.info("bridge started", { sessionID, workspaceRoot }))
         }).pipe(lifecycle.withPermits(1))).pipe(
@@ -351,12 +369,24 @@ export const layer = Layer.effect(
         yield* Effect.sync(() => log.info("bridge stopped", { sessionID: handle.sessionID }))
       }).pipe(Effect.uninterruptible)
 
-    const stop = () => stopHandle()
+    const stop = () =>
+      Effect.sync(() => {
+        resumable = undefined
+      }).pipe(Effect.andThen(stopHandle()))
+
+    const resume: Interface["resume"] = () =>
+      Effect.gen(function* () {
+        const last = resumable
+        if (!last || started) return
+        if ((yield* InstanceState.directory) !== last.directory) return
+        log.info("bridge resuming after instance recycle", { sessionID: last.sessionID })
+        yield* start(last.sessionID, last.workspaceRoot, last.inject)
+      })
 
     // If the Layer's scope closes (session teardown), make sure stop() runs.
     yield* Effect.addFinalizer(() => stop().pipe(Effect.orElseSucceed(() => undefined)))
 
-    return CronBridge.of({ start, stop, runKeepaliveSweep })
+    return CronBridge.of({ start, stop, runKeepaliveSweep, resume })
   }),
 )
 
