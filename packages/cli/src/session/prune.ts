@@ -164,14 +164,16 @@ export const layer: Layer.Layer<
 
     // FC-028: `crossed` lives in this process, so a restarted process saw every
     // threshold the session had already passed as newly crossed and started
-    // writers for ranges one had already been started for. Rebuild it from the
-    // last writer this session started: the main lane's context size then is
-    // what the ladder had reached. 0 when no writer started, or the lane was
-    // rebuilt or compacted since (the ladder then measures the new, smaller
+    // writers for ranges a checkpoint already covered. Rebuild it from the last
+    // writer of this session that succeeded: the main lane's context size when
+    // it started is what the checkpoint covers. A later writer that failed or
+    // never finished does not count, so its threshold fires again (the recovery
+    // gate does not survive a restart). 0 when no writer succeeded, or the lane
+    // was rebuilt or compacted since (the ladder then measures the new, smaller
     // context, as after resetThresholds).
     const reachedTokens = (sessionID: SessionID) =>
       Effect.sync(() => {
-        const writerStart = SessionCheckpoint.lastWriterStart(sessionID)
+        const writerStart = SessionCheckpoint.lastSucceededWriterStart(sessionID)
         if (writerStart == null) return 0
         for (const msg of MessageV2.stream(sessionID)) {
           if (isBoundaryUser(msg)) return 0
