@@ -145,6 +145,7 @@ not change their implementation. The preceding review is retained in the
 | FC-031 | Actor send sender id: the inbox row and the rendered `from` of a send                                     | Fork fix of upstream sender identity                             | Record the lane actor id; never an agent name                                            |
 | FC-032 | Bash timeout note for a command run over ssh                                                              | Fork fix of upstream timeout guidance                            | Say the remote side may still run; do not advise a longer retry                          |
 | FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
+| FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2786,3 +2787,56 @@ logged`, and the peer `success`/`failure` variants of
   fails it.
 - Retirement condition: upstream keeps a running tool's start across progress
   updates.
+
+## FC-034 — durable cron keeps firing after its lock holder stops
+
+- Status: active
+- Canonical owner: fork `main` cron scheduler — `takeOverLock` in `tick` and
+  `add` in `packages/cli/src/cron/scheduler.ts`, and the `schedule` action of
+  `packages/cli/src/tool/cron.ts` and `cron.txt`
+- Observable contract:
+  - Durable tasks (`.mimocode/scheduled_tasks.json`) are read and fired only
+    by the scheduler holding the workspace's `.cron-lock`. A scheduler that
+    started while another process held the lock tries for it again every 30
+    seconds (`StartOpts.lockRetryMs`) while its session is idle, and on
+    getting it fires what came due meanwhile, missed one-shots included.
+  - A scheduler's start, stop and ticks run one at a time. The lock names the
+    process, not the scheduler, so a takeover interleaved with a stop and a
+    restart could otherwise end with the restarted scheduler believing it held
+    a lock file that had been removed; a stop during a tick also cleared the
+    runtime the tick was still reading.
+  - `cron schedule` accepts `permanent: true` together with `durable: true` on
+    a recurring job; such a job is not ended by the 7-day recurring age limit
+    and runs until deleted. `permanent` on a session-only or one-shot job is
+    refused.
+- Motivation: the lock was tried only when a scheduler started. Every other
+  process stayed a non-owner for its whole life, so once the holder's
+  scheduler stopped — its process exited, or its instance was recycled — no
+  durable task fired until some scheduler started again. In recorded
+  collaboration all six processes in one workspace logged `lock held by live
+  process` at start and never retried, and the lock passed between processes
+  only through restarts. Without `permanent`, a durable recurring job used as
+  a long-running wake source would also end after a week.
+- Upstream relationship: upstream tries the lock at start only, and its tool
+  does not expose the task's existing `permanent` field. Fork fix of shared
+  code; `dev/compat` inherits it and adds its own delivery of a durable task
+  to a session another process owns.
+- Watch surfaces: the files above; `tryAcquireSchedulerLock` and
+  `releaseSchedulerLock` in `packages/cli/src/cron/cron-lock.ts`;
+  `recurringMaxAgeMs` in `packages/cli/src/cron/cron-jitter.ts`.
+- Known limit: firing stays fire-and-forget; a task is marked fired, or a
+  one-shot removed, when it is handed to delivery, not when delivery commits.
+- Tests/evidence: `packages/cli/test/cron/scheduler.test.ts` "a scheduler
+  without the lock takes it over once the holder lets go, then fires durable
+  tasks", "a durable one-shot missed while nobody held the lock fires once
+  after the lock is taken over", "a scheduler without the lock waits out its
+  retry interval before trying again", "a takeover racing a stop and a
+  restart leaves the restarted scheduler holding the lock" (20 rounds) and "a
+  permanent durable task outlives
+  the recurring age limit; others age out";
+  `packages/cli/test/tool/cron.test.ts` "permanent on a session-only / one-shot
+  job is refused". Dropping the takeover, ignoring the interval, not storing
+  `permanent`, storing it on a session-only task, running ticks outside the
+  serialization, or accepting `permanent` on the tool each fails a case.
+- Retirement condition: upstream retries the scheduler lock after start and
+  exposes permanent durable jobs.
