@@ -12,11 +12,13 @@ import { Log } from "@/util"
 import { FileWatcher } from "@/file/watcher"
 import { ShareNext } from "@/share"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import { Config } from "@/config"
 import { Metrics } from "@/metrics"
 import { Memory } from "@/memory"
 import { WriterService } from "@/history"
 import { sweepAbandonedZombies } from "@/actor/registry"
+import { CronBridge } from "@/session/cron-bridge"
 
 export const InstanceBootstrap = Effect.gen(function* () {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -66,4 +68,16 @@ export const InstanceBootstrap = Effect.gen(function* () {
   )
 
   yield* Metrics.subscribe()
+
+  // A recycled instance (e.g. after a models catalog reload) stopped this
+  // process's cron bridge; remount it now rather than at the next prompt, so
+  // session-only jobs keep firing while the session is idle (FC-026).
+  // The worktree bootstrap runtime has no cron bridge; nothing was mounted there.
+  const bridge = Option.getOrUndefined(yield* Effect.serviceOption(CronBridge))
+  if (bridge)
+    yield* bridge.resume().pipe(
+      Effect.catchCause((cause) =>
+        Effect.sync(() => Log.Default.warn("cron bridge resume failed", { error: String(cause) })),
+      ),
+    )
 }).pipe(Effect.withSpan("InstanceBootstrap"))

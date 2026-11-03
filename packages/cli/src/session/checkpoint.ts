@@ -15,8 +15,9 @@ import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, FailureInfo, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
-import { Database, NotFoundError, and, eq, inArray, isNull, not, or, sql } from "@/storage"
+import { Database, NotFoundError, and, desc, eq, inArray, isNull, not, or, sql } from "@/storage"
 import { alias } from "drizzle-orm/sqlite-core"
+import { ActorRegistryTable } from "@/actor/actor.sql"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
@@ -550,7 +551,8 @@ function composeWriterPrompt(input: {
     "",
     input.rangeDesc,
     "",
-    "Do not change task state: §4 comes from the TASK SNAPSHOT above. Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, stop immediately.",
+    // FC-027: an empty closing reply fails the writer, so it closes with one line.
+    "Do not change task state: §4 comes from the TASK SNAPSHOT above. Use the `write` tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, end with one short line such as `Checkpoint updated.` and stop.",
   ].join("\n")
 }
 
@@ -2157,6 +2159,30 @@ export async function lastBoundary(input: { sessionID: SessionID }) {
 
 export async function isWriterRunning(input: { sessionID: SessionID }) {
   return runPromise((svc) => svc.isWriterRunning(input.sessionID))
+}
+
+/**
+ * When this session last started a checkpoint writer that succeeded: the
+ * creation time of that writer's child session (FC-028).
+ */
+export function lastSucceededWriterStart(sessionID: SessionID): number | undefined {
+  const row = Database.use((db) =>
+    db
+      .select({ time: SessionTable.time_created })
+      .from(SessionTable)
+      .innerJoin(ActorRegistryTable, eq(ActorRegistryTable.session_id, SessionTable.id))
+      .where(
+        and(
+          eq(SessionTable.parent_id, sessionID),
+          eq(ActorRegistryTable.agent, "checkpoint-writer"),
+          eq(ActorRegistryTable.last_outcome, "success"),
+        ),
+      )
+      .orderBy(desc(SessionTable.time_created))
+      .limit(1)
+      .get(),
+  )
+  return row?.time
 }
 
 export * as SessionCheckpoint from "./checkpoint"

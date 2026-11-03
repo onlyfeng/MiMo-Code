@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config"
 import { Agent } from "../../src/agent/agent"
@@ -8,11 +8,14 @@ import { SessionPrune, defaultThresholdsFor } from "../../src/session/prune"
 import { Log } from "../../src/util"
 import { Plugin } from "../../src/plugin"
 import { provideTmpdirInstance } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
 import { ProviderTest } from "../fake/provider"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ActorRegistry } from "../../src/actor/registry"
+import { MessageID, PartID, type SessionID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 
 void Log.init({ print: false })
 
@@ -499,23 +502,268 @@ describe("SessionPrune.fireCheckpoints writer failure is not retried in place", 
           // final threshold would let it fire ahead of its own successors.
           yield* svc.resetThresholds(info.id)
 
-          // Post-reset the ladder replays in order: this crossing enqueues for
-          // 20K and 30K, and NOT a third time for the stale gate.
+          // Post-reset the ladder is armed again: this crossing passes 20K and 30K
+          // together and starts one writer for both (FC-028), and none for the
+          // stale gate.
           yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(41_000), promptOps })
           yield* Effect.sleep(150)
-          expect(harness.state.enqueueCount).toBe(4)
+          expect(harness.state.enqueueCount).toBe(3)
 
           // And the replayed final threshold is back to one-shot. A gate that
           // survived the reset would still read 41_000 here — `already` now holds
           // 30K again, so the stale gate would be exactly what admits a re-fire.
           yield* svc.fireCheckpoints({ sessionID: info.id, model, tokens: makeTokensAt(41_000), promptOps })
           yield* Effect.sleep(100)
-          expect(harness.state.enqueueCount).toBe(4)
+          expect(harness.state.enqueueCount).toBe(3)
         }),
         { checkpoint: { thresholds: ["20K", "30K"] } },
       )
     })
   })
+})
+
+// FC-028: `crossed` is process memory, so after a restart every threshold the
+// session had passed looked newly crossed. `testEffect` builds the layer for
+// each case, so each starts with an empty `crossed`, as a restarted process
+// does; the session's history says what the previous process had covered.
+class WriterStarts extends Context.Service<WriterStarts, { count: number }>()("test/prune/WriterStarts") {}
+
+const restartStub = Layer.effect(
+  SessionCheckpoint.Service,
+  Effect.gen(function* () {
+    const starts = yield* WriterStarts
+    return SessionCheckpoint.Service.of({
+      tryStartCheckpointWriter: () =>
+        Effect.sync(() => {
+          starts.count++
+          return "started" as const
+        }),
+      waitForWriter: () => Effect.succeed("no-writer" as const),
+      waitForWriterSettlement: () => Effect.succeed({ outcome: "no-writer" as const }),
+      drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
+      hasCheckpoint: () => Effect.succeed(false),
+      loadLatest: () => Effect.succeed(undefined),
+      loadCheckpoints: () => Effect.succeed([]),
+      renderIndex: () => Effect.succeed(""),
+      renderRebuildContext: () => Effect.succeed({ text: "" }),
+      lastBoundary: () => Effect.succeed(undefined),
+      isWriterRunning: () => Effect.succeed(false),
+      insertRebuildBoundary: () => Effect.succeed(false),
+      coverage: () => Effect.succeed([]),
+    })
+  }),
+)
+
+const restart = testEffect(
+  Layer.mergeAll(
+    SessionNs.defaultLayer,
+    ActorRegistry.defaultLayer,
+    CrossSpawnSpawner.defaultLayer,
+    SessionPrune.layer.pipe(
+      Layer.provide(SessionNs.defaultLayer),
+      Layer.provide(restartStub),
+      Layer.provide(ActorRegistry.defaultLayer),
+      Layer.provideMerge(deps),
+    ),
+  ).pipe(Layer.provideMerge(Layer.sync(WriterStarts, () => ({ count: 0 })))),
+)
+
+describe("SessionPrune.fireCheckpoints after a process restart", () => {
+  const ref = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }
+  // Usable window 60_000 (see the recovery gate block above), maxAllowed 47_000.
+  const model = createModel({ context: 100_000, output: 32_000 })
+  const tokensAt = (n: number) => ({ input: n, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })
+  // The stubbed writer start never reaches the prompt.
+  const promptOps = {} as never
+  const ladder = (thresholds: string[]) => ({
+    config: { compaction: { reserved: 20_000 }, checkpoint: { thresholds } },
+  })
+
+  // Each seed takes the current time and then lets the clock move, so messages
+  // and writer child sessions (stamped by Session.create) keep their order.
+  const tick = Effect.sleep("5 millis")
+
+  const seedAssistant = (sessionID: SessionID, tokens: number) =>
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const created = Date.now()
+      const user = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID,
+        agent: "build",
+        model: ref,
+        time: { created: created - 1 },
+      })
+      yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        sessionID,
+        parentID: user.id,
+        agentID: "main",
+        agent: "build",
+        mode: "build",
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        path: { cwd: "/tmp/example", root: "/tmp/example" },
+        cost: 0,
+        finish: "stop",
+        tokens: { total: tokens, input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created, completed: created },
+      })
+      yield* tick
+    })
+
+  // A writer runs as the `checkpoint-writer` actor of a child session.
+  const startWriter = (parentID: SessionID, outcome?: "success" | "failure") =>
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const registry = yield* ActorRegistry.Service
+      const child = yield* ssn.create({ parentID, title: "checkpoint-writer: example range" })
+      yield* registry.register({
+        sessionID: child.id,
+        actorID: "checkpoint-writer-1",
+        mode: "subagent",
+        agent: "checkpoint-writer",
+        description: "example range",
+        contextMode: "full",
+        background: true,
+        lifecycle: "ephemeral",
+      })
+      if (outcome) yield* registry.updateStatus(child.id, "checkpoint-writer-1", { status: "idle", lastOutcome: outcome })
+      yield* tick
+    })
+
+  const seedRebuild = (sessionID: SessionID) =>
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const user = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: user.id,
+        sessionID,
+        type: "checkpoint",
+        checkpointDir: "",
+        checkpointNumber: 1,
+        coveredUpTo: user.id,
+      })
+      yield* tick
+    })
+
+  const fire = (sessionID: SessionID, tokens: number) =>
+    SessionPrune.Service.use((svc) => svc.fireCheckpoints({ sessionID, model, tokens: tokensAt(tokens), promptOps }))
+
+  restart.live("a threshold a succeeded writer was started for does not fire again", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The previous process started the 30K writer at 35K, and it succeeded.
+          yield* seedAssistant(info.id, 35_000)
+          yield* startWriter(info.id, "success")
+
+          yield* fire(info.id, 36_000)
+          expect(starts.count).toBe(0)
+
+          // The next threshold still fires.
+          yield* fire(info.id, 46_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["30K", "45K"]),
+    ),
+  )
+
+  restart.live("the context reached is read from before the writer started, not after", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The session grew past 45K after the 30K writer started; no writer
+          // was started for 45K before the restart.
+          yield* seedAssistant(info.id, 35_000)
+          yield* startWriter(info.id, "success")
+          yield* seedAssistant(info.id, 46_000)
+
+          yield* fire(info.id, 46_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["30K", "45K"]),
+    ),
+  )
+
+  restart.live("a threshold whose last writer failed or never finished fires again", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // 20K's writer succeeded; the final threshold's failed, and a retry
+          // for it was still running when the process stopped. The recovery
+          // gate that would have retried it is process memory too.
+          yield* seedAssistant(info.id, 21_000)
+          yield* startWriter(info.id, "success")
+          yield* seedAssistant(info.id, 31_000)
+          yield* startWriter(info.id, "failure")
+          yield* seedAssistant(info.id, 41_000)
+          yield* startWriter(info.id)
+
+          yield* fire(info.id, 41_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K"]),
+    ),
+  )
+
+  restart.live("a rebuild after the last writer arms the whole ladder again", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // After the rebuild the ladder measures the new context, as after
+          // resetThresholds in the process that rebuilt.
+          yield* seedAssistant(info.id, 35_000)
+          yield* startWriter(info.id, "success")
+          yield* seedRebuild(info.id)
+
+          yield* fire(info.id, 36_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["30K", "45K"]),
+    ),
+  )
+
+  restart.live("thresholds crossed together start one writer", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // No writer history: 20K and 30K are both due. One writer covers the
+          // range up to now; a second would queue behind it for the same range.
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
+
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K"]),
+    ),
+  )
 })
 
 describe("defaultThresholdsFor (Part 2 density)", () => {

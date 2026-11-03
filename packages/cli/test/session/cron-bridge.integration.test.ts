@@ -540,6 +540,61 @@ lifecycleTest.live("instance disposal interrupts delivery and permits the same d
   }))
 }))
 
+// FC-026: an hourly models catalog reload recycles idle instances. Without a
+// resume, a session-only job then waits for the next prompt, which an idle
+// session relying on that job to wake it never gets.
+lifecycleTest.live("a recycled instance resumes the last mount without a new start", () => Effect.gen(function* () {
+  const { captured, mounts } = yield* LifecycleFixture
+  const bridge = yield* CronBridge
+  const scheduler = yield* Scheduler
+  const inject = yield* captureInject
+  const dir = yield* tmpdirScoped()
+  yield* Effect.addFinalizer(() => Effect.promise(() => Instance.disposeDirectory(dir)))
+  yield* provideInstance(dir)(bridge.start(sid, dir, inject))
+  yield* Effect.promise(() => Instance.disposeDirectory(dir))
+  expect(existsSync(getLockFilePath(dir))).toBe(false)
+
+  yield* provideInstance(dir)(bridge.resume())
+  expect(mounts).toHaveLength(2)
+  expect(mounts[1].sessionID).toBe(sid)
+  expect(existsSync(getLockFilePath(dir))).toBe(true)
+  yield* addDueTask(scheduler, "after recycle")
+  yield* scheduler.tickOnce()
+  yield* waitFor(() => captured.value.length === 1)
+  expect(captured.value[0].sessionID).toBe(sid)
+
+  // Already mounted: a second resume is a no-op.
+  yield* provideInstance(dir)(bridge.resume())
+  expect(mounts).toHaveLength(2)
+}))
+
+lifecycleTest.live("resume does not restart a bridge stopped on purpose or mount another directory", () => Effect.gen(function* () {
+  const { captured, mounts } = yield* LifecycleFixture
+  const bridge = yield* CronBridge
+  const scheduler = yield* Scheduler
+  const inject = yield* captureInject
+  const dir = yield* tmpdirScoped()
+  const otherDir = yield* tmpdirScoped()
+  yield* Effect.addFinalizer(() => Effect.promise(() => Instance.disposeDirectory(dir)))
+  yield* Effect.addFinalizer(() => Effect.promise(() => Instance.disposeDirectory(otherDir)))
+
+  yield* provideInstance(dir)(bridge.start(sid, dir, inject))
+  yield* Effect.promise(() => Instance.disposeDirectory(dir))
+  yield* provideInstance(otherDir)(bridge.resume())
+  expect(mounts).toHaveLength(1)
+
+  yield* provideInstance(dir)(bridge.resume())
+  expect(mounts).toHaveLength(2)
+  yield* bridge.stop()
+  yield* Effect.promise(() => Instance.disposeDirectory(dir))
+  yield* provideInstance(dir)(bridge.resume())
+  expect(mounts).toHaveLength(2)
+  yield* addDueTask(scheduler, "after explicit stop")
+  yield* scheduler.tickOnce()
+  yield* Effect.sleep("30 millis")
+  expect(captured.value).toHaveLength(0)
+}))
+
 lifecycleTest.live("instance disposal waits for an in-flight start and leaves no late scheduler", () => Effect.gen(function* () {
   const fixture = yield* LifecycleFixture
   const bridge = yield* CronBridge

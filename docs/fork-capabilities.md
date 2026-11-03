@@ -137,6 +137,9 @@ not change their implementation. The preceding review is retained in the
 | FC-023 | Model fallback variant: model-less prompts, command fallback model, shell user record                     | Fork fix of upstream variant loss on the model fallback          | Continue the variant only with the fallback model; a named model keeps its default       |
 | FC-024 | Inbox boot reconciliation: outcome of a claim the restart cut off                                        | Fork fix of upstream boot recovery outcome                       | A delivered claim is `interrupted`, an undelivered one `never_ran`                       |
 | FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
+| FC-026 | Cron bridge across instance recycling: remount from instance bootstrap                                    | Fork fix of upstream bridge lifecycle                            | Remount the last mount after a recycle; an explicit stop stays stopped                   |
+| FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
+| FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2420,3 +2423,140 @@ logged`, and the peer `success`/`failure` variants of
     shape for `task` and for `actor` (eight actions, `spawn` first).
 - Retirement condition: Grok fills nested discriminated-union properties, or
   upstream flattens them for every model.
+
+## FC-026 — the cron bridge survives instance recycling
+
+- Status: active
+- Canonical owner: fork `main` cron bridge in
+  `packages/cli/src/session/cron-bridge.ts` (`resume`) and instance bootstrap in
+  `packages/cli/src/project/bootstrap.ts` (`InstanceBootstrap`)
+- Observable contract:
+  - The bridge remembers the last mount this process made: session, workspace
+    root, directory and inject. Disposing the instance stops the bridge but keeps
+    that record; an explicit `stop()` clears it.
+  - `InstanceBootstrap` calls `resume()`. When the new instance has the
+    remembered directory and no bridge is mounted, the bridge mounts again for
+    the remembered session, takes the scheduler lock and fires due jobs without
+    waiting for a prompt. Another directory, a mounted bridge, or a bridge
+    stopped on purpose is left as it is.
+  - The worktree bootstrap runtime has no cron bridge, so bootstrap skips the
+    call there.
+- Motivation: the hourly models catalog reload disposes every instance, and a
+  busy session defers that disposal until it goes idle. The scheduler fires a
+  due job only on an idle tick, so it was stopped at exactly the moment its jobs
+  could fire, and the prompt loop mounted it again only when the next turn had
+  already made the session busy. In recorded runs a coordinator session's bridge
+  stopped at the hourly reload and stayed down until the next prompt, once for
+  an hour and a half, and its 10-minute session-only fallback job did not fire
+  once in the following hours.
+- Upstream relationship: upstream stops the bridge with the instance and mounts
+  it only from the prompt loop. Fork fix of shared code; `dev/compat` inherits
+  it unchanged.
+- Watch surfaces: `start`, `stop`, the instance-owner finalizer and `resume` in
+  `cron-bridge.ts`; `InstanceBootstrap`; the `cronBridge.start` call in
+  `packages/cli/src/session/prompt.ts`; `Instance.provide` callers that pass no
+  `init`.
+- Known gap: an instance created by a caller that passes no `init` skips
+  bootstrap, so the bridge then mounts at the next prompt, as before. Recorded
+  recycles were recreated through bootstrap in all but one case.
+- Tests/evidence: `packages/cli/test/session/cron-bridge.integration.test.ts`
+  "a recycled instance resumes the last mount without a new start" disposes the
+  instance, resumes, and expects a second mount, the lock file and a fired due
+  job; a second resume mounts nothing. "resume does not restart a bridge stopped
+  on purpose or mount another directory" covers the other cases. Dropping the
+  record on instance disposal fails the first; keeping it after `stop()` fails
+  the second.
+- Retirement condition: upstream keeps the scheduler across instance recycling
+  or mounts it on instance creation.
+
+## FC-027 — the checkpoint writer closes with one line
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer prompt in
+  `packages/cli/src/agent/prompt/checkpoint-writer.txt` (Turn 2, constraint 8)
+  and the writer task in `packages/cli/src/session/checkpoint.ts`
+  (`composeWriterPrompt`)
+- Observable contract:
+  - After its edits the writer is told to end with one short line such as
+    `Checkpoint updated.`, without a summary and never with an empty reply. The
+    last instruction of the writer task says the same.
+  - Nothing else about the writer changes: its tools, the edit pass, its budgets
+    and the success rule (the watermark advances only when the run succeeds).
+- Motivation: a final step with no text, no reasoning and no tool call is
+  invalid output. The processor retries it, and for a background system agent
+  the bounded retries (FC-013) then fail the run. The writer prompt said "then
+  stop", "your response is complete. Do not summarize what you wrote" and "stop
+  immediately". Most models still closed with a line; a GPT-family model behind
+  a gateway took it literally. In recorded runs one session's writers on that
+  model failed 16 of 21 times in about 16 hours, all with "empty output", and
+  the failed runs cost $85 of the $108 its writers spent. The inspected failure
+  had already rewritten checkpoint.md when its empty reply failed the run. The
+  watermark stayed at the last success for twelve hours, so every later writer
+  and rebuild covered the same growing range again.
+- Upstream relationship: upstream's prompt and task carry the same three
+  "stop" instructions and the same empty-output handling. Fork fix of shared
+  prompt text; `dev/compat` inherits it unchanged.
+- Watch surfaces: Turn 2 and constraint 8 in `checkpoint-writer.txt`; the last
+  line of `composeWriterPrompt`; the empty-output retry in
+  `packages/cli/src/session/processor.ts` and `classifyAssistantStep` in
+  `packages/cli/src/session/classify.ts`; the system-agent retry bound (FC-013).
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  "writer is told to close with one line, not to end with an empty reply" reads
+  the spawned writer's task and expects the closing-line instructions and none
+  of the old "stop" wording; restoring the old wording fails it. The case pins
+  the instruction, not a model's compliance, which is read from recorded writer
+  outcomes.
+- Retirement condition: upstream asks the writer for a closing line, or the
+  runtime accepts an empty final reply from a writer whose edits applied.
+
+## FC-028 — the checkpoint ladder survives a restart and starts one writer at a time
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`) and
+  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - The first time a process evaluates a session's ladder, every threshold at or
+    below the context size the session had reached when it started its last
+    writer that succeeded counts as crossed. That size is the main lane's newest
+    assistant usage from before the writer's child session was created; the
+    writer is that child session's `checkpoint-writer` actor with outcome
+    `success`. A later writer that failed or never finished does not count, so
+    its threshold fires again after the restart; this also stands in for the
+    final threshold's recovery gate, which does not survive a restart. With no
+    succeeded writer, or with a rebuild or compaction boundary after it, the
+    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild.
+  - When one evaluation finds several thresholds newly crossed, it starts one
+    writer, for the highest, and marks them all crossed. The final-threshold
+    recovery gate is unchanged within a process.
+- Motivation: `crossed` is process memory, so a restarted process treated every
+  threshold a session had passed as new. In recorded restarts three sessions
+  each started a writer at their first turn after the restart for a threshold
+  passed before it (for example 270000 at 609251 tokens), and two sessions also
+  queued a second writer behind the first for the same range. Each writer is a
+  pass over the whole context. The checkpoint watermark cannot stand in for the
+  ladder: `computeBoundary` leaves a tail of 10K–20K tokens after it, so the
+  context at the watermark sits below the threshold that fired.
+- Upstream relationship: upstream keeps `crossed` in memory only and starts a
+  writer per newly crossed threshold. Fork fix of shared code; `dev/compat`
+  inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; the writer child session and its pending-writer slot in
+  `tryStartCheckpointWriter`, and `lastSucceededWriterStart` in
+  `checkpoint.ts`; the writer actor's `last_outcome` in
+  `packages/cli/src/actor/actor.sql.ts`; `isBoundaryUser` in
+  `packages/cli/src/session/tail-digest.ts`.
+- Tests/evidence: `packages/cli/test/session/prune.test.ts`
+  "SessionPrune.fireCheckpoints after a process restart" builds a fresh layer
+  per case: "a threshold a succeeded writer was started for does not fire
+  again", "the context reached is read from before the writer started, not
+  after", "a threshold whose last writer failed or never finished fires again",
+  "a rebuild after the last writer arms the whole ladder again" and "thresholds
+  crossed together start one writer". "resetThresholds drops a pending gate" now
+  expects one writer for the two thresholds its replay crosses together.
+  Seeding nothing, ignoring the rebuild boundary, reading the newest usage
+  instead of the one before the writer, or counting a writer that did not
+  succeed each fails its case; a writer per threshold fails the last case and
+  the reset case.
+- Retirement condition: upstream rebuilds the ladder after a restart and starts
+  one writer per evaluation.
