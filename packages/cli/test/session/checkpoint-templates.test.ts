@@ -41,6 +41,7 @@ describe("Checkpoint templates v8.1", () => {
       rangeDesc: "test range",
       progressDiff: "",
       taskSnapshot: "",
+      currentFiles: "",
     })
     // Every section budget must be substituted into the prompt
     for (const [section, budget] of Object.entries(CHECKPOINT_SECTION_BUDGETS)) {

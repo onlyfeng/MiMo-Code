@@ -31,10 +31,8 @@ MEMORY_PATH structure (4 sections):
 PROCEDURE:
 
 Turn 1 - Read all sources:
-  Read CHECKPOINT_PATH
-  Read MEMORY_PATH
-  Read NOTES_PATH (file may not exist for v8.1-era sessions; treat as empty if so)
-  (also Read any spillover files referenced in either main file's index lines)
+  CHECKPOINT_PATH, MEMORY_PATH and NOTES_PATH: their text is in the CURRENT FILES block above, exact as of this writer's start; do not read them again (an empty NOTES_PATH block is an empty file). When a block says it is cut short, read the rest if you can; otherwise leave the part you cannot see as it is
+  (also Read any spillover files referenced in either main file's index lines, if you can read them)
 
 Turn 2a - Reconcile pass (read sources, decide migrations, then plan Edits):
 
@@ -111,7 +109,7 @@ Turn 2 - Issue Edits (single message), then close with one line (constraint 8):
         🔵 <TID> <summary> (progress: tasks/<TID>/progress.md, last-reconciled-written-at: <written-at from the diff block>)
       - When no SUBAGENT PROGRESS block is present, do not read any tasks/*/progress.md
         on your own — there is nothing new to reconcile.
-  For notes.md: Use `write` to overwrite notes.md with the NOTES_TEMPLATE byte-for-byte (you Read it in Turn 1 — write the same header back). Rationale: every entry in notes.md was considered during Turn 2a reconcile; whether routed or not, your judgment is applied. Agent re-appends fresh entries in subsequent turns. Do NOT use `edit` — use `write` with the full template body. Do not invent template text — use what you Read in Turn 1 verbatim.
+  For notes.md: Use `write` to overwrite notes.md with the NOTES_TEMPLATE byte-for-byte (the NOTES_TEMPLATE block above). Rationale: every entry in notes.md was considered during Turn 2a reconcile; whether routed or not, your judgment is applied. Agent re-appends fresh entries in subsequent turns. Do NOT use `edit` — use `write` with the full template body. Do not invent template text — use the NOTES_TEMPLATE block verbatim.
 
 CRITICAL CONSTRAINTS:
 
