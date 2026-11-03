@@ -1,3 +1,4 @@
+import { existsSync } from "fs"
 import path from "path"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 
@@ -17,12 +18,19 @@ function keys(file: string) {
 }
 
 // A patch names a file under the snapshot worktree, which may be the real path
-// of a directory the tool reached through a symlink.
+// of a directory the tool reached through a symlink. A new file, and any new
+// directories above it, do not exist yet: resolve the nearest existing ancestor.
 function real(file: string) {
+  const missing: string[] = []
+  let current = path.resolve(file)
+  while (!existsSync(current)) {
+    const parent = path.dirname(current)
+    if (parent === current) return path.resolve(file)
+    missing.unshift(path.basename(current))
+    current = parent
+  }
   try {
-    const resolved = AppFileSystem.resolve(file)
-    if (resolved !== path.resolve(file)) return resolved
-    return path.join(AppFileSystem.resolve(path.dirname(file)), path.basename(file))
+    return path.join(AppFileSystem.resolve(current), ...missing)
   } catch {
     return path.resolve(file)
   }

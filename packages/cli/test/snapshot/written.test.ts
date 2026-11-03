@@ -22,7 +22,7 @@ describe("SnapshotWritten", () => {
 
   // Creating symlinks on Windows needs a privilege CI does not have.
   ;(process.platform === "win32" ? test.skip : test)(
-    "a new file written through a symlinked directory matches the patch's real path",
+    "a new file written through a symlinked directory, in new directories too, matches the patch's real path",
     async () => {
       await using tmp = await tmpdir()
       const real = path.join(tmp.path, "real")
@@ -31,8 +31,14 @@ describe("SnapshotWritten", () => {
       await fs.symlink(real, link)
 
       SnapshotWritten.record("msg_written_link", path.join(link, "new.txt"))
-      const files = [posix(path.join(real, "new.txt")), posix(path.join(real, "other.txt"))]
-      expect(SnapshotWritten.take("msg_written_link", files)).toEqual([files[0]])
+      // A directory the write creates as well.
+      SnapshotWritten.record("msg_written_link", path.join(link, "made", "deeper", "new.txt"))
+      const files = [
+        posix(path.join(real, "new.txt")),
+        posix(path.join(real, "made", "deeper", "new.txt")),
+        posix(path.join(real, "other.txt")),
+      ]
+      expect(SnapshotWritten.take("msg_written_link", files)).toEqual([files[0], files[1]])
     },
   )
 })

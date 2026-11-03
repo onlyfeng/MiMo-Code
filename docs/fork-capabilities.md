@@ -2895,7 +2895,9 @@ logged`, and the peer `success`/`failure` variants of
   the files another process writes in the worktree" covers an undo, a further
   undo and a redo with another writer between each;
   `packages/cli/test/snapshot/written.test.ts` covers per-message records that
-  a patch claims once and a write through a symlinked directory;
+  a patch claims once and a new file written through a symlinked directory,
+  including directories the write creates (recorded under the real path of
+  the nearest existing ancestor);
   `packages/cli/test/cli/export-import.test.ts` "sanitizes real tool errors,
   session prompts and assistant error/result payloads" covers the redaction.
   Dropping the record call, the `written` field, the filter in revert, the
