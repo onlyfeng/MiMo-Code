@@ -304,11 +304,11 @@ does not substitute for C13's final branch-tip validation.
 
 ## 2026-11-04 DC-SESSION-001 durable cron delivery to another session
 
-Follow-up to PR #209, no inherited change and no owner added or retired. A durable task fires in whichever process holds `.cron-lock`, but it belongs to the session that created it. The bridge prompted that session in its own process, so when another live process owned it `preparePrompt` refused with `OwnedElsewhereError` and the fire was lost; the fire also waited for the lock holder's own session to go idle. Such a fire is now written to the target session's inbox (`type: "cron"`, receiver `main`, `adoptReceiver: false`): it runs in the process that has the session open, or waits until one opens it. It reads as the in-process fire does and carries the cron origin. Its idempotency key names the task and the slot the scheduler fired (`onFire`'s new `due`), which every process computes alike for a fire not yet recorded, so a slot fired twice is delivered once. The lock holder's turn no longer holds these fires back (`StartOpts.firesElsewhere`); its own session's tasks still wait for it. The bridge session's own fires keep the in-process path.
+Follow-up to PR #209, no inherited change and no owner added or retired. A durable task fires in whichever process holds `.cron-lock`, but it belongs to the session that created it. The bridge prompted that session in its own process, so when another live process owned it `preparePrompt` refused with `OwnedElsewhereError` and the fire was lost; the fire also waited for the lock holder's own session to go idle. Such a fire is now written to the target session's inbox (`type: "cron"`, receiver `main`, `adoptReceiver: false`): it runs in the process that has the session open, or waits until one opens it. It reads as the in-process fire does and carries the cron origin. Its idempotency key names the task and the slot the scheduler fired (`onFire`'s new `due`), which every process computes alike for a fire not yet recorded, so a slot fired twice is delivered once. The lock holder's turn no longer holds these fires back (`StartOpts.firesElsewhere`); its own session's tasks still wait for it. A durable task of the lock holder's own session also goes through the inbox with the same key (Codex review: a fire delivered by one process and refired in-process by the next lock holder would otherwise run twice); only session-only tasks keep the in-process path.
 
 Evidence (runtime/tests on `fix/compat-cron-inbox-delivery`, pinned Bun 1.3.14, ambient `MIMOCODE_EXPERIMENTAL`, `MIMOCODE_MCP_TOOL_SEARCH` and `MIMOCODE_CODEX_MODE` unset):
-- `test/session/cron-inbox-delivery.test.ts`: with the lock holder's session busy, a durable task created by another session lands as one accepted `cron` row for that session's `main` lane, keyed `cron:<task>:<slot>`, with the fire text and cron origin, nothing injected or kicked here; firing the slot again after a restart leaves one row. `test/cron/scheduler.test.ts`: a busy session fires another session's due task and holds its own until idle; a restarted scheduler gives an unrecorded fire the same slot. `test/inbox/render.test.ts`: a `cron` row renders without the `<inbox>` wrapper. In `test/session/cron-bridge.integration.test.ts` the restart case now expects its fire, aimed at the creating session after the bridge remounted for another, in that session's inbox.
-- Each of these fails a case: rendering a `cron` row as text, dropping the key or the part metadata in `Inbox.accept`, prompting the other session in-process, keying by fire time, not passing `firesElsewhere`, adopting the receiver, returning early or holding every task while busy, and passing the fire time as the slot.
+- `test/session/cron-inbox-delivery.test.ts`: with the lock holder's session busy, a durable task created by another session lands as one accepted `cron` row for that session's `main` lane, keyed `cron:<task>:<slot>`, with the fire text and cron origin, nothing injected or kicked here; firing the slot again after a restart leaves one row. A durable task of the lock holder's own session lands the same way, runs here, and also stays one row when refired. `test/cron/scheduler.test.ts`: a busy session fires another session's due task and holds its own until idle; a restarted scheduler gives an unrecorded fire the same slot. `test/inbox/render.test.ts`: a `cron` row renders without the `<inbox>` wrapper. In `test/session/cron-bridge.integration.test.ts` the restart case now expects its fire, aimed at the creating session after the bridge remounted for another, in that session's inbox.
+- Each of these fails a case: rendering a `cron` row as text, dropping the key or the part metadata in `Inbox.accept`, prompting the other session in-process, keying by fire time, not passing `firesElsewhere`, adopting the receiver, returning early or holding every task while busy, and passing the fire time as the slot, firing an own-session durable task in-process, and getting either adoption rule wrong.
 
 ## 2026-11-03 DC-SESSION-001 cron bridge remount (FC-026)
 
@@ -2816,20 +2816,22 @@ files remain byte-identical to the accepted main correction.
     `receiver_not_open` with a hint naming `mimo -s <id>`. Same-session sends
     and internal flows (child notifications, prompts, workflows) keep
     adopting.
-  - Durable cron: a fire whose task belongs to another session than the
-    bridge's (`createdBySessionId`) is written to that session's inbox
-    (`type: "cron"`, receiver `main`, `adoptReceiver: false`), not prompted
-    here. It renders as the in-process fire (`[cron fire @ …] <prompt>`, no
-    `<inbox>` wrapper) and its part carries the cron origin, so the receiver's
-    TUI shows the cron badge. The key `cron:<task id>:<slot>` uses the due time
-    the scheduler fired (`StartOpts.onFire`'s `due`), the same in every process
-    for a fire not yet recorded, so a slot fired twice is delivered once. These
-    fires are not held back by the bridge session's turn
-    (`StartOpts.firesElsewhere`); the bridge session's own fires stay in-process
-    and wait for it to be idle. A fire is still marked done when handed over: a
-    failed accept (for example a deleted session) is logged as `scheduled fire
-    failed`, and that one-shot is gone or the recurring task waits for its next
-    slot.
+  - Durable cron: every fire of a durable task (a task from
+    `.mimocode/scheduled_tasks.json`, which any lock holder may fire) is
+    written to its session's inbox (`type: "cron"`, receiver `main`), not
+    prompted here; a task of another session than the bridge's
+    (`createdBySessionId`) never adopts the receiver, one of the bridge's own
+    session may. It renders as the in-process fire (`[cron fire @ …] <prompt>`,
+    no `<inbox>` wrapper) and its part carries the cron origin, so the TUI shows
+    the cron badge. The key `cron:<task id>:<slot>` uses the due time the
+    scheduler fired (`StartOpts.onFire`'s `due`), the same in every process for
+    a fire not yet recorded, so a slot fired twice is delivered once whichever
+    process fires it. Fires for another session are not held back by the bridge
+    session's turn (`StartOpts.firesElsewhere`); the bridge session's own tasks
+    wait for it to be idle, and its session-only tasks keep the in-process
+    path. A fire is still marked done when handed over: a failed accept (for
+    example a deleted session) is logged as `scheduled fire failed`, and that
+    one-shot is gone or the recurring task waits for its next slot.
   - A TUI started with `-s <id>` without `--fork` claims that session through
     the worker `claimSession` RPC (`ExecutionOwnership.claimOpened`), so queued
     input starts without a keystroke, but only when the window's directory and

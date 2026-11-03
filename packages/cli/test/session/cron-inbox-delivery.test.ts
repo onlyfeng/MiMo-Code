@@ -39,7 +39,7 @@ afterEach(async () => {
 const rowsFor = (sessionID: SessionID) =>
   Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, sessionID)).all())
 
-describe("durable cron delivery to another session (DC-SESSION-001)", () => {
+describe("durable cron delivery through the inbox (DC-SESSION-001)", () => {
   it.live(
     "a durable task for another session reaches its inbox once per slot, while this session is busy",
     provideTmpdirInstance((dir) =>
@@ -99,6 +99,55 @@ describe("durable cron delivery to another session (DC-SESSION-001)", () => {
         yield* scheduler.tickOnce()
         yield* Effect.sleep(200)
         expect(rowsFor(there.id)).toHaveLength(1)
+        yield* bridge.stop()
+      }),
+    ),
+    30_000,
+  )
+
+  it.live(
+    "a durable task of the lock holder's own session also goes through its inbox, once per slot, and runs here",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const bridge = yield* CronBridge
+        const scheduler = yield* Scheduler
+        const here = yield* sessions.create({ title: "holds the cron lock and created the task" })
+
+        const kicks: string[] = []
+        const previous = schedulerRef.current
+        schedulerRef.current = { kick: (lane) => Effect.sync(() => void kicks.push(lane.sessionID)) }
+        yield* Effect.addFinalizer(() => Effect.sync(() => void (schedulerRef.current = previous)))
+
+        const task: CronTask = {
+          id: "own1",
+          cron: "* * * * *",
+          prompt: "check my lanes",
+          createdAt: Date.now() - 5 * 60_000,
+          recurring: true,
+          durable: true,
+          createdBySessionId: here.id,
+        }
+        yield* writeCronTasks([task], dir)
+        const injected: InjectScheduledPromptInput[] = []
+        const inject = (input: InjectScheduledPromptInput) => Effect.sync(() => void injected.push(input))
+
+        yield* bridge.start(here.id, dir, inject)
+        yield* scheduler.tickOnce()
+        for (let waited = 0; rowsFor(here.id).length === 0 && waited < 2_000; waited += 20) yield* Effect.sleep(20)
+        expect(rowsFor(here.id)).toEqual([expect.objectContaining({ type: "cron", idempotency_key: expect.stringMatching(/^cron:own1:\d+$/) })])
+        expect(injected).toEqual([])
+        expect(kicks).toContain(here.id)
+
+        // Another process fired the slot and stopped before recording it: this
+        // process fires it again and it is still delivered once.
+        yield* bridge.stop()
+        yield* writeCronTasks([task], dir)
+        yield* bridge.start(here.id, dir, inject)
+        yield* scheduler.tickOnce()
+        yield* Effect.sleep(200)
+        expect(rowsFor(here.id)).toHaveLength(1)
+        expect(injected).toEqual([])
         yield* bridge.stop()
       }),
     ),

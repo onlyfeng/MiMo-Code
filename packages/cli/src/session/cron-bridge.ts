@@ -298,16 +298,19 @@ export const layer = Layer.effect(
                 }
                 // DC-SESSION-001: another session runs only in the process that
                 // has it open. Its inbox delivers the fire there, or holds it
-                // until the session is opened. Keyed by the slot, so a second fire
-                // of it (after a lock takeover, or a restart before the fire was
-                // recorded) is delivered once.
-                if (targetSessionID !== sessionID) {
+                // until the session is opened. A durable task can be fired by
+                // whichever process holds the lock, so all its fires go through
+                // the inbox keyed by the slot: a second fire of a slot (after a
+                // lock takeover, or a restart before the fire was recorded) is
+                // delivered once, whichever process fires it.
+                const elsewhere = targetSessionID !== sessionID
+                if (elsewhere || task.durable !== false) {
                   yield* deliverToInbox({
                     receiverSessionID: targetSessionID,
                     receiverActorID: "main",
                     content: value,
                     type: "cron",
-                    adoptReceiver: false,
+                    adoptReceiver: !elsewhere,
                     idempotencyKey: `cron:${task.id}:${Math.round(due)}`,
                     metadata: { origin, priority: "later" },
                   })
