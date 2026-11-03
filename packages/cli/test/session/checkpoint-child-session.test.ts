@@ -239,6 +239,33 @@ describe("checkpoint writer child-session isolation", () => {
     ),
   )
 
+  // FC-027: the runtime retries an empty final reply as invalid output and then
+  // fails the run, which leaves the watermark where it was. A model that obeys
+  // "stop" to the letter ended every such writer that way, after its edits.
+  it.live(
+    "writer is told to close with one line, not to end with an empty reply",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const { info } = yield* seedParentSession()
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task).toContain("end your response with one short line")
+        expect(task).toContain("do not end with an empty reply")
+        expect(task).toContain("end with one short line such as `Checkpoint updated.` and stop.")
+        expect(task).not.toContain("stop immediately")
+        expect(task).not.toContain("your response is complete")
+      }),
+    ),
+  )
+
   it.live(
     "T2: writer spawn does not pollute parent's message table",
     provideTmpdirInstance(() =>
