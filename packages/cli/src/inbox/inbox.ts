@@ -88,6 +88,10 @@ export interface AgentInput {
   legacyInboxID?: string
   /** See AcceptInput.adoptReceiver. */
   adoptReceiver?: boolean
+  /** A second accept with the same key for the same receiver returns the first row. */
+  idempotencyKey?: string
+  /** Metadata for the input's text part, e.g. a cron fire's origin. */
+  metadata?: Record<string, unknown>
 }
 
 export interface Interface {
@@ -157,12 +161,14 @@ export const layer = Layer.effect(
           type: "text",
           synthetic: true,
           text,
+          ...(input.metadata ? { metadata: input.metadata } : {}),
         }],
         type,
         legacyInboxID: input.legacyInboxID,
         senderSessionID: input.senderSessionID,
         senderActorID: input.senderActorID,
         adoptReceiver: input.adoptReceiver,
+        idempotencyKey: input.idempotencyKey,
       }, guard).pipe(
         Effect.provideService(InstanceRef, receiverInstance),
         Effect.provideService(WorkspaceRef, workspace),
