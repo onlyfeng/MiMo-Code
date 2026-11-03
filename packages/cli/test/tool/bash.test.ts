@@ -1637,6 +1637,36 @@ describe("tool.bash abort", () => {
         expect(result.output).toContain("started")
         expect(result.output).toContain("bash tool terminated command after exceeding timeout")
         expect(result.output).toContain("retry with a larger timeout value in milliseconds")
+        expect(result.output).not.toContain("ran over ssh")
+      },
+    })
+  }, 15_000)
+
+  // FC-032: killing the local ssh client leaves what it started on the remote
+  // host running, so the timeout note says so instead of advising a longer retry.
+  test.skipIf(process.platform === "win32").each([
+    "./bin/ssh example-host run-job",
+    "env MODE=batch ./bin/ssh example-host run-job",
+  ])("a timed-out ssh command is reported as possibly still running remotely: %s", async (command) => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "bin"))
+        await Bun.write(path.join(dir, "bin", "ssh"), "#!/bin/sh\necho connected\nsleep 60\n")
+        await fs.chmod(path.join(dir, "bin", "ssh"), 0o755)
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await initBash()
+        const result = await Effect.runPromise(
+          bash.execute({ command, description: "Remote timeout test", timeout: 500 }, ctx),
+        )
+        expect(result.output).toContain("connected")
+        expect(result.output).toContain("bash tool terminated command after exceeding timeout 500 ms")
+        expect(result.output).toContain("ran over ssh")
+        expect(result.output).not.toContain("retry with a larger timeout")
       },
     })
   }, 15_000)
