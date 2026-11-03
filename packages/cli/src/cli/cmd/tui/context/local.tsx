@@ -176,6 +176,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         pending: false,
       }
 
+      // FC-030: the variant a resumed session ran at stays in memory, like the
+      // resumed model. model.json holds the saved choice every TUI process shares.
+      const [resumed, setResumed] = createSignal<{ key: string; value: string }>()
+
       function save() {
         if (!modelStore.ready) {
           state.pending = true
@@ -354,6 +358,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             const m = currentModel()
             if (!m) return undefined
             const key = `${m.providerID}/${m.modelID}`
+            const r = resumed()
+            if (r?.key === key) return r.value
             return modelStore.variant[key]
           },
           current() {
@@ -374,8 +380,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             const m = currentModel()
             if (!m) return
             const key = `${m.providerID}/${m.modelID}`
+            if (resumed()?.key === key) setResumed(undefined)
             setModelStore("variant", key, value ?? "default")
             save()
+          },
+          // Shows the variant a resumed session's message ran at, while its model
+          // is the current one, without saving it. A message without one is no
+          // choice, so the saved choice shows instead.
+          resume(model: { providerID: string; modelID: string; variant?: string }) {
+            setResumed(model.variant ? { key: `${model.providerID}/${model.modelID}`, value: model.variant } : undefined)
           },
           cycle() {
             const variants = this.list()
