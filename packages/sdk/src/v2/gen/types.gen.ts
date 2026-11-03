@@ -1475,6 +1475,7 @@ export type PatchPart = {
   type: "patch"
   hash: string
   files: Array<string>
+  written?: Array<string>
 }
 
 export type AgentPart = {
@@ -1626,6 +1627,7 @@ export type Session = {
     partID?: string
     snapshot?: string
     diff?: string
+    files?: Array<string>
   }
 }
 
@@ -1845,6 +1847,7 @@ export type SyncEventSessionUpdated = {
         partID?: string
         snapshot?: string
         diff?: string
+        files?: Array<string>
       } | null
     }
   }
@@ -3361,6 +3364,7 @@ export type GlobalSession = {
     partID?: string
     snapshot?: string
     diff?: string
+    files?: Array<string>
   }
   project: ProjectSummary | null
 }

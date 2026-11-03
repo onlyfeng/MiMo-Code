@@ -749,4 +749,66 @@ describe("revert + compact workflow", () => {
       { git: true },
     ),
   )
+
+  it.live(
+    "undo and redo leave alone the files another process writes in the worktree",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          const revert = yield* SessionRevert.Service
+          const snapshot = yield* Snapshot.Service
+          const mine = path.join(dir, "mine.txt")
+          const other = path.join(dir, "other.txt")
+
+          yield* write(mine, "m0")
+          yield* write(other, "o0")
+
+          const info = yield* session.create({})
+          const sid = info.id
+
+          // The session's tools write mine.txt; another process writes other.txt
+          // during the same step, so the patch lists both and `written` only mine.
+          const turn = Effect.fn("test.turnShared")(function* (next: { mine: string; other?: string }) {
+            const u = yield* user(sid)
+            yield* text(sid, u.id, next.mine)
+            const a = yield* assistant(sid, u.id, dir)
+            const before = yield* snapshot.track()
+            if (!before) throw new Error("expected snapshot")
+            yield* write(mine, next.mine)
+            if (next.other) yield* write(other, next.other)
+            const patch = yield* snapshot.patch(before)
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID: a.id,
+              sessionID: sid,
+              type: "patch",
+              hash: patch.hash,
+              files: patch.files,
+              written: patch.files.filter((file) => path.basename(file) === "mine.txt"),
+            })
+            return u.id
+          })
+
+          const first = yield* turn({ mine: "m1", other: "o1" })
+          const second = yield* turn({ mine: "m2" })
+
+          yield* revert.revert({ sessionID: sid, messageID: second })
+          expect(yield* read(mine)).toBe("m1")
+          expect(yield* read(other)).toBe("o1")
+
+          // Undoing further back first puts back what the earlier undo changed.
+          yield* write(other, "o2")
+          yield* revert.revert({ sessionID: sid, messageID: first })
+          expect(yield* read(mine)).toBe("m0")
+          expect(yield* read(other)).toBe("o2")
+
+          yield* write(other, "o3")
+          yield* revert.unrevert({ sessionID: sid })
+          expect(yield* read(mine)).toBe("m2")
+          expect(yield* read(other)).toBe("o3")
+        }),
+      { git: true },
+    ),
+  )
 })

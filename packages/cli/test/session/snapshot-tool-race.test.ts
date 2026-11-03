@@ -188,6 +188,7 @@ function makeHttp() {
   return Layer.mergeAll(
     TestLLMServer.layer,
     SessionSummary.defaultLayer,
+    SessionRevert.defaultLayer,
     SessionPrompt.layer.pipe(
     Layer.provide(CronBridgeDefaultLayer),
     Layer.provide(Goal.defaultLayer),
@@ -302,6 +303,71 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
         yield* Effect.sleep("100 millis")
       }
       expect(diff.length).toBeGreaterThan(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+  120_000,
+)
+
+it.live("undo reverts the files the turn's write tools wrote and keeps the rest", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const revert = yield* SessionRevert.Service
+
+      const session = yield* sessions.create({
+        title: "written files",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      const mine = path.join(dir, "mine.txt")
+      const other = path.join(dir, "other.txt")
+      // The write tool creates mine.txt; then bash, which names no files,
+      // creates other.txt the way another process sharing the worktree would.
+      yield* llm.tool("write", { file_path: mine, content: "mine\n" })
+      yield* llm.tool("bash", { command: `echo other > ${other}`, description: "create the other file" })
+      yield* llm.text("done")
+
+      const user = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "create the files" }],
+      })
+      yield* prompt.loop({ sessionID: session.id })
+
+      const patches = (yield* MessageV2.filterCompactedEffect(session.id))
+        .flatMap((m) => m.parts)
+        .filter((p): p is MessageV2.PatchPart => p.type === "patch")
+      expect(
+        patches.map((p) => ({
+          files: p.files.map((file) => path.basename(file)),
+          written: p.written?.map((file) => path.basename(file)),
+        })),
+      ).toEqual([
+        { files: ["mine.txt"], written: ["mine.txt"] },
+        { files: ["other.txt"], written: [] },
+      ])
+
+      const read = (file: string) => Effect.promise(() => fs.readFile(file, "utf-8"))
+      const exists = (file: string) =>
+        Effect.promise(() =>
+          fs
+            .access(file)
+            .then(() => true)
+            .catch(() => false),
+        )
+
+      yield* revert.revert({ sessionID: session.id, messageID: user.info.id })
+      expect(yield* exists(mine)).toBe(false)
+      expect((yield* read(other)).trim()).toBe("other")
+
+      // The other writer carries on while the turn is undone; redo leaves its file alone.
+      yield* Effect.promise(() => fs.writeFile(other, "other, later"))
+      yield* revert.unrevert({ sessionID: session.id })
+      expect(yield* read(mine)).toBe("mine\n")
+      expect(yield* read(other)).toBe("other, later")
     }),
     { git: true, config: providerCfg },
   ),

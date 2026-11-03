@@ -38,6 +38,15 @@ export const layer = Layer.effect(
     const summary = yield* SessionSummary.Service
     const state = yield* SessionRunState.Service
 
+    // FC-035: put back only the files a revert changed, so edits other processes
+    // made since then in a shared worktree survive. A revert recorded before
+    // `files` existed restores the whole snapshot.
+    const restore = Effect.fnUntraced(function* (revert: NonNullable<Session.Info["revert"]>) {
+      if (!revert.snapshot) return
+      if (revert.files) return yield* snap.revert([{ hash: revert.snapshot, files: revert.files }])
+      yield* snap.restore(revert.snapshot)
+    })
+
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
       const all = yield* sessions.messages({ sessionID: input.sessionID, agentID: "*" })
@@ -51,7 +60,9 @@ export const layer = Layer.effect(
         const remaining = []
         for (const part of msg.parts) {
           if (rev) {
-            if (part.type === "patch") patches.push(part)
+            // FC-035: a patch lists every file that changed during its step; revert
+            // the ones this session's write tools wrote. Older patches did not record them.
+            if (part.type === "patch") patches.push({ hash: part.hash, files: part.written ?? part.files })
             continue
           }
 
@@ -71,8 +82,9 @@ export const layer = Layer.effect(
       if (!rev) return session
 
       rev.snapshot = session.revert?.snapshot ?? (yield* snap.track())
-      if (session.revert?.snapshot) yield* snap.restore(session.revert.snapshot)
+      if (session.revert) yield* restore(session.revert)
       yield* snap.revert(patches)
+      rev.files = [...new Set(patches.flatMap((patch) => patch.files))]
       if (rev.snapshot) rev.diff = yield* snap.diff(rev.snapshot as string)
       const rangeStart = all.findIndex((msg) => msg.info.id === rev!.messageID)
       const range = rangeStart < 0 ? [] : all.slice(rangeStart)
@@ -96,7 +108,7 @@ export const layer = Layer.effect(
       yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID)
       if (!session.revert) return session
-      if (session.revert.snapshot) yield* snap.restore(session.revert!.snapshot!)
+      yield* restore(session.revert)
       yield* sessions.clearRevert(input.sessionID)
       return yield* sessions.get(input.sessionID)
     })
