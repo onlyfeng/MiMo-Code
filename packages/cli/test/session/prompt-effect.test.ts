@@ -5549,6 +5549,61 @@ it.live(
   30_000,
 )
 
+// DC-CONTEXT-001: the 400 KiB history alone estimates above the 108K trigger,
+// while the provider counted the step after it well under it.
+for (const counted of ["under", "near"] as const) {
+  it.live(
+    `request preflight measures the request from the previous step's provider count (${counted} the trigger)`,
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ llm }) {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({ title: "Measured preflight" })
+          const history = yield* seed(chat.id, { finish: "stop" })
+          const historyMessage = (yield* sessions.messages({ sessionID: chat.id })).find(
+            (message) => message.info.id === history.user.id,
+          )
+          const historyText = historyMessage?.parts.find((part): part is MessageV2.TextPart => part.type === "text")
+          if (!historyText) throw new Error("missing seeded history text")
+          yield* sessions.updatePart({ ...historyText, text: "old history " + "x".repeat(400 * 1024) })
+          // Near the trigger, what the active turn adds after the counted step
+          // carries the request over it.
+          yield* sessions.updateMessage({
+            ...history.assistant,
+            tokens: {
+              input: counted === "under" ? 20_000 : 90_000,
+              output: 500,
+              reasoning: 0,
+              cache: { read: 10_000, write: 0 },
+            },
+          })
+          yield* user(chat.id, "ACTIVE_TURN_MUST_SURVIVE " + "y".repeat(counted === "under" ? 1_000 : 40 * 1024))
+          if (counted === "near") yield* llm.text("overflow summary")
+          yield* llm.text("final answer")
+
+          const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("20 seconds"))
+          expect(result.parts.some((part) => part.type === "text" && part.text === "final answer")).toBe(true)
+
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const compactions = messages.flatMap((message) => message.parts).filter((part) => part.type === "compaction")
+          const inputs = yield* llm.inputs
+          if (counted === "under") {
+            expect(compactions).toEqual([])
+            expect(inputs).toHaveLength(1)
+            expect(JSON.stringify(inputs[0].messages)).toContain("old history")
+            return
+          }
+          expect(compactions).toHaveLength(1)
+          expect(inputs).toHaveLength(2)
+          expect(JSON.stringify(inputs[1].messages)).toContain("ACTIVE_TURN_MUST_SURVIVE")
+        }),
+        { git: true, config: recoverableOverflowCfg },
+      ),
+    30_000,
+  )
+}
+
 it.live(
   "an oversized external request arriving during compaction stays in the recovery floor",
   () =>

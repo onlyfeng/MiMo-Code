@@ -5,8 +5,12 @@ import {
   estimateRequestTokens,
   isOverflow,
   isRequestOverflow,
+  measuredRequest,
   usable,
 } from "../../src/session/overflow"
+import type { MessageV2 } from "../../src/session/message-v2"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { LLM } from "../../src/session/llm"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
@@ -853,6 +857,163 @@ describe("request preflight overflow recovery floor", () => {
     })
 
     expect(result.type).toBe("overflow-static")
+  })
+})
+
+// The whole-request estimate runs well above what providers count, so preflight
+// clears a request whose size, measured from the lane's last provider count plus
+// an estimate of what came after it, stays under the trigger (DC-CONTEXT-001).
+describe("request preflight measured from provider usage", () => {
+  // The dedicated 8K input window has a 7.2K compaction threshold.
+  const model = createModel({ context: 12_000, input: 8_000, output: 4_000 })
+  const cfg = mockCfg({ reserved: 0 })
+  const sessionID = SessionID.make("ses_measured")
+  const providerID = ProviderID.make("test")
+  const history = "h".repeat(30_000)
+
+  const textPart = (messageID: MessageID, text: string): MessageV2.TextPart => ({
+    id: PartID.ascending(),
+    sessionID,
+    messageID,
+    type: "text",
+    text,
+  })
+
+  function userMessage(text: string): MessageV2.WithParts {
+    const id = MessageID.ascending()
+    return {
+      info: { id, sessionID, role: "user", time: { created: 1 }, agent: "build", model: { providerID, modelID: ModelID.make("test-model") } },
+      parts: [textPart(id, text)],
+    }
+  }
+
+  function boundary(kind: "compaction" | "checkpoint"): MessageV2.WithParts {
+    const message = userMessage("boundary")
+    const base = { id: PartID.ascending(), sessionID, messageID: message.info.id }
+    const part: MessageV2.Part =
+      kind === "compaction"
+        ? { ...base, type: "compaction", auto: true }
+        : { ...base, type: "checkpoint", checkpointDir: "/tmp/example", checkpointNumber: 1, coveredUpTo: MessageID.ascending() }
+    return { info: message.info, parts: [part] }
+  }
+
+  function assistantMessage(input: {
+    input?: number
+    cacheRead?: number
+    cacheWrite?: number
+    output?: number
+    text?: string
+    summary?: boolean
+    modelID?: string
+  }): MessageV2.WithParts {
+    const id = MessageID.ascending()
+    return {
+      info: {
+        id,
+        sessionID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        modelID: ModelID.make(input.modelID ?? "test-model"),
+        providerID,
+        mode: "build",
+        agent: "build",
+        path: { cwd: "/tmp/example", root: "/tmp/example" },
+        cost: 0,
+        tokens: {
+          input: input.input ?? 0,
+          output: input.output ?? 0,
+          reasoning: 0,
+          cache: { read: input.cacheRead ?? 0, write: input.cacheWrite ?? 0 },
+        },
+        time: { created: 2, completed: 3 },
+        ...(input.summary ? { summary: true } : {}),
+      },
+      parts: [textPart(id, input.text ?? "done")],
+    }
+  }
+
+  function classify(messages: MessageV2.WithParts[], current: string) {
+    const measured = measuredRequest(messages, model)
+    return classifyRequestOverflow({
+      cfg,
+      model,
+      prebuiltSystem: ["ok"],
+      messages: [textMessage(history), textMessage(current)],
+      recoveryFloorMessages: [textMessage(current)],
+      ...(measured ? { measured: { inputTokens: measured.inputTokens, added: measured.tail.map((m) => m.parts) } } : {}),
+    })
+  }
+
+  test("a request the provider counted under the trigger is sent despite a larger estimate", () => {
+    const result = classify([userMessage(history), assistantMessage({ input: 2_000, cacheRead: 1_000 }), userMessage("next")], "next")
+    expect(result.type).toBe("ok")
+    if (result.type !== "ok") return
+    expect(result.measured?.requestTokens).toBeGreaterThan(7_200)
+    expect(result.measured?.measuredTokens).toBeGreaterThan(3_000)
+    expect(result.measured?.measuredTokens).toBeLessThan(7_200)
+  })
+
+  test("what came after the counted step is estimated on top of its count", () => {
+    const later = "y".repeat(6_000)
+    const result = classify([userMessage(history), assistantMessage({ input: 6_000 }), userMessage(later)], later)
+    expect(result.type).toBe("overflow")
+    if (result.type !== "overflow") return
+    expect(result.measuredTokens).toBeGreaterThanOrEqual(8_000)
+  })
+
+  test("the count is the step's uncached and cached input, not its output", () => {
+    const measured = measuredRequest(
+      [userMessage(history), assistantMessage({ input: 1_000, cacheRead: 2_000, cacheWrite: 500, output: 50_000 })],
+      model,
+    )
+    expect(measured?.inputTokens).toBe(3_500)
+  })
+
+  test("steps without a count are part of what came after the counted one", () => {
+    const counted = assistantMessage({ input: 2_000 })
+    const uncounted = assistantMessage({ text: "z".repeat(3_000) })
+    const next = userMessage("next")
+    const measured = measuredRequest([userMessage(history), counted, uncounted, next], model)
+    expect(measured?.inputTokens).toBe(2_000)
+    expect(measured?.tail.map((message) => message.info.id)).toEqual([counted.info.id, uncounted.info.id, next.info.id])
+  })
+
+  test.each(["compaction", "checkpoint"] as const)("a count from before a %s boundary does not size the request", (kind) => {
+    expect(
+      measuredRequest([userMessage(history), assistantMessage({ input: 1_000 }), boundary(kind), userMessage("next")], model),
+    ).toBeUndefined()
+  })
+
+  test("a compaction summary's count does not size the request", () => {
+    expect(
+      measuredRequest([userMessage(history), assistantMessage({ input: 1_000, summary: true }), userMessage("next")], model),
+    ).toBeUndefined()
+  })
+
+  test("a count from another model does not size the request", () => {
+    expect(
+      measuredRequest(
+        [userMessage(history), assistantMessage({ input: 1_000, modelID: "other-model" }), userMessage("next")],
+        model,
+      ),
+    ).toBeUndefined()
+  })
+
+  test("without a counted step the estimate decides", () => {
+    expect(classify([userMessage(history), userMessage("next")], "next").type).toBe("overflow")
+  })
+
+  test("a request the estimate fits is not measured", () => {
+    expect(
+      classifyRequestOverflow({
+        cfg,
+        model,
+        prebuiltSystem: ["ok"],
+        messages: [textMessage("next")],
+        recoveryFloorMessages: [textMessage("next")],
+        measured: { inputTokens: 1_000_000, added: [] },
+      }),
+    ).toEqual({ type: "ok" })
   })
 })
 
