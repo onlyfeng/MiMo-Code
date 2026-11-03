@@ -549,6 +549,7 @@ const restartStub = Layer.effect(
       lastBoundary: () => Effect.succeed(undefined),
       isWriterRunning: () => Effect.succeed(false),
       insertRebuildBoundary: () => Effect.succeed(false),
+      coverage: () => Effect.succeed([]),
     })
   }),
 )
