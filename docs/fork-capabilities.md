@@ -139,6 +139,7 @@ not change their implementation. The preceding review is retained in the
 | FC-025 | Grok tool schemas: discriminated-union `operation` envelopes (cron, task, actor)                          | Fork model-specific schema adaptation                            | Flatten the envelope for Grok only; zod parses the original union                        |
 | FC-026 | Cron bridge across instance recycling: remount from instance bootstrap                                    | Fork fix of upstream bridge lifecycle                            | Remount the last mount after a recycle; an explicit stop stays stopped                   |
 | FC-027 | Checkpoint writer closing reply: prompt Turn 2, constraint 8 and the writer task                          | Fork fix of upstream writer prompt                               | Close with one short line; never end with an empty reply                                 |
+| FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2507,3 +2508,55 @@ logged`, and the peer `success`/`failure` variants of
   outcomes.
 - Retirement condition: upstream asks the writer for a closing line, or the
   runtime accepts an empty final reply from a writer whose edits applied.
+
+## FC-028 — the checkpoint ladder survives a restart and starts one writer at a time
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`) and
+  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - The first time a process evaluates a session's ladder, every threshold at or
+    below the context size the session had reached when it started its last
+    writer that succeeded counts as crossed. That size is the main lane's newest
+    assistant usage from before the writer's child session was created; the
+    writer is that child session's `checkpoint-writer` actor with outcome
+    `success`. A later writer that failed or never finished does not count, so
+    its threshold fires again after the restart; this also stands in for the
+    final threshold's recovery gate, which does not survive a restart. With no
+    succeeded writer, or with a rebuild or compaction boundary after it, the
+    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild.
+  - When one evaluation finds several thresholds newly crossed, it starts one
+    writer, for the highest, and marks them all crossed. The final-threshold
+    recovery gate is unchanged within a process.
+- Motivation: `crossed` is process memory, so a restarted process treated every
+  threshold a session had passed as new. In recorded restarts three sessions
+  each started a writer at their first turn after the restart for a threshold
+  passed before it (for example 270000 at 609251 tokens), and two sessions also
+  queued a second writer behind the first for the same range. Each writer is a
+  pass over the whole context. The checkpoint watermark cannot stand in for the
+  ladder: `computeBoundary` leaves a tail of 10K–20K tokens after it, so the
+  context at the watermark sits below the threshold that fired.
+- Upstream relationship: upstream keeps `crossed` in memory only and starts a
+  writer per newly crossed threshold. Fork fix of shared code; `dev/compat`
+  inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; the writer child session and its pending-writer slot in
+  `tryStartCheckpointWriter`, and `lastSucceededWriterStart` in
+  `checkpoint.ts`; the writer actor's `last_outcome` in
+  `packages/cli/src/actor/actor.sql.ts`; `isBoundaryUser` in
+  `packages/cli/src/session/tail-digest.ts`.
+- Tests/evidence: `packages/cli/test/session/prune.test.ts`
+  "SessionPrune.fireCheckpoints after a process restart" builds a fresh layer
+  per case: "a threshold a succeeded writer was started for does not fire
+  again", "the context reached is read from before the writer started, not
+  after", "a threshold whose last writer failed or never finished fires again",
+  "a rebuild after the last writer arms the whole ladder again" and "thresholds
+  crossed together start one writer". "resetThresholds drops a pending gate" now
+  expects one writer for the two thresholds its replay crosses together.
+  Seeding nothing, ignoring the rebuild boundary, reading the newest usage
+  instead of the one before the writer, or counting a writer that did not
+  succeed each fails its case; a writer per threshold fails the last case and
+  the reset case.
+- Retirement condition: upstream rebuilds the ladder after a restart and starts
+  one writer per evaluation.

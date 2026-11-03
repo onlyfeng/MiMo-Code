@@ -8,6 +8,7 @@ import { Flag } from "@/flag/flag"
 import { Effect, Layer, Context } from "effect"
 import { usable } from "./overflow"
 import { SessionCheckpoint } from "./checkpoint"
+import { isBoundaryUser } from "./tail-digest"
 import { ActorRegistry } from "@/actor/registry"
 import type { ActorPromptOps } from "@/tool/actor"
 
@@ -161,6 +162,29 @@ export const layer: Layer.Layer<
     // See the arming site below for why that distinction is the whole design.
     const finalRetryAt = new Map<SessionID, number>()
 
+    // FC-028: `crossed` lives in this process, so a restarted process saw every
+    // threshold the session had already passed as newly crossed and started
+    // writers for ranges a checkpoint already covered. Rebuild it from the last
+    // writer of this session that succeeded: the main lane's context size when
+    // it started is what the checkpoint covers. A later writer that failed or
+    // never finished does not count, so its threshold fires again (the recovery
+    // gate does not survive a restart). 0 when no writer succeeded, or the lane
+    // was rebuilt or compacted since (the ladder then measures the new, smaller
+    // context, as after resetThresholds).
+    const reachedTokens = (sessionID: SessionID) =>
+      Effect.sync(() => {
+        const writerStart = SessionCheckpoint.lastSucceededWriterStart(sessionID)
+        if (writerStart == null) return 0
+        for (const msg of MessageV2.stream(sessionID)) {
+          if (isBoundaryUser(msg)) return 0
+          if (msg.info.role !== "assistant" || msg.info.time.created >= writerStart) continue
+          const t = msg.info.tokens
+          const total = t.total || t.input + t.output + t.cache.read + t.cache.write
+          if (total > 0) return total
+        }
+        return 0
+      })
+
     // Fires a checkpoint write for every threshold newly crossed by the
     // current token count. Exposed publicly so runLoop can call it at each
     // iteration to catch mid-turn threshold crossings (not just turn end).
@@ -216,7 +240,9 @@ export const layer: Layer.Layer<
         input.tokens.total ||
         input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
 
-      const already = crossed.get(input.sessionID) ?? new Set<number>()
+      const seen = crossed.get(input.sessionID)
+      const reached = seen ? 0 : yield* reachedTokens(input.sessionID)
+      const already = seen ?? new Set(thresholds.filter((threshold) => threshold <= reached))
       const maxThreshold = thresholds[thresholds.length - 1]
       // The ladder's own spacing: the token growth the design already accepts
       // as worth one writer. Used below as the recovery gate's step so a retry
@@ -224,6 +250,10 @@ export const layer: Layer.Layer<
       const step = thresholds.length > 1 ? maxThreshold - thresholds[thresholds.length - 2] : maxThreshold
       const maxAllowed = maxAllowedFor(windowSize, cfg.checkpoint?.reserved)
 
+      // FC-028: one writer covers everything up to now, so thresholds crossed
+      // together fire once, for the highest. A writer per threshold would only
+      // queue a second run behind the first for the same range.
+      const due: number[] = []
       for (const t of thresholds) {
         if (currentTokens < t) break // sorted ascending; nothing more to trigger
         if (already.has(t)) {
@@ -243,7 +273,11 @@ export const layer: Layer.Layer<
             currentTokens,
           })
         }
+        due.push(t)
+      }
 
+      const t = due.at(-1)
+      if (t != null) {
         const outcome = yield* checkpoint
           .tryStartCheckpointWriter({
             sessionID: input.sessionID,
@@ -342,8 +376,8 @@ export const layer: Layer.Layer<
           }).pipe(Effect.forkDetach)
         }
 
-        already.add(t)
-        log.info("checkpoint triggered", { threshold: t, currentTokens })
+        for (const d of due) already.add(d)
+        log.info("checkpoint triggered", { threshold: t, currentTokens, ...(due.length > 1 ? { covering: due } : {}) })
       }
 
       crossed.set(input.sessionID, already)
