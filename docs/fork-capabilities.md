@@ -142,6 +142,7 @@ not change their implementation. The preceding review is retained in the
 | FC-028 | Checkpoint ladder across restarts and multiple crossings: seeding and one writer per evaluation           | Fork fix of upstream threshold state                             | Count thresholds a writer was started for as crossed; start one writer for the highest   |
 | FC-029 | Checkpoint writer file text: CURRENT FILES block in the writer task and validation re-prompts             | Fork fix of upstream writer inputs under the Codex harness       | Give the writer the text it edits; never rely on it being able to read the memory files  |
 | FC-030 | TUI session resume variant: restore from the last user message, saved per-model choice                    | Fork fix of upstream TUI resume                                  | Show the resumed variant without saving it; no recorded variant keeps the saved choice   |
+| FC-031 | Actor send sender id: the inbox row and the rendered `from` of a send                                     | Fork fix of upstream sender identity                             | Record the lane actor id; never an agent name                                            |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2681,3 +2682,37 @@ logged`, and the peer `success`/`failure` variants of
   fails its case.
 - Retirement condition: upstream restores the variant without saving it and
   keeps the saved choice when history records none.
+
+## FC-031 — an actor send names the sending lane, so it can be answered
+
+- Status: active
+- Canonical owner: fork `main` actor tool — the `send` action's
+  `senderActorID` in `packages/cli/src/tool/actor.ts`, and the `send` entry of
+  `packages/cli/src/tool/actor.txt`
+- Observable contract:
+  - An `actor send` records the sending lane's actor id as the inbox row's
+    `sender_actor_id`: `main` for a session's main lane, the actor id (such as
+    `general-1`) for a subagent or peer lane, for direct and `exec` calls alike.
+  - The receiver sees `<inbox from="<session_id>:<actor_id>">`, and a send to
+    that session and actor reaches the sender. The tool description says so.
+- Motivation: a direct call recorded `ctx.agent`, the agent's name, while an
+  `exec` call recorded the actor id. A main lane running agent `build`
+  therefore signed its messages `<session>:build`, and a reply to
+  `to_actor_id: "build"` failed with receiver not found, since the main lane's
+  actor id is `main`. In recorded collaboration 565 rows carried `build` as the
+  sender, 391 of them across sessions, so every such receiver had to know the
+  sender's lane out of band to answer.
+- Upstream relationship: upstream records `ctx.agent` for every send; the fork
+  already used the actor id for `exec` calls. Fork fix of shared code;
+  `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `ctx.actorID` in the tool context built in
+  `packages/cli/src/session/prompt.ts`; `renderInboxRow` in
+  `packages/cli/src/inbox/render.ts`; receiver lookup in `Inbox.accept`
+  (`packages/cli/src/inbox/inbox.ts`).
+- Known limit: rows written before the fix keep the agent name.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "the sender is the
+  lane's actor id, so the receiver can reply to it": a main lane running `build`
+  sends across sessions, the row and the rendered `from` name `main`, a reply to
+  the rendered sender is accepted, and a subagent lane's send records its actor
+  id. Restoring the agent name fails it.
+- Retirement condition: upstream records the sending lane's actor id.
