@@ -141,6 +141,24 @@ describe("turn queue sync transport", () => {
     rebuild(session.id)
   })))
 
+  it.live("a keyed resend that supersedes an unseen send replays both rows", provideTmpdirInstance(() => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const tq = yield* InboxController.Service
+    const session = yield* sessions.create({ title: "supersede replay" })
+    const lane = { sessionID: session.id, agentID: "main" }
+    const send = () => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt", idempotencyKey: "key", supersedeUnconsumed: true }) }
+    const first = yield* send()
+    yield* tq.abortSession(session.id)
+    const second = yield* send()
+    expect(second.id).not.toBe(first.id)
+    const delta = latestDelta(session.id)
+    expect(delta.receipts?.map((r) => [r.id, r.idempotency_key])).toEqual([
+      [first.id, `key#superseded:${first.id}`],
+      [second.id, "key"],
+    ])
+    rebuild(session.id)
+  })))
+
   // Wake intents removed with the inbox queue (spec: intent is prompt-only).
   // Wake intents and bootstrap removed with the inbox queue; recovery coverage
   // lives in queue-controller.test.ts (reconcileOnBoot) instead.

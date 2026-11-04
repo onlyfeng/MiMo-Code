@@ -217,6 +217,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         if (input.legacyInboxID && !legacy) throw new Error("Legacy inbox record missing")
         if (legacy?.input_message_id) return reuse(legacy)
         const idempotencyKey = input.idempotencyKey ?? ""
+        let superseded: typeof InboxTable.$inferSelect | undefined
         if (idempotencyKey) {
           const row = db.select().from(InboxTable).where(and(
             eq(InboxTable.receiver_session_id, input.lane.sessionID),
@@ -227,8 +228,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             (row.state === "settled" && row.outcome === "never_ran"))
           if (row && ended && input.supersedeUnconsumed) {
             // Free the key for this send; the old row keeps its history under a marked key.
-            db.update(InboxTable).set({ idempotency_key: `${idempotencyKey}#superseded:${row.id}` })
-              .where(eq(InboxTable.id, row.id)).run()
+            superseded = db.update(InboxTable).set({ idempotency_key: `${idempotencyKey}#superseded:${row.id}` })
+              .where(eq(InboxTable.id, row.id)).returning().get()
           } else if (row) return reuse(row)
         }
         // Same-message live receipt: a second accept for one message returns it.
@@ -298,7 +299,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             },
           })
           .returning().get()!
-        InboxSync.record({ sessionID: input.lane.sessionID, receipts: [row], lanes: [laneRow] })
+        // A superseded row goes first, so a replay frees its key before inserting the new one.
+        InboxSync.record({ sessionID: input.lane.sessionID, receipts: superseded ? [superseded, row] : [row], lanes: [laneRow] })
         return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
         if (!committed || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
