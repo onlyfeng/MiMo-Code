@@ -20,6 +20,9 @@ export type Violation = {
   rule: ValidationRule
   severity: "warn" | "error" | "extract-required"
   detail: string
+  /** Budget violations: the measured size and its budget, in estimated tokens. */
+  tokens?: number
+  budget?: number
 }
 
 export const TOPIC_MAX_CHARS = 80
@@ -220,6 +223,8 @@ export function validateBudget(content: string, budget: number, filename: string
       rule: "budget-exceeded",
       severity: "extract-required",
       detail: `${tokens} tokens > ${budget} budget`,
+      tokens,
+      budget,
     },
   ]
 }
@@ -252,6 +257,8 @@ export function validateBudgetSections(
         rule: "section-budget-exceeded",
         severity: "extract-required",
         detail: `section "${sectionTitle}" is ${tokens} tokens (budget ${budget})`,
+        tokens,
+        budget,
       })
     }
   }
