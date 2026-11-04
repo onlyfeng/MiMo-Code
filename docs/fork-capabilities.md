@@ -151,6 +151,7 @@ not change their implementation. The preceding review is retained in the
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
 | FC-038 | Actor send idempotency key: per-sender/receiver namespace, revive only unseen messages                    | Fork addition to upstream actor tool                             | A keyed resend is a no-op unless the earlier message ended unseen                        |
 | FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
+| FC-041 | Exec `files.readText` reads the memory directory                                                          | Fork fix of upstream exec file jail                              | Let a harness without a read tool read task journals                                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3068,3 +3069,30 @@ logged`, and the peer `success`/`failure` variants of
   unpatched parser.
 - Retirement condition: upstream opentui gives open string sequences their own
   timeout, or the dependency is upgraded past such a fix.
+
+## FC-041 — exec can read the memory directory
+
+- Status: active
+- Canonical owner: fork `main` — `execReadRoots` in
+  `packages/cli/src/tool/tool-script.ts`
+- Observable contract:
+  - `files.readText` in `exec` reads the worktree, the OS temp dir and
+    `<data>/memory/` (session checkpoints, notes, `tasks/<id>/progress.md`,
+    project and global memory). The rejection message names all three.
+  - `files.writeText` stays OS-temp-only; memory writes keep going through the
+    write tools and memory-path-guard.
+- Motivation: in the codex harness the agent has no `read` tool, so `exec` is
+  its only way to read a file. Coordinators reading a subagent's progress
+  journal were rejected ("path outside allowed roots (worktree, tmp)") while
+  the `read` tool already reads the memory tree without asking
+  (`assertExternalDirectoryEffect` defers it to memory-path-guard).
+- Upstream relationship: upstream jails reads to worktree + tmp. Fork fix;
+  `dev/compat` inherits it.
+- Watch surfaces: `tool-script.ts` jail roots, `resolveJailed`, the `files`
+  declaration text; `external-directory.ts` memory deferral.
+- Tests/evidence: `packages/cli/test/tool/tool-script.test.ts`
+  "files.readText reads the memory directory" and "files.readText roots
+  include the memory directory wherever it lives" (the second fails when the
+  memory root is dropped; the first alone cannot, because the test data dir
+  lies under tmp).
+- Retirement condition: upstream lets `exec` read the memory tree.
