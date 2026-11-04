@@ -4,6 +4,15 @@ import type { MessageV2 } from "@/session/message-v2"
 
 export type Lane = { sessionID: SessionID; agentID: string }
 
+/** The key a receipt keeps once a keyed resend replaced it; its input is no longer rendered (FC-038). */
+export function supersededKey(key: string, receiptID: string) {
+  return `${key}#superseded:${receiptID}`
+}
+
+export function isSuperseded(receipt: { id: string; idempotency_key?: string }) {
+  return !!receipt.idempotency_key?.endsWith(supersededKey("", receipt.id))
+}
+
 export type ReceiptState = "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
 export type ReceiptOutcome = "success" | "assistant_error" | "interrupted" | "never_ran"
 

@@ -2984,7 +2984,9 @@ logged`, and the peer `success`/`failure` variants of
 - Canonical owner: fork `main` — `idempotency_key` of the `send` action in
   `packages/cli/src/tool/actor.ts`, `supersedeUnconsumed` in `AcceptInput`
   (`packages/cli/src/inbox/schema.ts`) and its branch in `writeAccept`
-  (`packages/cli/src/inbox/controller.ts`), passed through `Inbox.accept`
+  (`packages/cli/src/inbox/controller.ts`), passed through `Inbox.accept`;
+  `supersededKey`/`isSuperseded` (`packages/cli/src/inbox/schema.ts`) read by
+  `MessageV2.renderedOrder` and `SessionCheckpoint.withEndedInputs`
 - Observable contract:
   - `actor send` with `idempotency_key` stores
     `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
@@ -3001,6 +3003,11 @@ logged`, and the peer `success`/`failure` variants of
     so overlapping keyed sends each report what their own transaction did.
   - The inbox sync delta carries the superseded row ahead of the new one, so a
     replay frees the key before inserting the new receipt.
+  - A superseded input is no longer rendered — neither by
+    `MessageV2.renderedOrder` (which otherwise shows an ended, unconsumed input
+    on the next run) nor by `SessionCheckpoint.withEndedInputs` — so the model
+    sees the resend once. The mark matches only the row's own id, so a sender's
+    key text cannot hide another message.
   - Sends without a key, and every other keyed accept (prompt receipts keyed
     by message id), keep reusing the existing row unconditionally.
 - Motivation: a coordinator's rule "resend once with the same task key when a
@@ -3020,7 +3027,9 @@ logged`, and the peer `success`/`failure` variants of
   dropping the sender or receiver-actor namespace, or losing the key in the tool
   or in `Inbox.accept` each fails it.
   `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend that supersedes
-  an unseen send replays both rows" fails when the delta omits the old row.
+  an unseen send replays both rows" fails when the delta omits the old row,
+  when either render path shows the superseded input, or when the mark check
+  accepts any `#superseded:` key.
 - Retirement condition: upstream offers keyed actor sends with these semantics.
 
 ## FC-039 — a terminal reply split across stdin reads is not typed into the prompt

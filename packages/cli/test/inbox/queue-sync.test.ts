@@ -15,6 +15,8 @@ import { EventTable } from "../../src/sync/event.sql"
 import { InboxController } from "../../src/inbox"
 import { schedulerRef } from "../../src/inbox/scheduler"
 import * as QueueSync from "../../src/inbox/sync"
+import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { isSuperseded } from "../../src/inbox/schema"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -156,6 +158,26 @@ describe("turn queue sync transport", () => {
       [first.id, `key#superseded:${first.id}`],
       [second.id, "key"],
     ])
+    // The mark names the replaced row itself, so a sender's own key text cannot imitate it.
+    expect(isSuperseded({ id: second.id, idempotency_key: `key#superseded:${first.id}` })).toBe(false)
+    // Only the resend reaches the model: the cancelled original is not rendered next to it.
+    yield* tq.abortSession(session.id)
+    const rows = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all())
+    const messages = yield* sessions.messages({ sessionID: session.id })
+    const rendered = (window: MessageV2.WithParts[]) => MessageV2.renderedOrder(window, rows, session.id, new Set(),
+      (messageID) => MessageV2.get({ sessionID: session.id, messageID })).map((m) => m.info.id)
+    expect(rendered(messages)).toEqual([second.inputMessageID])
+    // Nor does a rebuild that deferred both inputs restore the original.
+    const boundary = makeUser(session.id)
+    yield* sessions.updateMessage(boundary.message)
+    yield* sessions.updatePart({
+      id: PartID.ascending(), messageID: boundary.messageID, sessionID: session.id, type: "checkpoint",
+      checkpointDir: "/tmp/example", checkpointNumber: 1, coveredUpTo: boundary.messageID,
+      deferredInputs: [first.inputMessageID, second.inputMessageID],
+    })
+    const window = [MessageV2.get({ sessionID: session.id, messageID: boundary.messageID })]
+    expect(SessionCheckpoint.withEndedInputs(session.id, window).map((m) => m.info.id))
+      .toEqual([boundary.messageID, second.inputMessageID])
     rebuild(session.id)
   })))
 

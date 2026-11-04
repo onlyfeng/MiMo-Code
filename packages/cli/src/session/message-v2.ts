@@ -2,6 +2,7 @@ import { normalizeRetryPart } from "./retry-record"
 import { fileURLToPath } from "node:url"
 import { BusEvent } from "@/bus/bus-event"
 import { SessionID, MessageID, PartID } from "./schema"
+import { isSuperseded } from "@/inbox/schema"
 import z from "zod"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
@@ -1679,6 +1680,7 @@ export function renderedOrder(
     delivery_message_id: MessageID | null
     state: "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
     consumed: boolean
+    idempotency_key?: string
   }>,
   sessionID: SessionID,
   owned: Set<string>,
@@ -1689,7 +1691,8 @@ export function renderedOrder(
   const hidden = new Set<MessageID>()
   for (const receipt of receipts) {
     if (!receipt.input_message_id) continue
-    if (receipt.state === "accepted") {
+    // A superseded input was resent as a new message, which carries it instead.
+    if (receipt.state === "accepted" || isSuperseded(receipt)) {
       hidden.add(receipt.input_message_id)
       continue
     }

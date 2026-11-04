@@ -18,6 +18,7 @@ import {
   type Receipt,
   type ReceiptOutcome,
   type ReceiptState,
+  supersededKey,
 } from "./schema"
 import { InboxLaneStateTable, InboxSessionEpochTable, InboxTable } from "./inbox.sql"
 import { inboxControllerRef } from "./controller-ref"
@@ -234,7 +235,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             (row.state === "settled" && row.outcome === "never_ran"))
           if (row && ended && input.supersedeUnconsumed) {
             // Free the key for this send; the old row keeps its history under a marked key.
-            superseded = db.update(InboxTable).set({ idempotency_key: `${idempotencyKey}#superseded:${row.id}` })
+            superseded = db.update(InboxTable).set({ idempotency_key: supersededKey(idempotencyKey, row.id) })
               .where(eq(InboxTable.id, row.id)).returning().get()
           } else if (row) return reuse(row)
         }
