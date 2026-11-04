@@ -148,6 +148,7 @@ not change their implementation. The preceding review is retained in the
 | FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
 | FC-036 | Checkpoint writer delta under `checkpoint.fork: false`: window check and parent-view fallback             | Fork fix of upstream writer view                                 | Fork the parent view when the delta would overflow; never start a writer that cannot fit |
+| FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2939,3 +2940,38 @@ logged`, and the peer `success`/`failure` variants of
   window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
   writer's own). Dropping the fallback fails the first case.
 - Retirement condition: upstream bounds the no-fork writer's delta.
+## FC-037 — a sender can read what became of its actor message
+
+- Status: active
+- Canonical owner: fork `main` actor tool — `receipt` action, `receiptOf` and
+  `inputModel` in `packages/cli/src/tool/actor.ts`, documented in `actor.txt`
+- Observable contract:
+  - `actor receipt` with `inbox_id` (as returned by `send`) returns that
+    message's receipt: receiver session and actor, sender, `state`, `outcome`,
+    `consumed`, `delivered`, `error`, times, and `model` (provider, model,
+    variant of the receiver's input message). Without `inbox_id` it returns the
+    20 newest messages the calling session sent.
+  - Only the sending or the receiving session can read a receipt; any other
+    session gets `not found`, as for a missing id.
+  - `actor send`'s result carries the same `model`: the model and variant the
+    receiver's lane will run the message with (for example a lane at `max`).
+  - Subagents keep `send` only; `receipt` is for primary agents.
+- Motivation: a coordinating agent had no tool to learn whether a dispatch was
+  delivered, ran, or settled `never_ran`; its re-dispatch rule (resend once when
+  `never_ran` and not consumed) could only be run by reading SQLite directly.
+  It also could not see that a dispatched task would run at the receiver's
+  inherited variant.
+- Upstream relationship: upstream has no receipt query. Fork addition;
+  `dev/compat` inherits it and adds `delivery` to cross-session send results.
+- Watch surfaces: the file above; `InboxTable` in
+  `packages/cli/src/inbox/inbox.sql.ts`; the actor `operation` union, which
+  FC-025 flattens for grok.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a sender reads
+  what became of its message and the model the receiver runs it with" (send
+  result and receipt carry the receiver's `max` variant; sender and receiver
+  read the receipt, a third session does not; the list holds only sent rows; a
+  `never_ran` settlement reads as such). Reading receipts without the session
+  check, listing by receiver, dropping either `model`, or deriving `consumed`
+  from the state each fails it. `registry-toolset.test.ts` and
+  `actor.test.ts` cover the advertised action list and the flattened union.
+- Retirement condition: upstream exposes inbox receipts to the actor tool.
