@@ -243,6 +243,54 @@ describe("checkpoint writer context overflow", () => {
   )
 })
 
+describe("bounded agent usage near the window (FC-042)", () => {
+  it.live(
+    "keeps running past the compaction trigger until the provider rejects a request",
+    () =>
+      Effect.gen(function* () {
+        const bodies: string[][] = [
+          // 380K of a 400K window: past the compaction trigger, still accepted.
+          toolCallsResponse([{ id: "call-1", name: "read", args: JSON.stringify({ filePath: "missing.txt" }) }], { promptTokens: 380_000 }),
+          textStopResponse("Checkpoint updated."),
+        ]
+        let calls = 0
+        const server = Bun.serve({
+          port: 0,
+          fetch(req) {
+            if (!new URL(req.url).pathname.endsWith("/chat/completions")) return new Response("not found", { status: 404 })
+            const lines = bodies[calls++] ?? textStopResponse("extra")
+            const encoder = new TextEncoder()
+            return new Response(
+              new ReadableStream<Uint8Array>({
+                start(ctrl) {
+                  for (const line of lines) ctrl.enqueue(encoder.encode(line))
+                  ctrl.close()
+                },
+              }),
+              { headers: { "Content-Type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() => Effect.promise(() => server.stop(true)))
+        yield* provideTmpdirInstance(
+          () =>
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "bounded usage" })
+              const result = yield* prompt
+                .prompt({ sessionID: session.id, agent: "checkpoint-writer", parts: [{ type: "text", text: "write" }] })
+                .pipe(Effect.timeout("20 seconds"))
+              expect(calls).toBe(2)
+              expect(result.info.role === "assistant" && result.info.error).toBeFalsy()
+            }),
+          { git: true, config: config(server.url.origin) },
+        )
+      }),
+    60_000,
+  )
+})
+
 // Four files per segment, each just under the read tool's 50 KB output cap: one
 // segment fits the window (including request preflight, where it runs), the two
 // segments a stale checkpoint leaves behind do not.
