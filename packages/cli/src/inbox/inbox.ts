@@ -86,9 +86,9 @@ export interface AgentInput {
   content: string
   type?: string
   legacyInboxID?: string
-  /** See AcceptInput.idempotencyKey and supersedeUnconsumed. */
+  /** See AcceptInput.idempotencyKey and reviveUnseen. */
   idempotencyKey?: string
-  supersedeUnconsumed?: boolean
+  reviveUnseen?: boolean
 }
 
 export interface Interface {
@@ -164,7 +164,7 @@ export const layer = Layer.effect(
         senderSessionID: input.senderSessionID,
         senderActorID: input.senderActorID,
         idempotencyKey: input.idempotencyKey,
-        supersedeUnconsumed: input.supersedeUnconsumed,
+        reviveUnseen: input.reviveUnseen,
       }, guard).pipe(
         Effect.provideService(InstanceRef, receiverInstance),
         Effect.provideService(WorkspaceRef, workspace),
@@ -180,7 +180,7 @@ export const layer = Layer.effect(
         inboxID: receipt.id,
         inputMessageID: receipt.inputMessageID,
         ...(receipt.deduplicated != null ? { deduplicated: receipt.deduplicated } : {}),
-        ...(receipt.supersedes ? { supersedes: receipt.supersedes } : {}),
+        ...(receipt.revived ? { revived: true } : {}),
       }
     })
     const legacy = yield* Effect.sync(() => Database.use((db) => db.select().from(InboxTable).where(and(

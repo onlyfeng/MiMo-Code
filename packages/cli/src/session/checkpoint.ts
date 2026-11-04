@@ -15,7 +15,6 @@ import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
 import { Database, and, desc, eq, inArray, isNull, not, or } from "@/storage"
 import { InboxTable } from "@/inbox/inbox.sql"
-import { isSuperseded } from "@/inbox/schema"
 import { ActorRegistryTable } from "@/actor/actor.sql"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
@@ -461,7 +460,7 @@ export function withEndedInputs(sessionID: SessionID, window: MessageV2.WithPart
   if (deferred.length === 0) return window
   const rows = Database.use((db) =>
     db
-      .select({ id: MessageTable.id, receipt: InboxTable.id, idempotency_key: InboxTable.idempotency_key })
+      .select({ id: MessageTable.id })
       .from(InboxTable)
       .innerJoin(MessageTable, eq(MessageTable.id, InboxTable.input_message_id))
       .where(
@@ -474,7 +473,7 @@ export function withEndedInputs(sessionID: SessionID, window: MessageV2.WithPart
       )
       .all(),
   )
-  const ended = [...new Set(rows.filter((row) => !isSuperseded({ id: row.receipt, idempotency_key: row.idempotency_key })).map((row) => row.id))]
+  const ended = [...new Set(rows.map((row) => row.id))]
     .toSorted()
     .map((messageID) => MessageV2.get({ sessionID, messageID }))
   if (ended.length === 0) return window

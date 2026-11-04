@@ -15,8 +15,6 @@ import { EventTable } from "../../src/sync/event.sql"
 import { InboxController } from "../../src/inbox"
 import { schedulerRef } from "../../src/inbox/scheduler"
 import * as QueueSync from "../../src/inbox/sync"
-import { SessionCheckpoint } from "../../src/session/checkpoint"
-import { isSuperseded } from "../../src/inbox/schema"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -143,41 +141,32 @@ describe("turn queue sync transport", () => {
     rebuild(session.id)
   })))
 
-  it.live("a keyed resend that supersedes an unseen send replays both rows", provideTmpdirInstance(() => Effect.gen(function* () {
+  it.live("a keyed resend revives the unseen row instead of adding a message, and only while unseen", provideTmpdirInstance(() => Effect.gen(function* () {
     const sessions = yield* Session.Service
     const tq = yield* InboxController.Service
-    const session = yield* sessions.create({ title: "supersede replay" })
+    const session = yield* sessions.create({ title: "revive unseen" })
     const lane = { sessionID: session.id, agentID: "main" }
-    const send = () => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt", idempotencyKey: "key", supersedeUnconsumed: true }) }
+    const send = () => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt", idempotencyKey: "key", reviveUnseen: true }) }
     const first = yield* send()
+    expect(first).toMatchObject({ deduplicated: false })
     yield* tq.abortSession(session.id)
-    const second = yield* send()
-    expect(second.id).not.toBe(first.id)
-    const delta = latestDelta(session.id)
-    expect(delta.receipts?.map((r) => [r.id, r.idempotency_key])).toEqual([
-      [first.id, `key#superseded:${first.id}`],
-      [second.id, "key"],
-    ])
-    // The mark names the replaced row itself, so a sender's own key text cannot imitate it.
-    expect(isSuperseded({ id: second.id, idempotency_key: `key#superseded:${first.id}` })).toBe(false)
-    // Only the resend reaches the model: the cancelled original is not rendered next to it.
-    yield* tq.abortSession(session.id)
-    const rows = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, session.id)).all())
+    // Another input arriving on the lane is not a turn that saw the first one.
+    const other = yield* (() => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt" }) })()
+    // Unseen: the same row and message are queued again, in one sync delta.
+    const again = yield* send()
+    expect(again).toMatchObject({ id: first.id, inputMessageID: first.inputMessageID, state: "accepted", deduplicated: false, revived: true })
+    expect(latestDelta(session.id).receipts?.map((r) => [r.id, r.state])).toEqual([[first.id, "accepted"]])
     const messages = yield* sessions.messages({ sessionID: session.id })
-    const rendered = (window: MessageV2.WithParts[]) => MessageV2.renderedOrder(window, rows, session.id, new Set(),
-      (messageID) => MessageV2.get({ sessionID: session.id, messageID })).map((m) => m.info.id)
-    expect(rendered(messages)).toEqual([second.inputMessageID])
-    // Nor does a rebuild that deferred both inputs restore the original.
-    const boundary = makeUser(session.id)
-    yield* sessions.updateMessage(boundary.message)
-    yield* sessions.updatePart({
-      id: PartID.ascending(), messageID: boundary.messageID, sessionID: session.id, type: "checkpoint",
-      checkpointDir: "/tmp/example", checkpointNumber: 1, coveredUpTo: boundary.messageID,
-      deferredInputs: [first.inputMessageID, second.inputMessageID],
+    expect(messages.filter((m) => m.info.role === "user").map((m) => m.info.id)).toEqual([first.inputMessageID, other.inputMessageID])
+    // Ended again and then seen by a later turn of the lane: the resend is a no-op.
+    yield* tq.abortSession(session.id)
+    yield* sessions.updateMessage({
+      id: MessageID.ascending(), sessionID: session.id, role: "assistant", parentID: first.inputMessageID,
+      agent: "build", mode: "build", modelID: ModelID.make("test-model"), providerID: ProviderID.make("test"),
+      path: { cwd: "/tmp/example", root: "/tmp/example" }, time: { created: Date.now() + 1 }, cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     })
-    const window = [MessageV2.get({ sessionID: session.id, messageID: boundary.messageID })]
-    expect(SessionCheckpoint.withEndedInputs(session.id, window).map((m) => m.info.id))
-      .toEqual([boundary.messageID, second.inputMessageID])
+    expect(yield* send()).toMatchObject({ id: first.id, state: "cancelled", deduplicated: true })
     rebuild(session.id)
   })))
 

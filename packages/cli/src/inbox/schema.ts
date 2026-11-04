@@ -4,15 +4,6 @@ import type { MessageV2 } from "@/session/message-v2"
 
 export type Lane = { sessionID: SessionID; agentID: string }
 
-/** The key a receipt keeps once a keyed resend replaced it; its input is no longer rendered (FC-038). */
-export function supersededKey(key: string, receiptID: string) {
-  return `${key}#superseded:${receiptID}`
-}
-
-export function isSuperseded(receipt: { id: string; idempotency_key?: string }) {
-  return !!receipt.idempotency_key?.endsWith(supersededKey("", receipt.id))
-}
-
 export type ReceiptState = "accepted" | "claimed" | "settled" | "cancelled" | "rejected"
 export type ReceiptOutcome = "success" | "assistant_error" | "interrupted" | "never_ran"
 
@@ -44,10 +35,11 @@ export type AcceptInput = {
   senderActorID?: string
   idempotencyKey?: string
   /**
-   * FC-038: a keyed message whose earlier row ended without being consumed
-   * (never_ran, cancelled, rejected) is sent again instead of returning that row.
+   * FC-038: a keyed message whose earlier row ended unseen — cancelled or
+   * never_ran, not consumed, and no later turn of the receiving lane — is
+   * queued again (that same row and message) instead of returned as is.
    */
-  supersedeUnconsumed?: boolean
+  reviveUnseen?: boolean
   legacyInboxID?: string
   generatedPartIDs?: ReadonlySet<PartID>
 }

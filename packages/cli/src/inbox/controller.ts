@@ -1,6 +1,6 @@
 import { Cause, Context, Deferred, Effect, Layer } from "effect"
 import { ulid } from "ulid"
-import { and, Database, desc, eq, inArray, ne, or, sql } from "@/storage"
+import { and, Database, desc, eq, gte, inArray, ne, or, sql } from "@/storage"
 import { NotFoundError } from "@/storage"
 import { SessionTable } from "@/session/session.sql"
 import { MessageTable } from "@/session/session.sql"
@@ -18,7 +18,6 @@ import {
   type Receipt,
   type ReceiptOutcome,
   type ReceiptState,
-  supersededKey,
 } from "./schema"
 import { InboxLaneStateTable, InboxSessionEpochTable, InboxTable } from "./inbox.sql"
 import { inboxControllerRef } from "./controller-ref"
@@ -47,7 +46,7 @@ export interface AdmissionGuard {
 /** Set only for keyed accepts, decided inside the accept transaction (FC-038). */
 export interface KeyedOutcome {
   deduplicated?: boolean
-  supersedes?: string
+  revived?: boolean
 }
 
 export interface Interface {
@@ -190,7 +189,28 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
      * record, bump input_revision. Returns undefined when the admission
      * guard rejects the write.
      */
-    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; supersedes?: string }
+    const bumpLane = (db: Database.TxOrDb, lane: Lane, now: number) =>
+      db.insert(InboxLaneStateTable)
+        .values({ session_id: lane.sessionID, agent_id: lane.agentID, input_revision: 1, time_updated: now })
+        .onConflictDoUpdate({
+          target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id],
+          set: { input_revision: sql`${InboxLaneStateTable.input_revision} + 1`, time_updated: now },
+        })
+        .returning().get()!
+
+    // An ended input that was never consumed still renders on the lane's next
+    // turn, so it went unseen only while no turn has begun since it ended.
+    const unseen = (db: Database.TxOrDb, row: typeof InboxTable.$inferSelect) =>
+      !row.consumed && !!row.input_message_id &&
+      (row.state === "cancelled" || (row.state === "settled" && row.outcome === "never_ran")) &&
+      !db.select({ id: MessageTable.id }).from(MessageTable).where(and(
+        eq(MessageTable.session_id, row.receiver_session_id),
+        eq(MessageTable.agent_id, row.receiver_actor_id),
+        gte(MessageTable.time_created, row.time_updated),
+        sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+      )).get()
+
+    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; revived?: boolean }
     const writeAccept = (input: AcceptInput, identity: ExecutionOwnership.Identity, guard?: AdmissionGuard) =>
       Effect.suspend(() => {
       let prepared: AcceptedWrite | undefined
@@ -224,20 +244,26 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         if (input.legacyInboxID && !legacy) throw new Error("Legacy inbox record missing")
         if (legacy?.input_message_id) return reuse(legacy)
         const idempotencyKey = input.idempotencyKey ?? ""
-        let superseded: typeof InboxTable.$inferSelect | undefined
         if (idempotencyKey) {
           const row = db.select().from(InboxTable).where(and(
             eq(InboxTable.receiver_session_id, input.lane.sessionID),
             eq(InboxTable.idempotency_key, idempotencyKey),
             promptOnly,
           )).get()
-          const ended = row && !row.consumed && (row.state === "cancelled" || row.state === "rejected" ||
-            (row.state === "settled" && row.outcome === "never_ran"))
-          if (row && ended && input.supersedeUnconsumed) {
-            // Free the key for this send; the old row keeps its history under a marked key.
-            superseded = db.update(InboxTable).set({ idempotency_key: supersededKey(idempotencyKey, row.id) })
-              .where(eq(InboxTable.id, row.id)).returning().get()
-          } else if (row) return reuse(row)
+          if (row && input.reviveUnseen && unseen(db, row)) {
+            if (row.receiver_actor_id !== input.lane.agentID) throw new Error("Inbox idempotency key belongs to another lane")
+            // Queue the same row and message again: a new message would sit beside
+            // the old one, which an ended unconsumed input still renders as.
+            const now = Date.now()
+            const revived = db.update(InboxTable).set({
+              state: "accepted", epoch, outcome: null, error: null, run_id: null, claim_frontier: null,
+              delivery_message_id: null, time_updated: now,
+            }).where(eq(InboxTable.id, row.id)).returning().get()!
+            const laneRow = bumpLane(db, input.lane, now)
+            InboxSync.record({ sessionID: input.lane.sessionID, receipts: [revived], lanes: [laneRow] })
+            return prepared = { row: revived, kind: "inserted" as const, revision: laneRow.input_revision, revived: true }
+          }
+          if (row) return reuse(row)
         }
         // Same-message live receipt: a second accept for one message returns it.
         const duplicate = db.select().from(InboxTable).where(and(
@@ -291,24 +317,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             set: { content: null, input_message_id: input.message.id, time_updated: now },
           })
           .returning().get()!
-        const laneRow = db.insert(InboxLaneStateTable)
-          .values({
-            session_id: input.lane.sessionID,
-            agent_id: input.lane.agentID,
-            input_revision: 1,
-            time_updated: now,
-          })
-          .onConflictDoUpdate({
-            target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id],
-            set: {
-              input_revision: sql`${InboxLaneStateTable.input_revision} + 1`,
-              time_updated: now,
-            },
-          })
-          .returning().get()!
-        // A superseded row goes first, so a replay frees its key before inserting the new one.
-        InboxSync.record({ sessionID: input.lane.sessionID, receipts: superseded ? [superseded, row] : [row], lanes: [laneRow] })
-        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision, supersedes: superseded?.id }
+        const laneRow = bumpLane(db, input.lane, now)
+        InboxSync.record({ sessionID: input.lane.sessionID, receipts: [row], lanes: [laneRow] })
+        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
         if (!committed || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
         log.warn("inbox postcommit publisher failed", { cause: Cause.pretty(cause) })
@@ -384,7 +395,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       return {
         ...receipt,
         deduplicated: written.kind === "existing",
-        ...(written.supersedes ? { supersedes: written.supersedes } : {}),
+        ...(written.revived ? { revived: true } : {}),
       }
     })
 

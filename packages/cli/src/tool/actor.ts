@@ -424,7 +424,7 @@ export const ActorTool = Tool.define(
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
               // FC-038: namespaced per sender and receiver actor, so keys never collide across them nor with message-id keys.
-              ...(key ? { idempotencyKey: key, supersedeUnconsumed: true } : {}),
+              ...(key ? { idempotencyKey: key, reviveUnseen: true } : {}),
             })
             .pipe(
               Effect.catchTag("InboxReceiverNotFound", () =>

@@ -354,17 +354,16 @@ describe("actor tool — send action", () => {
         // Ended but seen by the receiver's turn: not resent.
         settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: true })
         expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
-        // Ended unseen: sent anew once, superseding the old message.
-        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: false })
+        // Ended unseen: the same message is queued again once, under the same key.
+        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: false, time_updated: Date.now() })
         const again = yield* send(a.id, "task-3")
-        expect(again).toMatchObject({ deduplicated: false, supersedes: first.inboxID })
-        expect(again.inboxID).not.toBe(first.inboxID)
-        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: again.inboxID, deduplicated: true })
+        expect(again).toMatchObject({ inboxID: first.inboxID, inputMessageID: first.inputMessageID, deduplicated: false, revived: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
         const old = rows().find((row) => row.id === first.inboxID)
-        expect(old?.idempotency_key).toBe(`actor-send:${a.id}:main:main:task-3#superseded:${first.inboxID}`)
+        expect(old).toMatchObject({ state: "accepted", idempotency_key: `actor-send:${a.id}:main:main:task-3` })
         // Without a key every send is a new message.
         expect((yield* send(a.id)).inboxID).not.toBe((yield* send(a.id)).inboxID)
-        expect(rows()).toHaveLength(6)
+        expect(rows()).toHaveLength(5)
       }),
     ),
   )
