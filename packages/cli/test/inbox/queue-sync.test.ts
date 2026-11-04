@@ -12,6 +12,7 @@ import { MessageTable, SessionTable } from "../../src/session/session.sql"
 import { Database, eq, NotFoundError } from "../../src/storage"
 import { SyncEvent } from "../../src/sync"
 import { EventTable } from "../../src/sync/event.sql"
+import { Identifier } from "../../src/id/id"
 import { InboxController } from "../../src/inbox"
 import { schedulerRef } from "../../src/inbox/scheduler"
 import * as QueueSync from "../../src/inbox/sync"
@@ -138,6 +139,43 @@ describe("turn queue sync transport", () => {
     // Already-settled records are not cancelled again.
     expect(aborted.receipts ?? []).toEqual([])
     expect(events(session.id).filter((e) => e.type === "session.inbox.snapshot.1")).toEqual([])
+    rebuild(session.id)
+  })))
+
+  it.live("a keyed resend revives the unseen row instead of adding a message, and only while unseen", provideTmpdirInstance(() => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const tq = yield* InboxController.Service
+    const session = yield* sessions.create({ title: "revive unseen" })
+    const lane = { sessionID: session.id, agentID: "main" }
+    const send = () => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt", idempotencyKey: "key", reviveUnseen: true }) }
+    const first = yield* send()
+    expect(first).toMatchObject({ deduplicated: false })
+    yield* tq.abortSession(session.id)
+    // Another input arriving on the lane is not a turn that saw the first one.
+    const other = yield* (() => { const u = makeUser(session.id); return tq.accept({ lane, message: u.message, parts: u.parts, type: "prompt" }) })()
+    // Unseen: the same row and message are queued again, in one sync delta.
+    const again = yield* send()
+    expect(again).toMatchObject({ id: first.id, inputMessageID: first.inputMessageID, state: "accepted", deduplicated: false, revived: true })
+    expect(latestDelta(session.id).receipts?.map((r) => [r.id, r.state])).toEqual([[first.id, "accepted"]])
+    const messages = yield* sessions.messages({ sessionID: session.id })
+    expect(messages.filter((m) => m.info.role === "user").map((m) => m.info.id)).toEqual([first.inputMessageID, other.inputMessageID])
+    yield* tq.abortSession(session.id)
+    const ended = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, first.id)).get())!.time_updated
+    // `time_created` is bumped past the clock, so only the minted ID dates a turn.
+    const assistant = (minted: number) => sessions.updateMessage({
+      id: MessageID.make(Identifier.create("msg", "ascending", minted)), sessionID: session.id, role: "assistant",
+      parentID: first.inputMessageID, agent: "build", mode: "build", modelID: ModelID.make("test-model"),
+      providerID: ProviderID.make("test"), path: { cwd: "/tmp/example", root: "/tmp/example" },
+      time: { created: ended + 5 }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    // A turn minted in the tick the input ended began before it: still unseen.
+    yield* assistant(ended)
+    expect(yield* send()).toMatchObject({ id: first.id, state: "accepted", revived: true })
+    // Ended again and then seen by a later turn of the lane: the resend is a no-op.
+    yield* tq.abortSession(session.id)
+    const again2 = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, first.id)).get())!.time_updated
+    yield* assistant(again2 + 1)
+    expect(yield* send()).toMatchObject({ id: first.id, state: "cancelled", deduplicated: true })
     rebuild(session.id)
   })))
 

@@ -147,6 +147,10 @@ not change their implementation. The preceding review is retained in the
 | FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
 | FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
+| FC-036 | Checkpoint writer delta under `checkpoint.fork: false`: window check and parent-view fallback             | Fork fix of upstream writer view                                 | Fork the parent view when the delta would overflow; never start a writer that cannot fit |
+| FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
+| FC-038 | Actor send idempotency key: per-sender/receiver namespace, revive only unseen messages                    | Fork addition to upstream actor tool                             | A keyed resend is a no-op unless the earlier message ended unseen                        |
+| FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2906,3 +2910,161 @@ logged`, and the peer `success`/`failure` variants of
   unredacted.
 - Retirement condition: upstream attributes patch files to the tools that
   wrote them, or scopes undo and redo to the session's own writes.
+
+## FC-036 — a no-fork checkpoint writer whose delta would overflow forks the parent view
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer — `deltaTooLarge` in
+  `tryStartCheckpointWriter` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - With `checkpoint.fork: false` the writer is sent its own system prompt and
+    the messages since the last checkpoint. When the caller reports the
+    parent's usable window (`context`) and that delta's estimate exceeds it,
+    the writer forks the parent's view instead, exactly as under
+    `fork: true` (including FC-021's choice between the full and the parent's
+    own view). The log line is `writer delta exceeds the usable window,
+    forking the parent view`.
+  - Without `context`, or with a delta that fits, `fork: false` is unchanged.
+- Motivation: the delta has no other bound. With no checkpoint yet, or after
+  writers kept failing, it grows past the window; every writer then overflows,
+  the watermark never advances, and the delta keeps growing. The parent's view
+  is what the parent runs with, so it fits. A 2026-11-04 A/B on real models
+  (local report) found `fork: false` writers cost 1/4–1/2 of `fork: true` with
+  equal or better checkpoints, so the fallback is what lets `fork: false` be
+  used safely.
+- Upstream relationship: upstream has no fallback for either mode. Fork fix of
+  shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the file above; FC-021's view projection in the same
+  function; `estimateViewTokens`; the `context` passed by
+  `packages/cli/src/session/prune.ts`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
+  "fork:false forks the parent view only when the delta exceeds the usable
+  window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
+  writer's own). Dropping the fallback fails the first case.
+- Retirement condition: upstream bounds the no-fork writer's delta.
+## FC-037 — a sender can read what became of its actor message
+
+- Status: active
+- Canonical owner: fork `main` actor tool — `receipt` action, `receiptOf` and
+  `inputModel` in `packages/cli/src/tool/actor.ts`, documented in `actor.txt`
+- Observable contract:
+  - `actor receipt` with `inbox_id` (as returned by `send`) returns that
+    message's receipt: receiver session and actor, sender, `state`, `outcome`,
+    `consumed`, `delivered`, `error`, times, and `model` (provider, model,
+    variant of the receiver's input message). Without `inbox_id` it returns the
+    20 newest messages the calling session sent.
+  - Only the sending or the receiving session can read a receipt; any other
+    session gets `not found`, as for a missing id.
+  - `actor send`'s result carries the same `model`: the model and variant the
+    receiver's lane will run the message with (for example a lane at `max`).
+  - Subagents keep `send` only; `receipt` is for primary agents.
+- Motivation: a coordinating agent had no tool to learn whether a dispatch was
+  delivered, ran, or settled `never_ran`; its re-dispatch rule (resend once when
+  `never_ran` and not consumed) could only be run by reading SQLite directly.
+  It also could not see that a dispatched task would run at the receiver's
+  inherited variant.
+- Upstream relationship: upstream has no receipt query. Fork addition;
+  `dev/compat` inherits it and adds `delivery` to cross-session send results.
+- Watch surfaces: the file above; `InboxTable` in
+  `packages/cli/src/inbox/inbox.sql.ts`; the actor `operation` union, which
+  FC-025 flattens for grok.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a sender reads
+  what became of its message and the model the receiver runs it with" (send
+  result and receipt carry the receiver's `max` variant; sender and receiver
+  read the receipt, a third session does not; the list holds only sent rows; a
+  `never_ran` settlement reads as such). Reading receipts without the session
+  check, listing by receiver, dropping either `model`, or deriving `consumed`
+  from the state each fails it. `registry-toolset.test.ts` and
+  `actor.test.ts` cover the advertised action list and the flattened union.
+- Retirement condition: upstream exposes inbox receipts to the actor tool.
+
+## FC-038 — a keyed actor send is delivered once, and requeued only if it went unseen
+
+- Status: active
+- Canonical owner: fork `main` — `idempotency_key` of the `send` action in
+  `packages/cli/src/tool/actor.ts`, `reviveUnseen` in `AcceptInput`
+  (`packages/cli/src/inbox/schema.ts`) and `unseen`/the revive branch in
+  `writeAccept` (`packages/cli/src/inbox/controller.ts`), passed through
+  `Inbox.accept`
+- Observable contract:
+  - `actor send` with `idempotency_key` stores
+    `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
+    neither senders nor a receiver session's actors share keys, and none
+    collide with message-id keys.
+  - A send whose key already names a row returns that row
+    (`deduplicated: true`) while it is accepted, claimed, consumed, or ended
+    and seen.
+  - "Unseen" means: `cancelled` or settled `never_ran`, not consumed, and no
+    assistant message on the receiving lane minted after the row ended —
+    compared by message ID (`MessageID.ascendingAfter`), whose time is the
+    wall clock at minting, because `time_created` may be bumped past the clock
+    and is not comparable with `time_updated`. (An ended,
+    unconsumed input still renders on the lane's next turn, so a later turn
+    counts as having seen it.) Such a row is queued again in the same
+    transaction — the same row and the same user message, back to `accepted`
+    in the current epoch — and the result reports `revived: true`. No second
+    message is created, so nothing has to be hidden from rendering and receipt
+    GC cannot expose a duplicate.
+  - `deduplicated` and `revived` come from the accept transaction itself, so
+    overlapping keyed sends each report what their own transaction did.
+  - The revived message is the original one; a resend's own content is not
+    used.
+  - Sends without a key, and every other keyed accept (prompt receipts keyed
+    by message id), keep reusing the existing row unconditionally.
+- Motivation: a coordinator's rule "resend once with the same task key when a
+  message settled `never_ran` unconsumed" needs a key that dedupes live and
+  delivered messages but not lost ones; the store reused any keyed row, so a
+  resend after a loss was silently dropped.
+- Upstream relationship: upstream does not expose keys to the actor tool. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; `MessageV2.renderedOrder` and
+  `SessionCheckpoint.withEndedInputs` (ended unconsumed inputs render on the
+  next turn — the reason for the "unseen" rule); the partial unique index on
+  `(receiver_session_id, idempotency_key)`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a keyed resend
+  is a no-op until the earlier message ended unseen, then goes out once"
+  (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
+  and another receiver actor are separate; an unseen `never_ran` is revived
+  once as the same message; unkeyed sends always go out);
+  `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend revives the
+  unseen row instead of adding a message, and only while unseen" (one sync
+  delta, one user message, a later user input does not count as seen, an
+  assistant minted in the tick the input ended does not either even with a
+  bumped `time_created`, a later assistant turn does, replay rebuilds the same
+  state). Disabling the revive,
+  reviving consumed rows, ignoring the later turn or its role, comparing
+  `time_created` instead of the minted ID, shifting the ID bound by a tick, reviving into a
+  stale epoch, dropping the sync record or either result flag, or not passing
+  `reviveUnseen` from the tool each fails one of them.
+- Retirement condition: upstream offers keyed actor sends with these semantics.
+
+## FC-039 — a terminal reply split across stdin reads is not typed into the prompt
+
+- Status: active
+- Canonical owner: fork `main` dependency patch —
+  `patches/@opentui%2Fcore@0.1.101.patch`, `StdinParser.pendingTimeoutMs`
+  (with `STRING_SEQUENCE_TIMEOUT_MS`)
+- Observable contract:
+  - While the parser is inside a DCS, OSC or APC string (after `ESC P`,
+    `ESC ]`, `ESC _`), it waits up to 1000 ms for the terminator before
+    flushing; everything else, a lone Escape included, keeps the 20 ms key
+    timeout.
+  - So a terminal reply delivered in two reads is still one `response` event
+    and nothing of it reaches the prompt.
+- Motivation: a window hosted by a terminal multiplexer showed text such as
+  `48;2;10;10;10m` in the prompt: the tail of a DECRPSS reply
+  (`ESC P 1 $ r 48;2;10;10;10m ESC \`) whose two halves arrived more than
+  20 ms apart. The parser flushed the head as an opaque response and parsed the
+  tail in ground state as typed keys (the closing `ESC \` became Alt+\).
+  Nobody types these introducers by hand, so the longer wait costs nothing.
+- Upstream relationship: upstream `@opentui/core` 0.1.101 applies the 20 ms
+  timeout to every pending sequence. Fork patch alongside the existing CJK
+  extmark fix in the same patch file; `dev/compat` inherits it.
+- Watch surfaces: the patch file; any `@opentui/core` upgrade, which must keep
+  or replace this behavior.
+- Tests/evidence: `packages/cli/test/cli/cmd/tui/stdin-split-reply.test.ts`
+  drives the real parser: a DCS and an OSC reply split by 60 ms stay one
+  response; a lone Escape is still a key. Both split cases fail on the
+  unpatched parser.
+- Retirement condition: upstream opentui gives open string sequences their own
+  timeout, or the dependency is upgraded past such a fix.

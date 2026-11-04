@@ -41,7 +41,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
           .find((line) => line.trimStart().startsWith("actor(input:"))
         expect(actorDeclaration).toBeDefined()
         expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1])).toEqual([
-          "spawn", "run", "status", "wait", "cancel", "resume", "send", "models",
+          "spawn", "run", "status", "wait", "cancel", "resume", "send", "receipt", "models",
         ])
         const actor = advertised.find((tool) => tool.id === "actor")
         for (const operation of [
@@ -52,6 +52,8 @@ describe("ToolRegistry.tools: toolset selection", () => {
           { action: "wait", actor_id: "general-1" },
           { action: "cancel", actor_id: "general-1" },
           { action: "resume", actor_id: "general-1" },
+          { action: "receipt" },
+          { action: "receipt", inbox_id: "inb_example" },
           { action: "models" },
         ])
           expect(actor?.parameters.safeParse({ operation }).success).toBe(true)

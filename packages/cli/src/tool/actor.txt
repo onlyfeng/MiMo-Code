@@ -19,6 +19,7 @@ Examples:
 {"operation":{"action":"wait","actor_id":"<existing>"}}
 {"operation":{"action":"cancel","actor_id":"<existing>"}}
 {"operation":{"action":"send","to_actor_id":"<existing>","content":"<message>"}}
+{"operation":{"action":"receipt","inbox_id":"<inboxID from send>"}}
 THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gates this very turn:
 {"operation":{"action":"run","subagent_type":"explore","description":"One tiny blocking lookup","prompt":"<full task>"}}
 
@@ -64,10 +65,22 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
 - send:   deliver message to another actor's inbox, waking it when the actor
           remains reusable.
           required: to_actor_id, content.
-          optional: to_session_id, type (default "text").
+          optional: to_session_id, type (default "text"), idempotency_key.
+          With idempotency_key (e.g. your task key), sending again is a no-op that returns
+          the earlier message (deduplicated: true) while it is queued, running or was seen;
+          once it ended unseen (never_ran or cancelled, before any later turn of the receiver)
+          the next send queues that same message again (revived: true). So "resend once if it
+          never ran" is safe to repeat, and the receiver sees the message once.
           Receiver sees wrapped in <inbox from="<session_id>:<actor_id>" sent_at="...">...</inbox> at next iteration;
           reply with to_session_id=<session_id>, to_actor_id=<actor_id>.
           Returns once queued, not when the woken turn finishes — that turn's result arrives as a completion notification.
+          The result also names the model and variant the receiver will run the message with.
+- receipt: what became of a sent message. optional: inbox_id (from `send`); omit it for
+          the 20 newest messages this session sent. Each receipt: state (accepted |
+          claimed | settled | cancelled | rejected), outcome (success | assistant_error |
+          interrupted | never_ran), consumed (the receiver's turn saw it), delivered, error,
+          model. Only the sending or the receiving session can read a receipt. A message
+          that settled never_ran with consumed=false was never seen by the receiver.
 
 ## When to use actor
 
