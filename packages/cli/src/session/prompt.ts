@@ -6444,6 +6444,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 model,
                 agentMetrics,
                 awaitNewInput: recovery ? undefined : awaitNewInput({ sessionID, agentID: resolvedAgentID }),
+                compactsOnUsage: !isBoundedComputation,
               })
 
               const outcome: "break" | "continue" = yield* Effect.gen(function* () {
