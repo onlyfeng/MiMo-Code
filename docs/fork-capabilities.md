@@ -161,6 +161,7 @@ not change their implementation. The preceding review is retained in the
 | FC-042 | A bounded agent's usage past the compaction trigger is not an overflow                                    | Fork fix of upstream bounded overflow                            | Stop a writer only when the provider rejects its request                                 |
 | FC-043 | `actor cancel` waits a bounded time for the actor to stop                                                 | Fork fix of upstream actor tool                                  | A stuck child never freezes the caller's turn                                            |
 | FC-044 | Checkpoint writer returns only `.output` from exec tool calls                                             | Fork addition to upstream writer prompt                          | Keep the full patch diff out of the writer's context                                     |
+| FC-045 | Checkpoint extraction prompt targets 85% of each budget                                                   | Fork addition to upstream writer retry                           | Trim once, with room, instead of a hundred tokens per re-prompt                          |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3237,3 +3238,36 @@ logged`, and the peer `success`/`failure` variants of
   does not apply fails the `exec` and leaves the file unchanged).
 - Retirement condition: `exec` stops serializing nested tool metadata into the
   return value, or the writer stops calling tools through `exec`.
+
+## FC-045 — an over-budget checkpoint is trimmed once, to a target below the budget
+
+- Status: active
+- Canonical owner: fork `main` — `EXTRACTION_TARGET_RATIO` and the targets in
+  `buildExtractionReflection` (`packages/cli/src/session/checkpoint-retry.ts`);
+  `tokens`/`budget` on budget violations (`packages/cli/src/session/checkpoint-validator.ts`)
+- Observable contract:
+  - The `EXTRACTION REQUIRED` re-prompt lists, for every over-budget file and
+    section, its size, a target of 85% of the budget and the amount to move
+    (tokens and about 4 characters per token), and asks for one pass to that
+    target rather than to just under the budget.
+  - Validation is unchanged: a file passes at its budget, as before. Only the
+    prompt aims lower, so no new re-prompt is introduced.
+  - A violation without measured sizes keeps the previous prompt.
+- Motivation: from 2026-11-01 to 2026-11-05, 146 of 345 writers were re-prompted
+  to extract; 47 needed two or three rounds. The median overshoot was 113
+  tokens, each round removed a median of 167 tokens, and the file was left a
+  median of 53 tokens over after a round — writers trimmed to the line, so the
+  next round or the next writer went over again. Steps after the first
+  extraction prompt cost 8% of all writer spend, and the prompts carried 4.5M
+  characters of file text.
+- Upstream relationship: upstream's prompt names the overshoot only. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; `plugin/checkpoint-splitover.ts` (the
+  re-prompt loop); `CHECKPOINT_SECTION_BUDGETS`/`MEMORY_SECTION_BUDGETS`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-retry.test.ts`
+  "buildExtractionReflection targets (FC-045)" (targets for a file and a
+  section from real validators; the plain prompt for a violation without
+  sizes). Setting the ratio to 1, dropping the targets, or not carrying the
+  sizes on either violation kind fails it.
+- Retirement condition: upstream aims extraction below the budget, or the
+  writer stops being re-prompted for budget overruns.
