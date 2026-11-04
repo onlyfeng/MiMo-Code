@@ -46,6 +46,17 @@ const log = Log.create({ service: "actor.spawn" })
 export const MAX_PRE_REACT = 3
 /** Cap on postStop ReAct re-entries per spawn. See MAX_PRE_REACT TODO. */
 export const MAX_POST_REACT = 3
+
+/**
+ * An agent's ruleset as its own write stance reads it: catch-all rules merged
+ * after its last catch-all deny are dropped, so only an explicit later rule
+ * (e.g. `write: "allow"`) can make a read-only agent writable (FC-040).
+ */
+export function ownWritability(ruleset: Permission.Ruleset): Permission.Ruleset {
+  const deny = ruleset.findLastIndex((rule) => rule.permission === "*" && rule.pattern === "*" && rule.action === "deny")
+  if (deny < 0) return ruleset
+  return ruleset.filter((rule, index) => index <= deny || rule.permission !== "*")
+}
 const RETURN_FORMAT_INSTRUCTION = `
 
 ---
@@ -656,8 +667,10 @@ export const layer = Layer.effect(
         // "*":deny on a writable agent (we nudge though runtime strips). Both are deliberately
         // ignored: not reachable in normal usage (mimo run sets no such rule, spawn doesn't
         // rewrite session.permission). See spec §Decision. Unknown agent → fail-open (true).
+        // FC-040: a catch-all allow merged after the agent's own catch-all deny (`--yolo`'s
+        // base, or a global `"*": "allow"`) does not make a read-only agent writable here.
         const forkAgentInfo = yield* agents.get(input.agentType)
-        const canWrite = forkAgentInfo ? !Permission.disabled(["write"], forkAgentInfo.permission).has("write") : true
+        const canWrite = forkAgentInfo ? !Permission.disabled(["write"], ownWritability(forkAgentInfo.permission)).has("write") : true
         const runManagedTurn = <A, E>(turn: Effect.Effect<A, E>) =>
           runTurn(input.sessionID, input.actorID, turn, {
             isCancelled: isCancelled(input.sessionID, input.actorID),
