@@ -92,6 +92,14 @@ export function create(prefix: string, direction: "descending" | "ascending", ti
   return prefix + "_" + mark + timeBytes.toString("hex") + randomBase62(LENGTH - 1 - TIME_BYTES * 2)
 }
 
+/**
+ * A bound below every v2 ascending ID minted after `timestamp` (ms) and above
+ * every one minted at or before it, for comparing IDs against a wall-clock time.
+ */
+export function ascendingAfter(prefix: keyof typeof prefixes, timestamp: number) {
+  return prefixes[prefix] + "_g" + (BigInt(Math.floor(timestamp) + 1) * BigInt(0x1000)).toString(16).padStart(TIME_BYTES * 2, "0")
+}
+
 /** Extract timestamp from an ascending ID. Does not work with descending IDs. */
 export function timestamp(id: string, now = Date.now()): number {
   const prefix = id.split("_")[0]

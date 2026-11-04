@@ -34,6 +34,12 @@ export type AcceptInput = {
   senderSessionID?: SessionID
   senderActorID?: string
   idempotencyKey?: string
+  /**
+   * FC-038: a keyed message whose earlier row ended unseen — cancelled or
+   * never_ran, not consumed, and no later turn of the receiving lane — is
+   * queued again (that same row and message) instead of returned as is.
+   */
+  reviveUnseen?: boolean
   legacyInboxID?: string
   generatedPartIDs?: ReadonlySet<PartID>
   /**

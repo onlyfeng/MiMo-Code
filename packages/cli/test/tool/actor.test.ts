@@ -1101,9 +1101,9 @@ describe("Actor tool subagent_type enum (F36)", () => {
         expect(Object.keys(flat.properties)).toEqual(["operation"])
         expect(flat.required).toEqual(["operation"])
         // The operation node must carry type:"object" (the .meta fix) so models
-        // don't stringify the envelope, and must retain its inner 8-way union.
+        // don't stringify the envelope, and must retain its inner 9-way union.
         expect(flat.properties.operation.type).toBe("object")
-        expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(8)
+        expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(9)
       }),
     ),
   )
@@ -1121,7 +1121,7 @@ describe("Actor tool subagent_type enum (F36)", () => {
         const actions = typeof action === "object" ? action.enum : undefined
         expect(op.anyOf ?? op.oneOf).toBeUndefined()
         expect(op.required).toEqual(["action"])
-        expect(actions).toHaveLength(8)
+        expect(actions).toHaveLength(9)
         expect(actions?.[0]).toBe("spawn")
       }),
     ),

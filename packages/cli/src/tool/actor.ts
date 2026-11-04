@@ -1,6 +1,7 @@
 import * as Tool from "./tool"
 import { RecoverableError } from "./recoverable"
-import { Database, NotFoundError } from "@/storage"
+import { Database, NotFoundError, and, desc, eq, or } from "@/storage"
+import { InboxTable } from "@/inbox/inbox.sql"
 import DESCRIPTION from "./actor.txt"
 import DESCRIPTION_CHECKPOINT from "./actor.checkpoint.txt"
 import { withCheckpointDescription, withCheckpointClause } from "./checkpoint-description"
@@ -80,7 +81,56 @@ const sendSchema = z.strictObject({
     .describe(
       "(optional) Message type. Default 'text' is wrapped in <inbox>...</inbox>. 'actor_notification' is passed through verbatim (sender pre-renders).",
     ),
+  idempotency_key: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "(optional) Your key for this message, e.g. a task key. Sending again with the same key is a no-op while the earlier message is queued, running or was consumed; it is sent anew only if the earlier one ended unseen (never_ran, cancelled, rejected).",
+    ),
 })
+
+const receiptSchema = z.strictObject({
+  action: z.literal("receipt"),
+  inbox_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("(optional) inboxID returned by `send`. Omit to list the 20 newest messages this session sent."),
+})
+
+// M05-E2/E5: what became of a message, and which model and variant its receiver
+// runs it with. Visible only to the sending and the receiving session.
+type InboxRow = typeof InboxTable.$inferSelect
+
+function inputModel(row: InboxRow) {
+  if (!row.input_message_id) return undefined
+  try {
+    const info = MessageV2.get({ sessionID: row.receiver_session_id, messageID: row.input_message_id }).info
+    if (info.role !== "user") return undefined
+    return { providerID: info.model.providerID, modelID: info.model.modelID, variant: info.model.variant }
+  } catch {
+    return undefined
+  }
+}
+
+function receiptOf(row: InboxRow) {
+  return {
+    inbox_id: row.id,
+    receiver_session_id: row.receiver_session_id,
+    receiver_actor_id: row.receiver_actor_id,
+    sender_session_id: row.sender_session_id,
+    sender_actor_id: row.sender_actor_id,
+    state: row.state,
+    outcome: row.outcome,
+    consumed: row.consumed,
+    delivered: !!row.delivery_message_id,
+    error: row.error,
+    created_at: row.created_at,
+    updated_at: row.time_updated,
+    model: inputModel(row),
+  }
+}
 
 const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
@@ -298,6 +348,7 @@ export const ActorTool = Tool.define(
             cancelSchema,
             resumeSchema,
             sendSchema,
+            receiptSchema,
             modelsSchema,
           ])
           .meta({ type: "object" }),
@@ -429,6 +480,9 @@ export const ActorTool = Tool.define(
           const targetSid = op.to_session_id !== undefined ? SessionID.make(op.to_session_id) : ctx.sessionID
           // Another session runs in whichever process has it open; never adopt it here.
           const across = targetSid !== ctx.sessionID
+          const key = op.idempotency_key
+            ? `actor-send:${ctx.sessionID}:${ctx.actorID ?? "main"}:${op.to_actor_id}:${op.idempotency_key}`
+            : undefined
           const sendResult = yield* inboxSvc
             .accept({
               receiverSessionID: targetSid,
@@ -439,6 +493,8 @@ export const ActorTool = Tool.define(
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
               ...(across ? { adoptReceiver: false } : {}),
+              // FC-038: namespaced per sender and receiver actor, so keys never collide across them nor with message-id keys.
+              ...(key ? { idempotencyKey: key, reviveUnseen: true } : {}),
             })
             .pipe(
               Effect.catchTag("InboxReceiverNotFound", () =>
@@ -457,15 +513,52 @@ export const ActorTool = Tool.define(
             }
           }
           const delivery = across ? crossSessionDelivery(targetSid) : undefined
+          const model = yield* Effect.sync(() => {
+            const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, sendResult.inboxID)).get())
+            return row ? inputModel(row) : undefined
+          })
+          // Decided inside the accept transaction, so overlapping keyed sends report what each one did.
+          const deduplicated = sendResult.deduplicated === true
           return {
-            title: delivery?.delivery === "receiver_not_open" ? `Queued for ${op.to_actor_id}: session not open` : `Sent to ${op.to_actor_id}`,
-            output: JSON.stringify({ ...sendResult, ...delivery }),
+            title: deduplicated ? `Already sent to ${op.to_actor_id}`
+              : delivery?.delivery === "receiver_not_open" ? `Queued for ${op.to_actor_id}: session not open` : `Sent to ${op.to_actor_id}`,
+            output: JSON.stringify({ ...sendResult, ...delivery, ...(model ? { model } : {}) }),
             metadata: {
               inboxID: sendResult.inboxID,
               inputMessageID: sendResult.inputMessageID,
               receiver_actor_id: op.to_actor_id,
               receiver_session_id: targetSid,
             } as Record<string, any>,
+          }
+        }
+
+        if (op.action === "receipt") {
+          const mine = or(eq(InboxTable.sender_session_id, ctx.sessionID), eq(InboxTable.receiver_session_id, ctx.sessionID))
+          const rows = yield* Effect.sync(() =>
+            Database.use((db) =>
+              op.inbox_id
+                ? db.select().from(InboxTable).where(and(eq(InboxTable.id, op.inbox_id), mine)).all()
+                : db
+                    .select()
+                    .from(InboxTable)
+                    .where(eq(InboxTable.sender_session_id, ctx.sessionID))
+                    .orderBy(desc(InboxTable.created_at))
+                    .limit(20)
+                    .all(),
+            ),
+          )
+          if (op.inbox_id && rows.length === 0) {
+            return {
+              title: "Receipt not found",
+              output: JSON.stringify({ inbox_id: op.inbox_id, error: "not found" }),
+              metadata: { inbox_id: op.inbox_id, error: "not found" } as Record<string, any>,
+            }
+          }
+          const receipts = rows.map(receiptOf)
+          return {
+            title: op.inbox_id ? `Receipt: ${receipts[0].state}` : `Receipts: ${receipts.length}`,
+            output: JSON.stringify(op.inbox_id ? receipts[0] : receipts),
+            metadata: { count: receipts.length } as Record<string, any>,
           }
         }
 

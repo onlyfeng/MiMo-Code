@@ -10,6 +10,7 @@ import { Session } from "../../src/session"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { Database, and, eq } from "../../src/storage"
 import { MessageID, SessionID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ActorTool } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
@@ -194,6 +195,31 @@ describe("actor tool — send action", () => {
   )
 
   it.live(
+    "a keyed resend that revives an unseen message leaves a wake for the unopened receiver",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "coordinator" })
+        const target = yield* sessions.create({ title: "worker" })
+        const def = yield* (yield* ActorTool).init()
+        const send = () => def.execute(
+          { operation: { action: "send", to_actor_id: "main", to_session_id: target.id, content: "take task 5", idempotency_key: "task-5" } },
+          ctxFor(chat.id),
+        ).pipe(Effect.map((result) => JSON.parse(result.output)))
+        const wakes = () => Database.use((db) => db.select().from(InboxWakeTable).where(eq(InboxWakeTable.session_id, target.id)).all())
+        const first = yield* send()
+        Database.use((db) => {
+          db.update(InboxTable).set({ state: "settled", outcome: "never_ran", consumed: false, time_updated: Date.now() })
+            .where(eq(InboxTable.id, first.inboxID)).run()
+          db.delete(InboxWakeTable).where(eq(InboxWakeTable.session_id, target.id)).run()
+        })
+        expect(yield* send()).toMatchObject({ inboxID: first.inboxID, revived: true, delivery: "receiver_not_open" })
+        expect(wakes()).toHaveLength(1)
+      }),
+    ),
+  )
+
+  it.live(
     "cross-session send to a session another live process runs names that process",
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -326,6 +352,116 @@ describe("actor tool — send action", () => {
           { ...ctxFor(a.id, child), agent: "general" },
         )
         expect(rowOf(JSON.parse(fromChild.output).inboxID)?.sender_actor_id).toBe(child)
+      }),
+    ),
+  )
+
+  it.live(
+    "a sender reads what became of its message and the model the receiver runs it with",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const a = yield* sessions.create({ title: "sender" })
+        const b = yield* sessions.create({ title: "receiver" })
+        const c = yield* sessions.create({ title: "bystander" })
+        // The receiver's lane runs at the max variant; input it is sent inherits that.
+        const model = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model"), variant: "max" }
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: b.id,
+          agentID: "main",
+          agent: "build",
+          model,
+          time: { created: Date.now() },
+        })
+        const def = yield* (yield* ActorTool).init()
+        const sent = JSON.parse(
+          (yield* def.execute(
+            { operation: { action: "send", to_actor_id: "main", to_session_id: b.id, content: "take task 3" } },
+            ctxFor(a.id, "main"),
+          )).output,
+        )
+        expect(sent.model).toEqual(model)
+
+        const receipt = (sessionID: SessionID, inboxID?: string) =>
+          def
+            .execute({ operation: { action: "receipt", ...(inboxID ? { inbox_id: inboxID } : {}) } }, ctxFor(sessionID, "main"))
+            .pipe(Effect.map((result) => JSON.parse(result.output)))
+        expect(yield* receipt(a.id, sent.inboxID)).toMatchObject({
+          inbox_id: sent.inboxID,
+          receiver_session_id: b.id,
+          receiver_actor_id: "main",
+          state: "accepted",
+          consumed: false,
+          delivered: false,
+          model,
+        })
+        expect(yield* receipt(b.id, sent.inboxID)).toMatchObject({ inbox_id: sent.inboxID })
+        expect(yield* receipt(c.id, sent.inboxID)).toEqual({ inbox_id: sent.inboxID, error: "not found" })
+        const listed = yield* receipt(a.id)
+        expect(listed.map((row: { inbox_id: string }) => row.inbox_id)).toEqual([sent.inboxID])
+        expect(yield* receipt(c.id)).toEqual([])
+
+        // A message that settled without being seen reads as such.
+        Database.use((db) =>
+          db.update(InboxTable).set({ state: "settled", outcome: "never_ran" }).where(eq(InboxTable.id, sent.inboxID)).run(),
+        )
+        expect(yield* receipt(a.id, sent.inboxID)).toMatchObject({ state: "settled", outcome: "never_ran", consumed: false })
+      }),
+    ),
+  )
+
+  it.live(
+    "a keyed resend is a no-op until the earlier message ended unseen, then goes out once",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const a = yield* sessions.create({ title: "sender" })
+        const other = yield* sessions.create({ title: "another sender" })
+        const b = yield* sessions.create({ title: "receiver" })
+        const registry = yield* ActorRegistry.Service
+        const peer = yield* registry.allocateActorID(b.id, "general")
+        yield* registry.register({
+          sessionID: b.id, actorID: peer, mode: "subagent", agent: "general", description: "peer",
+          contextMode: "none", background: true, lifecycle: "ephemeral",
+        })
+        const def = yield* (yield* ActorTool).init()
+        const send = (from: SessionID, key?: string, to = "main") =>
+          def
+            .execute(
+              { operation: { action: "send", to_actor_id: to, to_session_id: b.id, content: "take task 3", ...(key ? { idempotency_key: key } : {}) } },
+              ctxFor(from, "main"),
+            )
+            .pipe(Effect.map((result) => ({ ...JSON.parse(result.output), title: result.title })))
+        const settle = (id: string, set: Partial<typeof InboxTable.$inferInsert>) =>
+          Database.use((db) => db.update(InboxTable).set(set).where(eq(InboxTable.id, id)).run())
+        const rows = () => Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, b.id)).all())
+
+        const first = yield* send(a.id, "task-3")
+        expect(first.deduplicated).toBe(false)
+        // Queued: the resend returns the same message.
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true, title: "Already sent to main" })
+        // Another sender's key is its own, and so is the same key to another actor of the receiver.
+        expect((yield* send(other.id, "task-3")).inboxID).not.toBe(first.inboxID)
+        // compat: the receiver session is open in no process, so the title says it is queued.
+        expect(yield* send(a.id, "task-3", peer)).toMatchObject({ deduplicated: false, title: `Queued for ${peer}: session not open` })
+        // Consumed: still a no-op.
+        settle(first.inboxID, { state: "settled", outcome: "success", consumed: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        // Ended but seen by the receiver's turn: not resent.
+        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        // Ended unseen: the same message is queued again once, under the same key.
+        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: false, time_updated: Date.now() })
+        const again = yield* send(a.id, "task-3")
+        expect(again).toMatchObject({ inboxID: first.inboxID, inputMessageID: first.inputMessageID, deduplicated: false, revived: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        const old = rows().find((row) => row.id === first.inboxID)
+        expect(old).toMatchObject({ state: "accepted", idempotency_key: `actor-send:${a.id}:main:main:task-3` })
+        // Without a key every send is a new message.
+        expect((yield* send(a.id)).inboxID).not.toBe((yield* send(a.id)).inboxID)
+        expect(rows()).toHaveLength(5)
       }),
     ),
   )
