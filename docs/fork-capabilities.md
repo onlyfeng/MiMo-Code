@@ -151,6 +151,8 @@ not change their implementation. The preceding review is retained in the
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
 | FC-038 | Actor send idempotency key: per-sender/receiver namespace, revive only unseen messages                    | Fork addition to upstream actor tool                             | A keyed resend is a no-op unless the earlier message ended unseen                        |
 | FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
+| FC-040 | Subagent writability for the progress check ignores catch-all allows after its own deny                   | Fork fix of upstream postStop check                              | Never ask a read-only subagent to write its journal under `--yolo`                       |
+| FC-041 | Exec `files.readText` reads the memory directory                                                          | Fork fix of upstream exec file jail                              | Let a harness without a read tool read task journals                                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3068,3 +3070,64 @@ logged`, and the peer `success`/`failure` variants of
   unpatched parser.
 - Retirement condition: upstream opentui gives open string sequences their own
   timeout, or the dependency is upgraded past such a fix.
+
+## FC-040 — a read-only subagent is not asked to write its journal under a global allow
+
+- Status: active
+- Canonical owner: fork `main` — `ownWritability` and the `canWrite` it feeds in
+  `packages/cli/src/actor/spawn.ts` (input to `actor.postStop`, read by
+  `packages/cli/src/plugin/subagent-progress-checker.ts`)
+- Observable contract:
+  - A subagent whose own ruleset ends its defaults with a catch-all deny
+    (`explore`: `"*": "deny"`) reports `canWrite: false` even when a catch-all
+    allow is merged after it — `--yolo`
+    (`MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS`, which merges `"*": "allow"` under
+    the user config) or a global `permission: {"*": "allow"}` — so the
+    progress checker does not nudge it to write `tasks/<id>/progress.md`.
+  - An explicit later rule still decides: `write`/`edit: "allow"` after the
+    deny makes it writable. Agents without a catch-all deny are unchanged.
+  - Runtime tool permissions are unchanged; this only feeds `canWrite`.
+- Motivation: under `--yolo` every built-in agent's ruleset ended in
+  `"*": "allow"`, so `canWrite` was true for `explore`; its read-only prompt
+  then refused the "write the journal" nudge three times (MAX_POST_REACT),
+  wasting three turns and delaying the result by about a minute each time
+  (6 explore runs in one 2-hour coordinator session).
+- Upstream relationship: upstream computes `canWrite` from the merged agent
+  ruleset the same way. Fork fix; `dev/compat` inherits it.
+- Watch surfaces: the files above; `Config` `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS`
+  merge; agent default rulesets in `packages/cli/src/agent/agent.ts`.
+- Tests/evidence: `packages/cli/test/actor/poststop-progress-write-permission.repro.test.ts`
+  "explore bound to task_id skips the progress check … under a global allow"
+  (real spawn, one LLM turn, no journal; fails with the merged ruleset) and
+  "ownWritability (FC-040)" (catch-all allow after deny stays read-only;
+  explicit later write/edit allow stays writable; agents without a deny
+  unchanged — dropping the filter or the explicit-rule exception fails it).
+- Retirement condition: upstream derives subagent writability independently of
+  catch-all allows, or `--yolo` stops overriding agent catch-all denies.
+
+## FC-041 — exec can read the memory directory
+
+- Status: active
+- Canonical owner: fork `main` — `execReadRoots` in
+  `packages/cli/src/tool/tool-script.ts`
+- Observable contract:
+  - `files.readText` in `exec` reads the worktree, the OS temp dir and
+    `<data>/memory/` (session checkpoints, notes, `tasks/<id>/progress.md`,
+    project and global memory). The rejection message names all three.
+  - `files.writeText` stays OS-temp-only; memory writes keep going through the
+    write tools and memory-path-guard.
+- Motivation: in the codex harness the agent has no `read` tool, so `exec` is
+  its only way to read a file. Coordinators reading a subagent's progress
+  journal were rejected ("path outside allowed roots (worktree, tmp)") while
+  the `read` tool already reads the memory tree without asking
+  (`assertExternalDirectoryEffect` defers it to memory-path-guard).
+- Upstream relationship: upstream jails reads to worktree + tmp. Fork fix;
+  `dev/compat` inherits it.
+- Watch surfaces: `tool-script.ts` jail roots, `resolveJailed`, the `files`
+  declaration text; `external-directory.ts` memory deferral.
+- Tests/evidence: `packages/cli/test/tool/tool-script.test.ts`
+  "files.readText reads the memory directory" and "files.readText roots
+  include the memory directory wherever it lives" (the second fails when the
+  memory root is dropped; the first alone cannot, because the test data dir
+  lies under tmp).
+- Retirement condition: upstream lets `exec` read the memory tree.
