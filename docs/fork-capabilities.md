@@ -2987,8 +2987,9 @@ logged`, and the peer `success`/`failure` variants of
   (`packages/cli/src/inbox/controller.ts`), passed through `Inbox.accept`
 - Observable contract:
   - `actor send` with `idempotency_key` stores
-    `actor-send:<sender session>:<sender actor>:<key>`, so senders never share
-    keys and none collide with message-id keys.
+    `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
+    neither senders nor a receiver session's actors share keys, and none
+    collide with message-id keys.
   - A send whose key already names a row for that receiver returns that row
     (`deduplicated: true`) while it is accepted, claimed, or consumed — a
     `never_ran` row that the receiver's turn saw included.
@@ -3014,8 +3015,9 @@ logged`, and the peer `success`/`failure` variants of
   is a no-op until the earlier message ended unseen, then goes out once"
   (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
   is separate; an unseen `never_ran` is superseded once with the old key
-  marked; unkeyed sends always go out). Disabling the supersede, superseding
-  consumed rows, dropping the sender namespace, or losing the key in the tool
+  marked; the same key to another actor of the receiver goes out; unkeyed
+  sends always go out). Disabling the supersede, superseding consumed rows,
+  dropping the sender or receiver-actor namespace, or losing the key in the tool
   or in `Inbox.accept` each fails it.
   `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend that supersedes
   an unseen send replays both rows" fails when the delta omits the old row.

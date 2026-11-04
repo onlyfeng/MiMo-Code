@@ -412,7 +412,7 @@ export const ActorTool = Tool.define(
           }
           const targetSid = op.to_session_id !== undefined ? SessionID.make(op.to_session_id) : ctx.sessionID
           const key = op.idempotency_key
-            ? `actor-send:${ctx.sessionID}:${ctx.actorID ?? "main"}:${op.idempotency_key}`
+            ? `actor-send:${ctx.sessionID}:${ctx.actorID ?? "main"}:${op.to_actor_id}:${op.idempotency_key}`
             : undefined
           const sendResult = yield* inboxSvc
             .accept({
@@ -423,7 +423,7 @@ export const ActorTool = Tool.define(
               senderActorID: ctx.actorID ?? "main",
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
-              // FC-038: namespaced per sender so senders' keys never collide, nor with message-id keys.
+              // FC-038: namespaced per sender and receiver actor, so keys never collide across them nor with message-id keys.
               ...(key ? { idempotencyKey: key, supersedeUnconsumed: true } : {}),
             })
             .pipe(
