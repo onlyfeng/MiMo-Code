@@ -1194,7 +1194,7 @@ itTool.live("build's tool list swaps GPT-specific file tools", () =>
           .find((line) => line.trimStart().startsWith("actor(input:"))
         expect(actorDeclaration).toBeDefined()
         expect([...actorDeclaration!.matchAll(/action: "([^"]+)"/g)].map((match) => match[1]).sort()).toEqual([
-          "cancel", "models", "resume", "run", "send", "spawn", "status", "wait",
+          "cancel", "models", "receipt", "resume", "run", "send", "spawn", "status", "wait",
         ])
         const actor = tools.find((tool) => tool.id === "actor")
         for (const operation of [
