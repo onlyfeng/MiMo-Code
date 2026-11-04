@@ -3854,6 +3854,60 @@ pauseIt.live("a child execution postStop hook can cancel its ancestor without jo
 
 // docs/compose/spec/reasoning-variants.md S2.3 — the spawn variant reaches the child's user message.
 describe("Actor.spawn reasoning variant", () => {
+  it.live("keeps the agent variant on a provider-aware model group member", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "group variant",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.tool("actor", {
+          operation: { action: "run", subagent_type: "tuned", description: "Group probe", prompt: "group child task" },
+        })
+        yield* llm.text("child done")
+        yield* llm.text("parent done")
+        yield* (yield* SessionPrompt.Service).prompt({
+          sessionID: parent.id,
+          agent: "build",
+          model: ref,
+          variant: "high",
+          parts: [{ type: "text", text: "delegate to the configured agent" }],
+        })
+        const msgs = yield* session.messages({ sessionID: parent.id, agentID: "*" })
+        const childUser = msgs.find((m) => m.info.role === "user" && m.info.agent === "tuned")
+        expect(childUser?.info.role === "user" ? childUser.info.model : undefined).toEqual({ ...ref, variant: "low" })
+        const request = (yield* llm.inputs).find((input) => {
+          const messages = input.messages as { role?: string; content?: unknown }[] | undefined
+          return messages?.some((message) => message.role === "user" && JSON.stringify(message.content).includes("group child task"))
+        })
+        expect(request?.reasoning_effort).toBe("low")
+      }),
+      {
+        git: true,
+        config: (url) => {
+          const config = providerCfg(url)
+          const model = {
+            ...config.provider.test.models["test-model"],
+            reasoning: true,
+            variants: { low: { reasoningEffort: "low" }, high: { reasoningEffort: "high" } },
+          }
+          return {
+            ...config,
+            provider: {
+              test: { ...config.provider.test, models: { "test-model": model } },
+              alt: { ...config.provider.test, id: "alt", name: "Alt", models: { "test-model": model } },
+            },
+            model_groups: { squad: { default: "alt/test-model", models: ["test/test-model", "alt/test-model"] } },
+            agent: { tuned: { description: "Tuned", mode: "subagent", model: "squad", variant: "low" } },
+          }
+        },
+      },
+    ),
+    15000,
+  )
+
   it.live("records the given variant on the child user message and sends its reasoning effort", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {

@@ -1310,7 +1310,7 @@ describe("Actor tool reasoning variant inheritance", () => {
       () =>
         Effect.gen(function* () {
           const input = yield* spawnWith({ subagent_type: "tuned" }, "high")
-          expect(input?.variant).toBeUndefined()
+          expect(input?.variant).toBe("low")
         }),
       {
         config: {

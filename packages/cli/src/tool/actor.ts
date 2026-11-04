@@ -666,14 +666,19 @@ export const ActorTool = Tool.define(
             })
 
         // Reasoning variant (docs/compose/spec/reasoning-variants.md S2.3): an agent with its
-        // own variant on its own configured model keeps it (SessionPrompt applies it when no
-        // variant is passed). Otherwise inherit the parent turn's variant — as-is on the same
-        // model, and on a different model only when that model offers the same level.
+        // own variant on its own configured model keeps it. Resolve it here because the
+        // prompt's model-group fallback lacks the caller's provider. Otherwise inherit the
+        // parent's variant as-is on the same model, and on a different model only when it offers that level.
         // An explicit --model always counts as an override, even when it names the agent's own model.
         const agentOwnsVariant = !!next.variant && !op.model && !!(next.model || next.modelRef)
         const parentVariant = agentOwnsVariant ? undefined : msg.info.variant
         let variant: string | undefined
-        if (parentVariant) {
+        if (agentOwnsVariant) {
+          const target = yield* provider
+            .getModel(model.providerID, model.modelID)
+            .pipe(Effect.catchDefect(() => Effect.succeed(undefined)))
+          if (next.variant && target?.variants?.[next.variant]) variant = next.variant
+        } else if (parentVariant) {
           const sameModel = model.providerID === msg.info.providerID && model.modelID === msg.info.modelID
           if (sameModel) variant = parentVariant
           else {
