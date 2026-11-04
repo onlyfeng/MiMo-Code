@@ -302,6 +302,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-04 inherit FC-040 and FC-041
+
+Inherited from `main` PRs #219 (FC-040: a read-only subagent's `canWrite` ignores catch-all allows merged after its own catch-all deny, so `--yolo` no longer has the progress checker ask `explore` to write a journal) and #220 (FC-041: `exec` `files.readText` reads `<data>/memory/`); no owner added or retired. The merge is conflict-free: DC-ACTOR-001's `spawn.ts` overlay (frozen `turnContext`, subagent `variant`) does not meet the `canWrite` hunk, and `tool-script.ts` carries no compat overlay.
+
 ## 2026-11-04 inherit FC-036, FC-037, FC-038 and FC-039
 
 Inherited from `main` PRs #214 (FC-036 writer delta window guard), #215 (FC-037 `actor receipt` and the receiver model in send results), #216 (FC-038 keyed actor sends) and #217 (FC-039 split terminal replies in the opentui stdin parser); no owner added or retired.
