@@ -457,7 +457,8 @@ describe("checkpoint writer step budget", () => {
               })
               expect(writerCalls).toBe(CHECKPOINT_WRITER_STEPS)
             }),
-          { git: true, config: config(server.origin) },
+          // Skip filesystem snapshots for the 120-step read-only task-list loop.
+          { git: true, config: { ...config(server.origin), snapshot: false } },
         )
       }),
     150_000,
