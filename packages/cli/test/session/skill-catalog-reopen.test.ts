@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import { tmpdir } from "../fixture/fixture"
 import { SESSION_MEMORY_DIR_MARKER } from "../../src/session/prompt"
+import type { MessageV2 } from "../../src/session/message-v2"
+import { isWindowReminder } from "../lib/reminder"
 
 const OLD = "CATALOG_BEFORE_PROCESS_EXIT_38c9"
 const NEW = "CATALOG_AFTER_PROCESS_REOPEN_a473"
@@ -158,12 +160,14 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
     )
     expect(reopened.captured).toEqual(first.captured)
     expect(reopened.captured.system.join("\n")).not.toContain(NEW)
-    // The first user was never sent, so it carries the context window's memory
-    // paths reminder; the catalog refresh must not touch any other part.
+    // The first user was never sent, so it carries the context window's
+    // reminders; the catalog refresh must not touch any other part.
     const isDirReminder = (part: { type: string; text?: string }) =>
       part.type === "text" && !!part.text?.includes(SESSION_MEMORY_DIR_MARKER)
-    const firstAfter = reopened.after.find((message: { info: { id: string } }) => message.info.id === first.userID).parts
-    expect(firstAfter.filter((part: { type: string; text?: string }) => !isDirReminder(part))).toEqual(
+    const firstAfter: MessageV2.Part[] = reopened.after.find(
+      (message: { info: { id: string } }) => message.info.id === first.userID,
+    ).parts
+    expect(firstAfter.filter((part) => !isWindowReminder(part))).toEqual(
       reopened.before.find((message: { info: { id: string } }) => message.info.id === first.userID).parts,
     )
     expect(firstAfter.filter(isDirReminder)).toHaveLength(1)
