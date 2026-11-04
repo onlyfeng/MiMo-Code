@@ -216,6 +216,12 @@ type Input = {
    * claim it instead of holding it behind a persistent retry.
    */
   awaitNewInput?: Effect.Effect<void>
+  /**
+   * FC-042: false for an agent with no context management (a bounded agent).
+   * Reaching the compaction trigger is then not an overflow — only the
+   * provider rejecting the request is; nothing could act on the trigger.
+   */
+  compactsOnUsage?: boolean
 }
 
 export interface Interface {
@@ -314,6 +320,7 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         model: input.model,
         agentMetrics: input.agentMetrics,
+        compactsOnUsage: input.compactsOnUsage,
         toolcalls: {},
         shouldBreak: false,
         snapshot: initialSnapshot,
@@ -822,6 +829,7 @@ export const layer: Layer.Layer<
               .pipe(Effect.ignore, Effect.forkIn(scope))
             if (
               !ctx.assistantMessage.summary &&
+              ctx.compactsOnUsage !== false &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
             ) {
               ctx.needsOverflowHandling = true
