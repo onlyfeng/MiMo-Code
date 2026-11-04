@@ -14,13 +14,13 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-31
-- Upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
-- Prior reviewed upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
-- Main behavior (runtime/tests): `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b` (host execution boundary for MCP/LSP/formatter configuration, legacy TOML and stored-config persistence; includes FC-020)
-- Inherited compat behavior: `f37f9b0ec111c54fb68f7eccb3d0534768f917ea` (shared changes inherited; compat config overlay unchanged)
-- Bundled guidance content: `19362075089580aef8b709de58a5433cbfd6608b` (available search/MCP and DuckDuckGo fallback; explicit Exa/search MCP configuration)
-- Prior fork `main` tip: `a8892c5c5036be2f6fc41fd70e53f42b59760ce9`
+- Last reviewed: 2026-11-04
+- Upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
+- Prior reviewed upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
+- Main behavior (runtime/tests): `2516c8e76ba2bd452998e66153878bfd35f15ddf` (C01–C07, including the selected-model variant correction and concurrent FC-042 integration)
+- Inherited compat behavior: `9a1e4d700607429f8218f7ede3ff37d51f82114f` (explicit/configured variant precedence and parent fallback; existing compatibility overlays retained)
+- Bundled guidance content: `fd04de73ced82599baac249e9cf96dfb55b9d778` (cloud-sharing commands/settings removed; unrelated fork guidance retained)
+- Prior fork `main` tip: `602f07bf662c1d0fb9c9c67982c24dedfa663f35`; concurrent accepted main: `4f6f694b22da00c79f6200c80ff9db3212039ac9`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +30,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 now owns the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+
+Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
@@ -122,6 +124,7 @@ not change their implementation. The preceding review is retained in the
 | FD-010 | compaction summary acceptance                                                         | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                                                       | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012                                                                   |
 | FD-011 | compaction request tool_choice                                                        | Rejects upstream's `"auto"`: it permits the one event the summary processor throws on                                                           | Keep tool calls disabled while summary messages cannot handle them                                                                                                        |
 | FD-012 | compaction retry on an empty step                                                     | Extends upstream: retries a genuinely empty step, once by default                                                                               | Preserve the configurable non-negative limit (default 1, 0 disables) and empty-step scope                                                                                 |
+| FD-013 | Fresh legacy model configuration and literal-preserving updates | Retains the source-level semantics reverted by upstream bfd5a2f4 | Read legacy values afresh; never persist expanded runtime configuration |
 
 ## FD-001 — run approval must not toggle shared delete state
 
@@ -1083,3 +1086,30 @@ the complete resolved model identity` case. FD-005 keeps only identity
 - Retirement condition: upstream retries a compaction step that produced no
   content, under a comparable bound. Upstream recovering reasoning-only
   summaries satisfies FD-010, NOT this entry.
+
+## FD-013 — model configuration retains its stored source semantics
+
+- Status: active
+- Canonical owner: fork `main` configuration persistence and legacy model refresh
+- Observable contract: legacy TOML is parsed from disk on every load. Models-only
+  refresh includes freshly edited legacy model settings without writing a migration
+  or deleting the source. Ordinary loading may migrate the file. `Config.update`
+  reads, normalizes and validates the stored JSONC before merging an update; it
+  preserves literal `{env:...}` / `{file:...}` references and unresolved plugin
+  paths, and invalid stored data fails before any write.
+- Upstream relationship: deliberately retain these two independent behaviors
+  from `7bc7dc3a` when adopting `bfd5a2f4`'s reversal of execution-source filtering.
+  The source filter itself is removed; plugin host restrictions remain plugin-only.
+  FC-004 owns MCP import and startup-control precedence, not this persistence rule.
+- Watch surfaces: `packages/cli/src/config/config.ts` — `loadGlobal`,
+  `prepareModelRefresh`, `update`, `normalizeLoadedConfig`; `config/variable.ts`
+  is intentionally outside the stored-file update path.
+- Tests/evidence: `packages/cli/test/config/config.test.ts` configuration persistence
+  and legacy refresh cases prove literal retention, invalid-file non-mutation,
+  ordinary migration/reload, and two successive edited legacy model refreshes
+  without writes. The final configuration run passes 95 tests, 229 assertions.
+- Review basis: upstream `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`;
+  main `fd04de73ced82599baac249e9cf96dfb55b9d778`.
+- Retirement condition: upstream provides equivalent fresh legacy model reads and
+  updates that preserve the stored configuration rather than serializing an
+  expanded runtime view.
