@@ -10,6 +10,7 @@ import { Session } from "../../src/session"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { Database, and, eq } from "../../src/storage"
 import { MessageID, SessionID } from "../../src/session/schema"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ActorTool } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
@@ -254,6 +255,62 @@ describe("actor tool — send action", () => {
           { ...ctxFor(a.id, child), agent: "general" },
         )
         expect(rowOf(JSON.parse(fromChild.output).inboxID)?.sender_actor_id).toBe(child)
+      }),
+    ),
+  )
+
+  it.live(
+    "a sender reads what became of its message and the model the receiver runs it with",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const a = yield* sessions.create({ title: "sender" })
+        const b = yield* sessions.create({ title: "receiver" })
+        const c = yield* sessions.create({ title: "bystander" })
+        // The receiver's lane runs at the max variant; input it is sent inherits that.
+        const model = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model"), variant: "max" }
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: b.id,
+          agentID: "main",
+          agent: "build",
+          model,
+          time: { created: Date.now() },
+        })
+        const def = yield* (yield* ActorTool).init()
+        const sent = JSON.parse(
+          (yield* def.execute(
+            { operation: { action: "send", to_actor_id: "main", to_session_id: b.id, content: "take task 3" } },
+            ctxFor(a.id, "main"),
+          )).output,
+        )
+        expect(sent.model).toEqual(model)
+
+        const receipt = (sessionID: SessionID, inboxID?: string) =>
+          def
+            .execute({ operation: { action: "receipt", ...(inboxID ? { inbox_id: inboxID } : {}) } }, ctxFor(sessionID, "main"))
+            .pipe(Effect.map((result) => JSON.parse(result.output)))
+        expect(yield* receipt(a.id, sent.inboxID)).toMatchObject({
+          inbox_id: sent.inboxID,
+          receiver_session_id: b.id,
+          receiver_actor_id: "main",
+          state: "accepted",
+          consumed: false,
+          delivered: false,
+          model,
+        })
+        expect(yield* receipt(b.id, sent.inboxID)).toMatchObject({ inbox_id: sent.inboxID })
+        expect(yield* receipt(c.id, sent.inboxID)).toEqual({ inbox_id: sent.inboxID, error: "not found" })
+        const listed = yield* receipt(a.id)
+        expect(listed.map((row: { inbox_id: string }) => row.inbox_id)).toEqual([sent.inboxID])
+        expect(yield* receipt(c.id)).toEqual([])
+
+        // A message that settled without being seen reads as such.
+        Database.use((db) =>
+          db.update(InboxTable).set({ state: "settled", outcome: "never_ran" }).where(eq(InboxTable.id, sent.inboxID)).run(),
+        )
+        expect(yield* receipt(a.id, sent.inboxID)).toMatchObject({ state: "settled", outcome: "never_ran", consumed: false })
       }),
     ),
   )
