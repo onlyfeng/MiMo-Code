@@ -10,7 +10,7 @@ import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { AppLayer, AppRuntime } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
-import { SessionPrompt, SESSION_MEMORY_DIR_MARKER } from "../../src/session/prompt"
+import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -23,6 +23,7 @@ import { provideTmpdirServer, tmpdirScoped } from "../fixture/fixture"
 import { TestLLMServer } from "../lib/llm-server"
 import { testEffect } from "../lib/effect"
 import { withEnv } from "../lib/env"
+import { isWindowReminder } from "../lib/reminder"
 
 withEnv({
   MIMOCODE_DISABLE_BUILTIN_SKILLS: "true",
@@ -50,9 +51,6 @@ const config = (url: string): Partial<Config.Info> => ({
     },
   },
 })
-// The runLoop may persist the memory paths reminder on a user message that no
-// reply follows yet; every other part must stay untouched.
-const isDirReminder = (part: MessageV2.Part) => part.type === "text" && part.text.includes(SESSION_MEMORY_DIR_MARKER)
 
 const resume = (dir: string, sessionID: string, assistantID: string, taskID: string, signal?: AbortSignal) =>
   Effect.promise(() =>
@@ -489,7 +487,7 @@ it.live(
           )
           expect(yield* llm.calls).toBe(1)
           const recovered = messages.find((message) => message.info.id === user.id)
-          expect(recovered && { ...recovered, parts: recovered.parts.filter((part) => !isDirReminder(part)) }).toEqual(
+          expect(recovered && { ...recovered, parts: recovered.parts.filter((part) => !isWindowReminder(part)) }).toEqual(
             before,
           )
           expect(
