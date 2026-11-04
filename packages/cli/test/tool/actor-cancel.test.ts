@@ -9,7 +9,7 @@ import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, type SessionID } from "../../src/session/schema"
-import { ActorTool } from "../../src/tool/actor"
+import { ActorTool, actorCancelWait } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -137,6 +137,55 @@ describe("actor tool — cancel action", () => {
         const entry = yield* registry.get(child.id, child.id)
         expect(entry?.status).toBe("idle")
         expect(entry?.lastOutcome).toBe("cancelled")
+      }),
+    ),
+  )
+
+  // FC-043: a child stuck in uninterruptible work must not block the caller's cancel.
+  it.live(
+    "cancel returns cancelling when the actor does not stop in time, and keeps cancelling",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const child = yield* sessions.create({ parentID: chat.id, title: "stuck (@general subagent)" })
+        yield* registry.register({
+          sessionID: child.id,
+          actorID: child.id,
+          mode: "peer",
+          agent: "general",
+          description: "stuck",
+          contextMode: "none",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+        yield* registry.updateStatus(child.id, child.id, { status: "running" })
+        let release!: () => void
+        const stuck = new Promise<void>((resolve) => (release = resolve))
+        let finished = false
+        const previous = spawnRef.current!
+        const previousWait = actorCancelWait.ms
+        spawnRef.current = {
+          ...previous,
+          cancel: () => Effect.uninterruptible(Effect.promise(() => stuck)).pipe(Effect.tap(() => Effect.sync(() => (finished = true)))),
+        }
+        actorCancelWait.ms = 100
+        yield* Effect.addFinalizer(() => Effect.sync(() => {
+          spawnRef.current = previous
+          actorCancelWait.ms = previousWait
+          release()
+        }))
+
+        const { ctx } = ctxFor(chat.id)
+        const def = yield* (yield* ActorTool).init()
+        const result = yield* def.execute({ operation: { action: "cancel", actor_id: child.id } }, ctx).pipe(Effect.timeout("5 seconds"))
+        expect(parseOutput(result.output).status).toBe("cancelling")
+        expect(finished).toBe(false)
+        // The cancellation was not dropped: it completes once the stuck work ends.
+        release()
+        yield* Effect.promise(() => Bun.sleep(50))
+        expect(finished).toBe(true)
       }),
     ),
   )
