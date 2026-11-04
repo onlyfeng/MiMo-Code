@@ -160,6 +160,7 @@ not change their implementation. The preceding review is retained in the
 | FC-041 | Exec `files.readText` reads the memory directory                                                          | Fork fix of upstream exec file jail                              | Let a harness without a read tool read task journals                                     |
 | FC-042 | A bounded agent's usage past the compaction trigger is not an overflow                                    | Fork fix of upstream bounded overflow                            | Stop a writer only when the provider rejects its request                                 |
 | FC-043 | `actor cancel` waits a bounded time for the actor to stop                                                 | Fork fix of upstream actor tool                                  | A stuck child never freezes the caller's turn                                            |
+| FC-044 | Checkpoint writer returns only `.output` from exec tool calls                                             | Fork addition to upstream writer prompt                          | Keep the full patch diff out of the writer's context                                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3207,3 +3208,32 @@ logged`, and the peer `success`/`failure` variants of
   `Effect.timeout`, which cannot interrupt it).
 - Retirement condition: upstream bounds the tool-level cancel wait, or
   `Actor.cancel` no longer joins uninterruptibly.
+
+## FC-044 — the checkpoint writer returns only `.output` from exec calls
+
+- Status: active
+- Canonical owner: fork `main` — `checkpointWriterExecReturn`, placed after the
+  tool contract in `composeWriterPrompt` (`packages/cli/src/session/checkpoint.ts`)
+- Observable contract:
+  - The writer task tells a writer that calls its tools through `exec` (the
+    Codex harness, where `apply_patch` replaces edit/write) to return each
+    result's `.output`, not the whole result.
+  - Patch application is unchanged: the tool writes the file inside the call;
+    the `exec` return value is only what reaches the model. A patch that does
+    not apply still throws, so the `exec` reports `code_error`.
+- Motivation: a returned `apply_patch` result carries `metadata.diff` and
+  `files[].patch` — since upstream `eb8ee1cd` the untrimmed full diff. In one
+  coordinator session 97% of the writers' exec output (≈405K characters over 16
+  writers) was these echoes, re-read on every later writer step.
+- Upstream relationship: upstream's writer prompt has no such instruction.
+  Fork addition; `dev/compat` inherits it.
+- Watch surfaces: `composeWriterPrompt`; `tool/tool-script.ts` return
+  serialization; `tool/apply_patch.ts` result shape.
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  (the writer task carries the instruction; fails without it);
+  `packages/cli/test/tool/tool-script.test.ts` "real apply_patch through exec,
+  returning only .output" (the real tool applies the patch and returns the
+  summary without `@@`, the full result does carry the diff, and a patch that
+  does not apply fails the `exec` and leaves the file unchanged).
+- Retirement condition: `exec` stops serializing nested tool metadata into the
+  return value, or the writer stops calling tools through `exec`.
