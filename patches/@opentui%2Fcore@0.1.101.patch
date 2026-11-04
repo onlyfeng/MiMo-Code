@@ -2,10 +2,46 @@ diff --git a/node_modules/@opentui/core/.bun-tag-1a78c3343e7bc25e b/.bun-tag-1a7
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/index-xsfpee0k.js b/index-xsfpee0k.js
-index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..ef4ee58deeed1b28c3863268429d7b2b2617754b 100644
+index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f612ad9284 100644
 --- a/index-xsfpee0k.js
 +++ b/index-xsfpee0k.js
-@@ -9914,7 +9914,9 @@ class ExtmarksController {
+@@ -6855,6 +6855,7 @@ var env = new Proxy({}, {
+ // src/lib/stdin-parser.ts
+ import { Buffer as Buffer3 } from "buffer";
+ var DEFAULT_TIMEOUT_MS = 20;
++var STRING_SEQUENCE_TIMEOUT_MS = 1000;
+ var DEFAULT_MAX_PENDING_BYTES = 64 * 1024;
+ var INITIAL_PENDING_CAPACITY = 256;
+ var ESC = 27;
+@@ -7248,9 +7249,17 @@ class StdinParser {
+       onEvent(event);
+     }
+   }
++  // MiMoCode: a terminal reply (DCS/OSC/APC) can reach stdin in pieces. Flushing
++  // it after the short key timeout dropped the head and typed the rest into the
++  // prompt (e.g. "48;2;10;10;10m" from a split DECRPSS). Nobody types these
++  // introducers by hand, so give an open string sequence longer to finish.
++  pendingTimeoutMs() {
++    const tag = this.state?.tag;
++    return tag === "dcs" || tag === "osc" || tag === "apc" ? Math.max(this.timeoutMs, STRING_SEQUENCE_TIMEOUT_MS) : this.timeoutMs;
++  }
+   flushTimeout(nowMsValue = this.clock.now()) {
+     this.ensureAlive();
+-    if (this.pendingSinceMs !== null && (nowMsValue < this.pendingSinceMs || nowMsValue - this.pendingSinceMs < this.timeoutMs)) {
++    if (this.pendingSinceMs !== null && (nowMsValue < this.pendingSinceMs || nowMsValue - this.pendingSinceMs < this.pendingTimeoutMs())) {
+       return;
+     }
+     this.tryForceFlush();
+@@ -8126,7 +8135,7 @@ class StdinParser {
+       } catch (error) {
+         console.error("stdin parser timeout flush failed", error);
+       }
+-    }, this.timeoutMs);
++    }, this.pendingTimeoutMs());
+   }
+   clearTimeout() {
+     if (!this.timeoutId) {
+@@ -9914,7 +9923,9 @@ class ExtmarksController {
          return;
        }
        this.originalDeleteCharBackward();
@@ -16,7 +52,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..ef4ee58deeed1b28c3863268429d7b2b
      };
      this.editBuffer.deleteChar = () => {
        if (this.destroyed) {
-@@ -9923,9 +9925,10 @@ class ExtmarksController {
+@@ -9923,9 +9934,10 @@ class ExtmarksController {
        }
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
@@ -29,7 +65,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..ef4ee58deeed1b28c3863268429d7b2b
          this.originalDeleteChar();
          return;
        }
-@@ -9946,8 +9949,13 @@ class ExtmarksController {
+@@ -9946,8 +9958,13 @@ class ExtmarksController {
          this.updateHighlights();
          return;
        }
@@ -44,7 +80,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..ef4ee58deeed1b28c3863268429d7b2b
      };
      this.editBuffer.deleteRange = (startLine, startCol, endLine, endCol) => {
        if (this.destroyed) {
-@@ -9999,7 +10007,8 @@ class ExtmarksController {
+@@ -9999,7 +10016,8 @@ class ExtmarksController {
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
        this.originalInsertText(text);
@@ -54,7 +90,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..ef4ee58deeed1b28c3863268429d7b2b
      };
      this.editBuffer.insertChar = (char) => {
        if (this.destroyed) {
-@@ -10009,7 +10018,8 @@ class ExtmarksController {
+@@ -10009,7 +10027,8 @@ class ExtmarksController {
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
        this.originalInsertChar(char);
