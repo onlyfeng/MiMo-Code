@@ -939,6 +939,7 @@ describe("invalid-output continuation — integration", () => {
   test("a prompt sent while a retried attempt hangs supersedes the step and runs in the same turn", async () => {
     await using tmp = await tmpdir({ git: true })
     const hanging = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     let readMain: (() => MessageV2.WithParts[]) | undefined
     let beforeAnswer: MessageV2.WithParts[] = []
     const stub = startScriptedLLMServer([
@@ -947,7 +948,7 @@ describe("invalid-output continuation — integration", () => {
         lines: textStopResponse("never delivered"),
         beforeReply: () => {
           hanging.resolve()
-          return new Promise(() => {})
+          return release.promise
         },
       },
       { lines: textStopResponse("answer with the steer"), beforeReply: async () => { beforeAnswer = readMain?.() ?? [] } },
@@ -1009,6 +1010,7 @@ describe("invalid-output continuation — integration", () => {
       expect(answer).toBeDefined()
       expect(retryParts(msgs)).toEqual([])
     } finally {
+      release.resolve()
       await stub.stop()
     }
   }, 30_000)
@@ -1108,13 +1110,14 @@ describe("invalid-output continuation — integration", () => {
   test("a message sent to a subagent while its retried attempt hangs supersedes the subagent step", async () => {
     await using tmp = await tmpdir({ git: true })
     const hanging = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     const stub = startScriptedLLMServer([
       { lines: emptyStopResponse() },
       {
         lines: textStopResponse("never delivered"),
         beforeReply: () => {
           hanging.resolve()
-          return new Promise(() => {})
+          return release.promise
         },
       },
       { lines: textStopResponse("actor answer with the steer") },
@@ -1156,6 +1159,7 @@ describe("invalid-output continuation — integration", () => {
       expect(assistants.some((message) => message.parts.some((part) => part.type === "text" && part.text === "actor answer with the steer"))).toBe(true)
       expect(retryParts(msgs)).toEqual([])
     } finally {
+      release.resolve()
       await stub.stop()
     }
   }, 30_000)
