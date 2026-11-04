@@ -258,7 +258,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             const revived = db.update(InboxTable).set({
               state: "accepted", epoch, outcome: null, error: null, run_id: null, claim_frontier: null,
               delivery_message_id: null, time_updated: now,
-            }).where(eq(InboxTable.id, row.id)).returning().get()!
+            }).where(eq(InboxTable.id, row.id)).returning().get()
             const laneRow = bumpLane(db, input.lane, now)
             InboxSync.record({ sessionID: input.lane.sessionID, receipts: [revived], lanes: [laneRow] })
             return prepared = { row: revived, kind: "inserted" as const, revision: laneRow.input_revision, revived: true }
