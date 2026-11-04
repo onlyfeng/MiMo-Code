@@ -330,6 +330,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-04 inherit FC-044
+
+Inherited from `main` PR #226 (FC-044: the checkpoint writer task tells an `exec` caller to return only each result's `.output`); no owner added or retired. Conflict-free; `composeWriterPrompt` has no compat overlay.
+
 ## 2026-11-04 inherit FC-043
 
 Inherited from `main` PR #224 (FC-043: `actor cancel` waits at most 30 s for the actor to stop, then returns `cancelling` while cancellation continues detached); no owner added or retired. One import-block conflict in `src/tool/actor.ts` with DC-SESSION-001's `SessionOwner` import; both kept. The compat cancel path is otherwise main's.
