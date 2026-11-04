@@ -10,6 +10,18 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
+- Status: active; all twelve DC owners remain compat-owned. No override retires or moves.
+- Last reviewed: 2026-11-04; live upstream `7bc7dc3a..6b66e8ce`.
+- Starting compat: `bfd640db8b96fa8dd05d877c96c448711f90a1e9`; concurrently accepted compat: `78e06c71c476a018894c00520149805e196aa3de` (PR #223).
+- Inherited main runtime/tests: `2516c8e76ba2bd452998e66153878bfd35f15ddf`; reviewed compat runtime/tests: `9a1e4d700607429f8218f7ede3ff37d51f82114f`.
+- Scope: C01–C07 (N=7) in [the shared synchronization record](upstream-sync-2026-11-04.md). All upstream capabilities and the concurrently accepted FC-042 update are inherited. Main owns the retained configuration persistence deviation (FD-013).
+- Direct adaptation: C02 preserves explicit child variant validation, provider-aware configured-agent precedence and unsupported-configured-value fallback; parent inheritance applies only when neither selector owns the child. Selection, metadata, frozen context, persisted user and actual request agree. Main's configured-model group correction is inherited; main's explicit-model priority remains intentionally different.
+- Adjacent review: preserve DC-ACTOR-001 frozen/full context, DC-PROVIDER-001 Responses/sdkKey/declared reasoning, DC-WEBSEARCH-001 native search ordering, DC-SESSION-001 process ownership and DC-CONTEXT-001 preflight/checkpoint coverage. Cloud sharing removal preserves compat model-selection, agent MaxMode, search/fetch configuration and their regenerated SDK surfaces. The two new migrations do not rewrite shipped journals.
+- Validation: `bun ci` with Bun 1.3.14 and clean environment; generated v2 SDK, CLI typecheck and lint (zero errors). Full local results, exact-SHA CI and Windows evidence are in the shared record.
+- Shared ownership: FD/FC/history/report inherit main unchanged; this file owns the compat review.
+
+## Previous review record: 7bc7dc3a synchronization
+
 - Status: active; all eleven DC owners remain compat-owned. No override retires or moves.
 - Last reviewed: 2026-10-31; live upstream `ee0a93b5..7bc7dc3a`.
 - Starting compat: `ba60dff21688385113a873e89ef19fc4ed9ad8a1`; inherited main runtime/tests: `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b`; reviewed compat runtime/tests: `f37f9b0ec111c54fb68f7eccb3d0534768f917ea`.
@@ -1406,7 +1418,7 @@ files remain byte-identical to the accepted main correction.
 | DC-MODEL-001    | Agent config, MaxMode, retry status, title path, SDK/OpenAPI                                                                               | Per-agent extension over shared bounded retry; title generation stays shared | Preserve opt-in, final-step bound, title isolation, and subagent status isolation                                         |
 | DC-CONTEXT-001  | Model-visible text, request preflight, title/skills/memory, compaction, checkpoint coverage, chronology, and TUI context/revert projection | Bounded-content hardening around shared request construction                 | Preserve caps, snapshots, stable paths, effective-window preflight, positional coverage, chronology, and recovery routing |
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
-| DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit precedence, non-inheritance, and actor-lifetime persistence                   |
+| DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit/configured precedence, parent fallback, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
 | DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
 | DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
@@ -2276,12 +2288,11 @@ files remain byte-identical to the accepted main correction.
 
 - Status: active
 - Canonical owner: `dev/compat` model-facing actor creation
-- Base: inherited main behavior
-  `0b8c5d634077f19c2d8c03179f2c869a01a18cec` lets actor `run`/`spawn` choose
-  only `model`. A child request's variant then comes solely from the prompt-side
-  agent fallback: the agent's configured `variant`, applied only when the request
-  uses the agent's configured model and that model defines it. The caller's own
-  variant is never inherited.
+- Base: inherited main `fd04de73ced82599baac249e9cf96dfb55b9d778` supports
+  parent-turn variant inheritance and explicitly forwards a supported agent
+  variant on the actual selected model when no model override was supplied.
+  On main, an explicit model selection takes the parent path even when it names
+  the agent's model. Main still exposes no explicit actor `variant` selector.
 - Overrides: compat adds an optional `variant` selector to `run`/`spawn` across
   the strict JSON schema, tool descriptions and `actor models`, starting from
   compat
@@ -2305,12 +2316,14 @@ files remain byte-identical to the accepted main correction.
   group reference or the resolved member itself — while the prompt-side
   comparison would treat it as a different model. A configured value the
   resolved model does not define is dropped. With neither an explicit nor a
-  configured variant, the spawn input, prompt input, tool metadata and
-  model/variant selection are unchanged and no extra provider lookup runs. Tool
-  metadata adds `variant` only when set. `actor models` appends
+  configured variant, inherit the parent's value as-is for the same resolved
+  model; for another model, inherit only if its merged variants contain that
+  value. A configured but unsupported agent value still drops to default and
+  does not fall through to the parent. With none of these values, the spawn
+  input remains unset. Tool metadata adds `variant` only when set. `actor models` appends
   `[variants: …]` to models that define variants. DC-TUI-001 renders the
   persisted value in the subagent footer without a TUI change.
-- Boundaries: no parent-variant inheritance, no variant inside `model`, no
+- Boundaries: no variant inside `model`, no
   workflow `agent()` or session-tool peer selector, and no resume override. The
   prompt-side fallback is unchanged and still resolves the agent's group without
   provider context for every other caller; the actor path no longer depends on
@@ -2324,6 +2337,7 @@ files remain byte-identical to the accepted main correction.
   `packages/cli/test/tool/actor-variant-guidance.test.ts`,
   `packages/cli/test/actor/spawn.test.ts`, and
   `packages/cli/test/inbox/drain-seed-variant.test.ts`.
+- 2026-11-04 evidence: parent same/different-model forwarding, explicit-over-agent/parent priority, unsupported configured value, provider-aware group selection and metadata consistency are covered alongside the existing tests. A real group-selected child persists the configured variant and sends its reasoning effort on the wire.
 - Evidence: JSON schema and runtime tests cover the remaining entry points.
   Actor tool tests prove forwarding against an overridden model, rejection of
   unknown and disabled variants and of models without variants before any
