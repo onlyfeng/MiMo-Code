@@ -414,16 +414,6 @@ export const ActorTool = Tool.define(
           const key = op.idempotency_key
             ? `actor-send:${ctx.sessionID}:${ctx.actorID ?? "main"}:${op.idempotency_key}`
             : undefined
-          const earlier = key
-            ? yield* Effect.sync(() =>
-                Database.use((db) =>
-                  db.select().from(InboxTable).where(and(
-                    eq(InboxTable.receiver_session_id, targetSid),
-                    eq(InboxTable.idempotency_key, key),
-                  )).get(),
-                ),
-              )
-            : undefined
           const sendResult = yield* inboxSvc
             .accept({
               receiverSessionID: targetSid,
@@ -456,13 +446,11 @@ export const ActorTool = Tool.define(
             const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, sendResult.inboxID)).get())
             return row ? inputModel(row) : undefined
           })
-          const deduplicated = !!earlier && earlier.id === sendResult.inboxID
-          const keyed = key
-            ? { deduplicated, ...(earlier && !deduplicated ? { supersedes: earlier.id } : {}) }
-            : {}
+          // Decided inside the accept transaction, so overlapping keyed sends report what each one did.
+          const deduplicated = sendResult.deduplicated === true
           return {
             title: deduplicated ? `Already sent to ${op.to_actor_id}` : `Sent to ${op.to_actor_id}`,
-            output: JSON.stringify({ ...sendResult, ...keyed, ...(model ? { model } : {}) }),
+            output: JSON.stringify({ ...sendResult, ...(model ? { model } : {}) }),
             metadata: {
               inboxID: sendResult.inboxID,
               inputMessageID: sendResult.inputMessageID,

@@ -330,7 +330,7 @@ describe("actor tool — send action", () => {
               { operation: { action: "send", to_actor_id: "main", to_session_id: b.id, content: "take task 3", ...(key ? { idempotency_key: key } : {}) } },
               ctxFor(from, "main"),
             )
-            .pipe(Effect.map((result) => JSON.parse(result.output)))
+            .pipe(Effect.map((result) => ({ ...JSON.parse(result.output), title: result.title })))
         const settle = (id: string, set: Partial<typeof InboxTable.$inferInsert>) =>
           Database.use((db) => db.update(InboxTable).set(set).where(eq(InboxTable.id, id)).run())
         const rows = () => Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, b.id)).all())
@@ -338,7 +338,7 @@ describe("actor tool — send action", () => {
         const first = yield* send(a.id, "task-3")
         expect(first.deduplicated).toBe(false)
         // Queued: the resend returns the same message.
-        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true, title: "Already sent to main" })
         // Another sender's key is its own.
         expect((yield* send(other.id, "task-3")).inboxID).not.toBe(first.inboxID)
         // Consumed: still a no-op.

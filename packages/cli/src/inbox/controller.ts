@@ -43,11 +43,17 @@ export interface AdmissionGuard {
   expectedEpoch?: number
 }
 
+/** Set only for keyed accepts, decided inside the accept transaction (FC-038). */
+export interface KeyedOutcome {
+  deduplicated?: boolean
+  supersedes?: string
+}
+
 export interface Interface {
   readonly accept: (
     input: AcceptInput,
     guard?: AdmissionGuard,
-  ) => Effect.Effect<Receipt>
+  ) => Effect.Effect<Receipt & KeyedOutcome>
   readonly getReceipt: (receiptId: string) => Effect.Effect<Receipt, ReceiptNotFound>
   readonly listAccepted: (lane: Lane) => Effect.Effect<Receipt[]>
   readonly claimNext: (
@@ -183,7 +189,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
      * record, bump input_revision. Returns undefined when the admission
      * guard rejects the write.
      */
-    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number }
+    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; supersedes?: string }
     const writeAccept = (input: AcceptInput, identity: ExecutionOwnership.Identity, guard?: AdmissionGuard) =>
       Effect.suspend(() => {
       let prepared: AcceptedWrite | undefined
@@ -301,7 +307,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           .returning().get()!
         // A superseded row goes first, so a replay frees its key before inserting the new one.
         InboxSync.record({ sessionID: input.lane.sessionID, receipts: superseded ? [superseded, row] : [row], lanes: [laneRow] })
-        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
+        return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision, supersedes: superseded?.id }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
         if (!committed || Cause.hasInterrupts(cause)) return Effect.failCause(cause)
         log.warn("inbox postcommit publisher failed", { cause: Cause.pretty(cause) })
@@ -348,7 +354,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       } : undefined
       if (isCancelled?.()) return yield* Effect.interrupt
 
-      const written = yield* writeAccept(input, identity, guard)
+      const written: AcceptedWrite | undefined = yield* writeAccept(input, identity, guard)
       if (written === undefined) return yield* Effect.interrupt
       const receipt = toReceipt(written.row)
       if (written.kind === "inserted") {
@@ -373,7 +379,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       } else if (!guard && !input.legacyInboxID && (receipt.state === "accepted" || receipt.state === "claimed")) {
         yield* maybeKick(input.lane)
       }
-      return receipt
+      if (!input.idempotencyKey) return receipt
+      return {
+        ...receipt,
+        deduplicated: written.kind === "existing",
+        ...(written.supersedes ? { supersedes: written.supersedes } : {}),
+      }
     })
 
     const listAccepted = Effect.fn("Inbox.listAccepted")(function* (lane: Lane) {
