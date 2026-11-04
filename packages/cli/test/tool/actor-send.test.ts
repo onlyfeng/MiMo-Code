@@ -314,4 +314,57 @@ describe("actor tool — send action", () => {
       }),
     ),
   )
+
+  it.live(
+    "a keyed resend is a no-op until the earlier message ended unseen, then goes out once",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const a = yield* sessions.create({ title: "sender" })
+        const other = yield* sessions.create({ title: "another sender" })
+        const b = yield* sessions.create({ title: "receiver" })
+        const registry = yield* ActorRegistry.Service
+        const peer = yield* registry.allocateActorID(b.id, "general")
+        yield* registry.register({
+          sessionID: b.id, actorID: peer, mode: "subagent", agent: "general", description: "peer",
+          contextMode: "none", background: true, lifecycle: "ephemeral",
+        })
+        const def = yield* (yield* ActorTool).init()
+        const send = (from: SessionID, key?: string, to = "main") =>
+          def
+            .execute(
+              { operation: { action: "send", to_actor_id: to, to_session_id: b.id, content: "take task 3", ...(key ? { idempotency_key: key } : {}) } },
+              ctxFor(from, "main"),
+            )
+            .pipe(Effect.map((result) => ({ ...JSON.parse(result.output), title: result.title })))
+        const settle = (id: string, set: Partial<typeof InboxTable.$inferInsert>) =>
+          Database.use((db) => db.update(InboxTable).set(set).where(eq(InboxTable.id, id)).run())
+        const rows = () => Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, b.id)).all())
+
+        const first = yield* send(a.id, "task-3")
+        expect(first.deduplicated).toBe(false)
+        // Queued: the resend returns the same message.
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true, title: "Already sent to main" })
+        // Another sender's key is its own, and so is the same key to another actor of the receiver.
+        expect((yield* send(other.id, "task-3")).inboxID).not.toBe(first.inboxID)
+        expect(yield* send(a.id, "task-3", peer)).toMatchObject({ deduplicated: false, title: `Sent to ${peer}` })
+        // Consumed: still a no-op.
+        settle(first.inboxID, { state: "settled", outcome: "success", consumed: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        // Ended but seen by the receiver's turn: not resent.
+        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        // Ended unseen: the same message is queued again once, under the same key.
+        settle(first.inboxID, { state: "settled", outcome: "never_ran", consumed: false, time_updated: Date.now() })
+        const again = yield* send(a.id, "task-3")
+        expect(again).toMatchObject({ inboxID: first.inboxID, inputMessageID: first.inputMessageID, deduplicated: false, revived: true })
+        expect(yield* send(a.id, "task-3")).toMatchObject({ inboxID: first.inboxID, deduplicated: true })
+        const old = rows().find((row) => row.id === first.inboxID)
+        expect(old).toMatchObject({ state: "accepted", idempotency_key: `actor-send:${a.id}:main:main:task-3` })
+        // Without a key every send is a new message.
+        expect((yield* send(a.id)).inboxID).not.toBe((yield* send(a.id)).inboxID)
+        expect(rows()).toHaveLength(5)
+      }),
+    ),
+  )
 })

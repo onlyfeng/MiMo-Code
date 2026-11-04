@@ -65,6 +65,13 @@ const sendSchema = z.strictObject({
     .describe(
       "(optional) Message type. Default 'text' is wrapped in <inbox>...</inbox>. 'actor_notification' is passed through verbatim (sender pre-renders).",
     ),
+  idempotency_key: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "(optional) Your key for this message, e.g. a task key. Sending again with the same key is a no-op while the earlier message is queued, running or was consumed; it is sent anew only if the earlier one ended unseen (never_ran, cancelled, rejected).",
+    ),
 })
 
 const receiptSchema = z.strictObject({
@@ -404,6 +411,9 @@ export const ActorTool = Tool.define(
             )
           }
           const targetSid = op.to_session_id !== undefined ? SessionID.make(op.to_session_id) : ctx.sessionID
+          const key = op.idempotency_key
+            ? `actor-send:${ctx.sessionID}:${ctx.actorID ?? "main"}:${op.to_actor_id}:${op.idempotency_key}`
+            : undefined
           const sendResult = yield* inboxSvc
             .accept({
               receiverSessionID: targetSid,
@@ -413,6 +423,8 @@ export const ActorTool = Tool.define(
               senderActorID: ctx.actorID ?? "main",
               content: op.content,
               ...(op.type !== undefined ? { type: op.type } : {}),
+              // FC-038: namespaced per sender and receiver actor, so keys never collide across them nor with message-id keys.
+              ...(key ? { idempotencyKey: key, reviveUnseen: true } : {}),
             })
             .pipe(
               Effect.catchTag("InboxReceiverNotFound", () =>
@@ -434,8 +446,10 @@ export const ActorTool = Tool.define(
             const row = Database.use((db) => db.select().from(InboxTable).where(eq(InboxTable.id, sendResult.inboxID)).get())
             return row ? inputModel(row) : undefined
           })
+          // Decided inside the accept transaction, so overlapping keyed sends report what each one did.
+          const deduplicated = sendResult.deduplicated === true
           return {
-            title: `Sent to ${op.to_actor_id}`,
+            title: deduplicated ? `Already sent to ${op.to_actor_id}` : `Sent to ${op.to_actor_id}`,
             output: JSON.stringify({ ...sendResult, ...(model ? { model } : {}) }),
             metadata: {
               inboxID: sendResult.inboxID,

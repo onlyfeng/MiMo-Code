@@ -1,6 +1,6 @@
 import { Cause, Context, Deferred, Effect, Layer } from "effect"
 import { ulid } from "ulid"
-import { and, Database, desc, eq, inArray, ne, or, sql } from "@/storage"
+import { and, Database, desc, eq, gte, inArray, ne, or, sql } from "@/storage"
 import { NotFoundError } from "@/storage"
 import { SessionTable } from "@/session/session.sql"
 import { MessageTable } from "@/session/session.sql"
@@ -8,7 +8,7 @@ import { Session } from "@/session"
 import { ActorRegistryTable } from "@/actor/actor.sql"
 import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { Bus } from "@/bus"
-import type { MessageID, SessionID } from "@/session/schema"
+import { MessageID, type SessionID } from "@/session/schema"
 import { Log } from "@/util"
 import { ReceiptUpdated } from "./events"
 import {
@@ -43,11 +43,17 @@ export interface AdmissionGuard {
   expectedEpoch?: number
 }
 
+/** Set only for keyed accepts, decided inside the accept transaction (FC-038). */
+export interface KeyedOutcome {
+  deduplicated?: boolean
+  revived?: boolean
+}
+
 export interface Interface {
   readonly accept: (
     input: AcceptInput,
     guard?: AdmissionGuard,
-  ) => Effect.Effect<Receipt>
+  ) => Effect.Effect<Receipt & KeyedOutcome>
   readonly getReceipt: (receiptId: string) => Effect.Effect<Receipt, ReceiptNotFound>
   readonly listAccepted: (lane: Lane) => Effect.Effect<Receipt[]>
   readonly claimNext: (
@@ -183,7 +189,30 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
      * record, bump input_revision. Returns undefined when the admission
      * guard rejects the write.
      */
-    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number }
+    const bumpLane = (db: Database.TxOrDb, lane: Lane, now: number) =>
+      db.insert(InboxLaneStateTable)
+        .values({ session_id: lane.sessionID, agent_id: lane.agentID, input_revision: 1, time_updated: now })
+        .onConflictDoUpdate({
+          target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id],
+          set: { input_revision: sql`${InboxLaneStateTable.input_revision} + 1`, time_updated: now },
+        })
+        .returning().get()!
+
+    // An ended input that was never consumed still renders on the lane's next
+    // turn, so it went unseen only while no turn has begun since it ended. IDs
+    // carry the wall-clock time they were minted at; `time_created` may be
+    // bumped past it, so it cannot be compared with `time_updated`.
+    const unseen = (db: Database.TxOrDb, row: typeof InboxTable.$inferSelect) =>
+      !row.consumed && !!row.input_message_id &&
+      (row.state === "cancelled" || (row.state === "settled" && row.outcome === "never_ran")) &&
+      !db.select({ id: MessageTable.id }).from(MessageTable).where(and(
+        eq(MessageTable.session_id, row.receiver_session_id),
+        eq(MessageTable.agent_id, row.receiver_actor_id),
+        gte(MessageTable.id, MessageID.ascendingAfter(row.time_updated)),
+        sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+      )).get()
+
+    type AcceptedWrite = { row: typeof InboxTable.$inferSelect; kind: "existing" | "inserted"; revision?: number; revived?: boolean }
     const writeAccept = (input: AcceptInput, identity: ExecutionOwnership.Identity, guard?: AdmissionGuard) =>
       Effect.suspend(() => {
       let prepared: AcceptedWrite | undefined
@@ -223,6 +252,19 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             eq(InboxTable.idempotency_key, idempotencyKey),
             promptOnly,
           )).get()
+          if (row && input.reviveUnseen && unseen(db, row)) {
+            if (row.receiver_actor_id !== input.lane.agentID) throw new Error("Inbox idempotency key belongs to another lane")
+            // Queue the same row and message again: a new message would sit beside
+            // the old one, which an ended unconsumed input still renders as.
+            const now = Date.now()
+            const revived = db.update(InboxTable).set({
+              state: "accepted", epoch, outcome: null, error: null, run_id: null, claim_frontier: null,
+              delivery_message_id: null, time_updated: now,
+            }).where(eq(InboxTable.id, row.id)).returning().get()
+            const laneRow = bumpLane(db, input.lane, now)
+            InboxSync.record({ sessionID: input.lane.sessionID, receipts: [revived], lanes: [laneRow] })
+            return prepared = { row: revived, kind: "inserted" as const, revision: laneRow.input_revision, revived: true }
+          }
           if (row) return reuse(row)
         }
         // Same-message live receipt: a second accept for one message returns it.
@@ -277,21 +319,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             set: { content: null, input_message_id: input.message.id, time_updated: now },
           })
           .returning().get()!
-        const laneRow = db.insert(InboxLaneStateTable)
-          .values({
-            session_id: input.lane.sessionID,
-            agent_id: input.lane.agentID,
-            input_revision: 1,
-            time_updated: now,
-          })
-          .onConflictDoUpdate({
-            target: [InboxLaneStateTable.session_id, InboxLaneStateTable.agent_id],
-            set: {
-              input_revision: sql`${InboxLaneStateTable.input_revision} + 1`,
-              time_updated: now,
-            },
-          })
-          .returning().get()!
+        const laneRow = bumpLane(db, input.lane, now)
         InboxSync.record({ sessionID: input.lane.sessionID, receipts: [row], lanes: [laneRow] })
         return prepared = { row, kind: "inserted" as const, revision: laneRow.input_revision }
       }, { behavior: "immediate" })).pipe(Effect.catchCause((cause) => {
@@ -340,7 +368,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       } : undefined
       if (isCancelled?.()) return yield* Effect.interrupt
 
-      const written = yield* writeAccept(input, identity, guard)
+      const written: AcceptedWrite | undefined = yield* writeAccept(input, identity, guard)
       if (written === undefined) return yield* Effect.interrupt
       const receipt = toReceipt(written.row)
       if (written.kind === "inserted") {
@@ -365,7 +393,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       } else if (!guard && !input.legacyInboxID && (receipt.state === "accepted" || receipt.state === "claimed")) {
         yield* maybeKick(input.lane)
       }
-      return receipt
+      if (!input.idempotencyKey) return receipt
+      return {
+        ...receipt,
+        deduplicated: written.kind === "existing",
+        ...(written.revived ? { revived: true } : {}),
+      }
     })
 
     const listAccepted = Effect.fn("Inbox.listAccepted")(function* (lane: Lane) {

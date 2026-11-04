@@ -149,6 +149,7 @@ not change their implementation. The preceding review is retained in the
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
 | FC-036 | Checkpoint writer delta under `checkpoint.fork: false`: window check and parent-view fallback             | Fork fix of upstream writer view                                 | Fork the parent view when the delta would overflow; never start a writer that cannot fit |
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
+| FC-038 | Actor send idempotency key: per-sender/receiver namespace, revive only unseen messages                    | Fork addition to upstream actor tool                             | A keyed resend is a no-op unless the earlier message ended unseen                        |
 | FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -2976,6 +2977,66 @@ logged`, and the peer `success`/`failure` variants of
   from the state each fails it. `registry-toolset.test.ts` and
   `actor.test.ts` cover the advertised action list and the flattened union.
 - Retirement condition: upstream exposes inbox receipts to the actor tool.
+
+## FC-038 — a keyed actor send is delivered once, and requeued only if it went unseen
+
+- Status: active
+- Canonical owner: fork `main` — `idempotency_key` of the `send` action in
+  `packages/cli/src/tool/actor.ts`, `reviveUnseen` in `AcceptInput`
+  (`packages/cli/src/inbox/schema.ts`) and `unseen`/the revive branch in
+  `writeAccept` (`packages/cli/src/inbox/controller.ts`), passed through
+  `Inbox.accept`
+- Observable contract:
+  - `actor send` with `idempotency_key` stores
+    `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
+    neither senders nor a receiver session's actors share keys, and none
+    collide with message-id keys.
+  - A send whose key already names a row returns that row
+    (`deduplicated: true`) while it is accepted, claimed, consumed, or ended
+    and seen.
+  - "Unseen" means: `cancelled` or settled `never_ran`, not consumed, and no
+    assistant message on the receiving lane minted after the row ended —
+    compared by message ID (`MessageID.ascendingAfter`), whose time is the
+    wall clock at minting, because `time_created` may be bumped past the clock
+    and is not comparable with `time_updated`. (An ended,
+    unconsumed input still renders on the lane's next turn, so a later turn
+    counts as having seen it.) Such a row is queued again in the same
+    transaction — the same row and the same user message, back to `accepted`
+    in the current epoch — and the result reports `revived: true`. No second
+    message is created, so nothing has to be hidden from rendering and receipt
+    GC cannot expose a duplicate.
+  - `deduplicated` and `revived` come from the accept transaction itself, so
+    overlapping keyed sends each report what their own transaction did.
+  - The revived message is the original one; a resend's own content is not
+    used.
+  - Sends without a key, and every other keyed accept (prompt receipts keyed
+    by message id), keep reusing the existing row unconditionally.
+- Motivation: a coordinator's rule "resend once with the same task key when a
+  message settled `never_ran` unconsumed" needs a key that dedupes live and
+  delivered messages but not lost ones; the store reused any keyed row, so a
+  resend after a loss was silently dropped.
+- Upstream relationship: upstream does not expose keys to the actor tool. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; `MessageV2.renderedOrder` and
+  `SessionCheckpoint.withEndedInputs` (ended unconsumed inputs render on the
+  next turn — the reason for the "unseen" rule); the partial unique index on
+  `(receiver_session_id, idempotency_key)`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a keyed resend
+  is a no-op until the earlier message ended unseen, then goes out once"
+  (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
+  and another receiver actor are separate; an unseen `never_ran` is revived
+  once as the same message; unkeyed sends always go out);
+  `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend revives the
+  unseen row instead of adding a message, and only while unseen" (one sync
+  delta, one user message, a later user input does not count as seen, an
+  assistant minted in the tick the input ended does not either even with a
+  bumped `time_created`, a later assistant turn does, replay rebuilds the same
+  state). Disabling the revive,
+  reviving consumed rows, ignoring the later turn or its role, comparing
+  `time_created` instead of the minted ID, shifting the ID bound by a tick, reviving into a
+  stale epoch, dropping the sync record or either result flag, or not passing
+  `reviveUnseen` from the tool each fails one of them.
+- Retirement condition: upstream offers keyed actor sends with these semantics.
 
 ## FC-039 — a terminal reply split across stdin reads is not typed into the prompt
 

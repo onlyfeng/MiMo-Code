@@ -86,13 +86,16 @@ export interface AgentInput {
   content: string
   type?: string
   legacyInboxID?: string
+  /** See AcceptInput.idempotencyKey and reviveUnseen. */
+  idempotencyKey?: string
+  reviveUnseen?: boolean
 }
 
 export interface Interface {
   readonly accept: (input: AgentInput, guard?: AdmissionGuard) => Effect.Effect<{
     inboxID: string
     inputMessageID: MessageID
-  }, InboxReceiverNotFound>
+  } & Controller.KeyedOutcome, InboxReceiverNotFound>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Inbox") {}
@@ -160,6 +163,8 @@ export const layer = Layer.effect(
         legacyInboxID: input.legacyInboxID,
         senderSessionID: input.senderSessionID,
         senderActorID: input.senderActorID,
+        idempotencyKey: input.idempotencyKey,
+        reviveUnseen: input.reviveUnseen,
       }, guard).pipe(
         Effect.provideService(InstanceRef, receiverInstance),
         Effect.provideService(WorkspaceRef, workspace),
@@ -171,7 +176,12 @@ export const layer = Layer.effect(
           }))
         return yield* Effect.failCause(cause)
       })))
-      return { inboxID: receipt.id, inputMessageID: receipt.inputMessageID }
+      return {
+        inboxID: receipt.id,
+        inputMessageID: receipt.inputMessageID,
+        ...(receipt.deduplicated != null ? { deduplicated: receipt.deduplicated } : {}),
+        ...(receipt.revived ? { revived: true } : {}),
+      }
     })
     const legacy = yield* Effect.sync(() => Database.use((db) => db.select().from(InboxTable).where(and(
       isNotNull(InboxTable.content), isNull(InboxTable.input_message_id), eq(InboxTable.state, "accepted"),
