@@ -2,6 +2,7 @@ import z from "zod"
 import os from "os"
 import fs from "fs"
 import path from "path"
+import { Global } from "@/global"
 import ts from "typescript"
 import { Cause, Effect, Exit } from "effect"
 import type { Tool as AiTool } from "ai"
@@ -180,7 +181,7 @@ export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
     "declare const ALL_TOOLS: ReadonlyArray<{ name: string; description: string }>",
     "// Raw file IO for machine-to-machine data (pipelines across executions).",
     "declare const files: {",
-    "  /** Raw file contents — no line numbers, no truncation. null if missing. Paths: worktree or OS tmp. */",
+    "  /** Raw file contents — no line numbers, no truncation. null if missing. Paths: worktree, OS tmp, or the memory directory. */",
     "  readText(path: string): Promise<string | null>",
     "  /** Write raw text; parent dirs auto-created. OS tmp dir ONLY — project writes go through tools.apply_patch. */",
     "  writeText(path: string, content: string): Promise<void>",
@@ -327,7 +328,7 @@ const files = {
 };
 `
 
-/** Jail for the `files` raw-IO primitives. Read: worktree + OS tmp. Write: OS
+/** Jail for the `files` raw-IO primitives. Read: worktree + OS tmp + memory. Write: OS
  * tmp ONLY — project writes must go through tools.apply_patch so Permission.ask
  * applies (enforced here, not just advised in the prompt). Containment is
  * checked on REALPATHS: macOS /tmp and /var are symlinks into /private, so a
@@ -349,6 +350,17 @@ function realpathBestEffort(p: string): string {
   }
 }
 
+export function execTmpRoots() {
+  return [os.tmpdir(), ...(process.platform === "win32" ? [] : ["/tmp"])]
+}
+
+/** Read roots for `files.readText`; the first one resolves relative paths. */
+export function execReadRoots(ins: { worktree: string; directory: string }) {
+  // FC-041: the memory tree is readable too, as it is for the read tool (its
+  // writes keep going through the write tools and memory-path-guard).
+  return [ins.worktree === "/" ? ins.directory : ins.worktree, ...execTmpRoots(), path.join(Global.Path.data, "memory")]
+}
+
 function resolveJailed(roots: string[], p: string, kind: "read" | "write"): string {
   const canonRoots = roots.map(realpathBestEffort)
   const abs = realpathBestEffort(path.resolve(canonRoots[0], p))
@@ -356,7 +368,7 @@ function resolveJailed(roots: string[], p: string, kind: "read" | "write"): stri
   throw new Error(
     kind === "write"
       ? `files.writeText is limited to the OS temp dir — write project files via tools.apply_patch: ${JSON.stringify(p)}`
-      : `path outside allowed roots (worktree, tmp): ${JSON.stringify(p)}`,
+      : `path outside allowed roots (worktree, tmp, memory): ${JSON.stringify(p)}`,
   )
 }
 
@@ -914,8 +926,8 @@ export const ToolScriptTool = Tool.define(
           // directories (/private/tmp vs /private/var/folders/...), and the tool
           // description's staging example uses "/tmp/..." — both must work.
           const ins = yield* InstanceState.context
-          const tmpRoots = [os.tmpdir(), ...(process.platform === "win32" ? [] : ["/tmp"])]
-          const jailRoots = [ins.worktree === "/" ? ins.directory : ins.worktree, ...tmpRoots]
+          const tmpRoots = execTmpRoots()
+          const jailRoots = execReadRoots(ins)
 
           // Snapshot the Effect context BEFORE crossing into Promise-land: the
           // quickjs hook boundary loses Instance/Workspace context otherwise.
@@ -1395,7 +1407,7 @@ export const ToolScriptTool = Tool.define(
 
           // Raw file IO (`files.*`): machine-to-machine data channel, bypassing the
           // agent-facing read/write formatting (line numbers, truncation). Reads are
-          // jailed to worktree + OS tmp; writes to OS tmp ONLY (project writes must
+          // jailed to worktree + OS tmp + memory; writes to OS tmp ONLY (project writes must
           // carry permissions → tools.apply_patch). Read side also caps size so a
           // giant file can't blow the guest memory limit.
           const fileCall = <T>(work: () => Promise<T>) => {

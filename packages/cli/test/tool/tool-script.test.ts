@@ -4,11 +4,12 @@ import z from "zod"
 import os from "os"
 import fs from "fs/promises"
 import path from "path"
+import { Global } from "../../src/global"
 import { evalScript } from "../../src/workflow/sandbox"
 import { MessageID } from "../../src/session/schema"
 import { Agent } from "../../src/agent/agent"
 import { Truncate, Tool } from "../../src/tool"
-import { ToolScriptTool, renderToolScriptDeclarations, viewExecSubtools, type ExecSubPartSnapshot } from "../../src/tool/tool-script"
+import { ToolScriptTool, renderToolScriptDeclarations, viewExecSubtools, type ExecSubPartSnapshot, execReadRoots, execTmpRoots } from "../../src/tool/tool-script"
 import { RecoverableError } from "../../src/tool/recoverable"
 import { toolScriptRegistry, TOOL_SCRIPT_EXCLUDED } from "../../src/tool/tool-script-ref"
 import { Instance } from "../../src/project/instance"
@@ -1457,6 +1458,23 @@ return r.output;`,
     )
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("tools.apply_patch")
+  })
+
+  // FC-041: a codex-harness agent has no read tool; exec is how it reads a task's progress journal.
+  // (Writes stay tmp-only; the test data dir happens to live under tmp, so that is covered above.)
+  test("files.readText reads the memory directory", async () => {
+    const file = path.join(Global.Path.data, "memory", "sessions", "ses_example", "tasks", "T1", "progress.md")
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, "## §1 Task identity")
+    const result = await runToolScript(`return await files.readText(${JSON.stringify(file)})`, [])
+    expect(result.metadata.status).toBe("completed")
+    expect(result.output).toContain("## §1 Task identity")
+    await fs.rm(path.join(Global.Path.data, "memory", "sessions", "ses_example"), { recursive: true, force: true })
+  })
+
+  test("files.readText roots include the memory directory wherever it lives", () => {
+    expect(execReadRoots({ worktree: "/tmp/example", directory: "/tmp/example" }))
+      .toEqual(["/tmp/example", ...execTmpRoots(), path.join(Global.Path.data, "memory")])
   })
 
   test("files.readText reads worktree files raw (no line numbers)", async () => {
