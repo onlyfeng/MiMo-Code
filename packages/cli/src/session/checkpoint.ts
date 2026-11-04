@@ -58,6 +58,9 @@ const log = Log.create({ service: "session.checkpoint" })
 // (renderTaskSnapshot) and never changes task state.
 const CHECKPOINT_WRITER_TOOLS = ["read", "write", "edit", "apply_patch", "glob", "grep"] as const
 const checkpointWriterToolContract = `The ${CHECKPOINT_WRITER_TOOLS.join(", ")} tools are available; do not invoke others.`
+// FC-044: a full apply_patch result repeats the whole diff into the writer's context.
+export const checkpointWriterExecReturn =
+  "When you call these tools through `exec`, return only each result's `.output` (e.g. `return (await tools.apply_patch({ patch_text })).output`), not the whole result: it repeats the full diff. A failed patch still fails the `exec`."
 const TASK_SNAPSHOT_LIMIT = 300
 
 /** The session's tasks, including finished ones, for the writer's §4. */
@@ -545,6 +548,7 @@ function composeWriterPrompt(input: {
     "<system-reminder>",
     "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above.",
     checkpointWriterToolContract,
+    checkpointWriterExecReturn,
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",

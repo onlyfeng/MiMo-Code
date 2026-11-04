@@ -11,7 +11,7 @@ import { ActorRegistry } from "../../src/actor/registry"
 import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { TaskRegistry } from "../../src/task/registry"
-import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { SessionCheckpoint, checkpointWriterExecReturn } from "../../src/session/checkpoint"
 import { checkpointPath, memoryPath, notesPath } from "../../src/session/checkpoint-paths"
 import { NOTES_TEMPLATE } from "../../src/session/checkpoint-templates"
 import { CURRENT_FILE_CHAR_LIMIT } from "../../src/session/checkpoint-retry"
@@ -209,6 +209,8 @@ describe("checkpoint writer child-session isolation", () => {
         expect(contracts).toHaveLength(1)
         expect(contracts[0]?.[1]?.split(", ")).toEqual(spawnLog.lastInput?.tools)
         expect(spawnLog.lastInput?.task).not.toContain("Available tools (runtime-enforced whitelist)")
+        // FC-044: exec callers return only the nested result's output.
+        expect(spawnLog.lastInput?.task).toContain(checkpointWriterExecReturn)
       }),
     ),
   )
