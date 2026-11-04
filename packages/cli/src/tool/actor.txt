@@ -62,6 +62,8 @@ THE EXCEPTION — `run` blocks the conversation; only for a tiny lookup that gat
           wait until recovery ends; completion uses the existing actor notification.
           Returns: { status, executionState?, actor_id, result?, error? }; the same completion rules apply.
 - cancel: stop a running actor (graceful). required: actor_id. Idempotent.
+          Returns status "cancelled", or "cancelling" when the actor has not stopped within
+          30s (a tool call is still finishing); cancellation continues — do not wait on it.
 - send:   deliver message to another actor's inbox, waking it when the actor
           remains reusable.
           required: to_actor_id, content.

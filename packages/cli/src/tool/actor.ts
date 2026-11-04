@@ -24,6 +24,13 @@ import { TaskID } from "@/task/schema"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { inboxControllerRef } from "@/inbox"
 import { Effect, Deferred } from "effect"
+import { awaitWithHardTimeout } from "@/effect/hard-timeout"
+import { Log } from "@/util"
+
+const log = Log.create({ service: "tool.actor" })
+
+/** FC-043: how long `actor cancel` waits for the actor to stop. Mutable for tests. */
+export const actorCancelWait = { ms: 30_000 }
 
 export interface ActorPromptOps {
   cancel(sessionID: SessionID): void
@@ -564,8 +571,37 @@ export const ActorTool = Tool.define(
           }
 
           // Signal the actor through Actor.cancel — marks status "cancelled" in the registry.
+          // FC-043: cancel waits for the actor's in-flight work to stop; a tool stuck in
+          // uninterruptible work would block the caller indefinitely. Wait a bounded time,
+          // then report "cancelling" while the cancellation keeps running detached.
           const actorForCancel = yield* requireActor()
-          yield* actorForCancel.cancel(found.sessionID, entry.actorID, "graceful")
+          const stopped = yield* awaitWithHardTimeout(
+            actorForCancel.cancel(found.sessionID, entry.actorID, "graceful"),
+            actorCancelWait.ms,
+          ).pipe(
+            Effect.as(true),
+            Effect.catchTag("TimeoutError", () =>
+              Effect.sync(() => {
+                log.warn("actor cancel still stopping; returned to the caller", { actorID: entry.actorID })
+                return false
+              }),
+            ),
+          )
+          if (!stopped) {
+            const snapshot = {
+              status: "cancelling" as const,
+              actor_id: entry.actorID,
+              description: entry.description,
+              agent: entry.agent,
+              background: entry.background,
+              hint: "Cancellation is requested and still finishing in the background (a tool call has not stopped yet). Do not wait on it; check later with actor status.",
+            }
+            return {
+              title: `Actor cancel: cancelling`,
+              output: JSON.stringify(snapshot),
+              metadata: { actor_id: entry.actorID, status: "cancelling" } as Record<string, any>,
+            }
+          }
 
           const snapshot = {
             status: "cancelled" as const,
