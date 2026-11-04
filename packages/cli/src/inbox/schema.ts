@@ -34,6 +34,11 @@ export type AcceptInput = {
   senderSessionID?: SessionID
   senderActorID?: string
   idempotencyKey?: string
+  /**
+   * FC-038: a keyed message whose earlier row ended without being consumed
+   * (never_ran, cancelled, rejected) is sent again instead of returning that row.
+   */
+  supersedeUnconsumed?: boolean
   legacyInboxID?: string
   generatedPartIDs?: ReadonlySet<PartID>
 }

@@ -223,7 +223,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             eq(InboxTable.idempotency_key, idempotencyKey),
             promptOnly,
           )).get()
-          if (row) return reuse(row)
+          const ended = row && !row.consumed && (row.state === "cancelled" || row.state === "rejected" ||
+            (row.state === "settled" && row.outcome === "never_ran"))
+          if (row && ended && input.supersedeUnconsumed) {
+            // Free the key for this send; the old row keeps its history under a marked key.
+            db.update(InboxTable).set({ idempotency_key: `${idempotencyKey}#superseded:${row.id}` })
+              .where(eq(InboxTable.id, row.id)).run()
+          } else if (row) return reuse(row)
         }
         // Same-message live receipt: a second accept for one message returns it.
         const duplicate = db.select().from(InboxTable).where(and(

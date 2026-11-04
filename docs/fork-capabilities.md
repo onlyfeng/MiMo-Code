@@ -148,6 +148,7 @@ not change their implementation. The preceding review is retained in the
 | FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
+| FC-038 | Actor send idempotency key: per-sender namespace, supersede only unseen messages                          | Fork addition to upstream actor tool                             | A keyed resend is a no-op unless the earlier message ended unseen                        |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2943,3 +2944,40 @@ logged`, and the peer `success`/`failure` variants of
   from the state each fails it. `registry-toolset.test.ts` and
   `actor.test.ts` cover the advertised action list and the flattened union.
 - Retirement condition: upstream exposes inbox receipts to the actor tool.
+
+## FC-038 — a keyed actor send is delivered once, and resent only if it went unseen
+
+- Status: active
+- Canonical owner: fork `main` — `idempotency_key` of the `send` action in
+  `packages/cli/src/tool/actor.ts`, `supersedeUnconsumed` in `AcceptInput`
+  (`packages/cli/src/inbox/schema.ts`) and its branch in `writeAccept`
+  (`packages/cli/src/inbox/controller.ts`), passed through `Inbox.accept`
+- Observable contract:
+  - `actor send` with `idempotency_key` stores
+    `actor-send:<sender session>:<sender actor>:<key>`, so senders never share
+    keys and none collide with message-id keys.
+  - A send whose key already names a row for that receiver returns that row
+    (`deduplicated: true`) while it is accepted, claimed, or consumed — a
+    `never_ran` row that the receiver's turn saw included.
+  - When that row ended unconsumed (`cancelled`, `rejected`, or settled
+    `never_ran`), the send goes out anew in the same transaction: the old row
+    keeps its history under `<key>#superseded:<old id>` and the result reports
+    `supersedes: <old id>`. The next send with the key returns the new row.
+  - Sends without a key, and every other keyed accept (prompt receipts keyed
+    by message id), keep reusing the existing row unconditionally.
+- Motivation: a coordinator's rule "resend once with the same task key when a
+  message settled `never_ran` unconsumed" needs a key that dedupes live and
+  delivered messages but not lost ones; the store reused any keyed row, so a
+  resend after a loss was silently dropped.
+- Upstream relationship: upstream does not expose keys to the actor tool. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; the partial unique index on
+  `(receiver_session_id, idempotency_key)`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a keyed resend
+  is a no-op until the earlier message ended unseen, then goes out once"
+  (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
+  is separate; an unseen `never_ran` is superseded once with the old key
+  marked; unkeyed sends always go out). Disabling the supersede, superseding
+  consumed rows, dropping the sender namespace, or losing the key in the tool
+  or in `Inbox.accept` each fails it.
+- Retirement condition: upstream offers keyed actor sends with these semantics.

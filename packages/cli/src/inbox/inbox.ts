@@ -86,6 +86,9 @@ export interface AgentInput {
   content: string
   type?: string
   legacyInboxID?: string
+  /** See AcceptInput.idempotencyKey and supersedeUnconsumed. */
+  idempotencyKey?: string
+  supersedeUnconsumed?: boolean
 }
 
 export interface Interface {
@@ -160,6 +163,8 @@ export const layer = Layer.effect(
         legacyInboxID: input.legacyInboxID,
         senderSessionID: input.senderSessionID,
         senderActorID: input.senderActorID,
+        idempotencyKey: input.idempotencyKey,
+        supersedeUnconsumed: input.supersedeUnconsumed,
       }, guard).pipe(
         Effect.provideService(InstanceRef, receiverInstance),
         Effect.provideService(WorkspaceRef, workspace),
