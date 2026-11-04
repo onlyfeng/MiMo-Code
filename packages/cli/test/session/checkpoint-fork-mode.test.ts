@@ -22,6 +22,7 @@ import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
+import type { ActorPromptOps } from "../../src/tool/actor"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
 void Log.init({ print: false })
@@ -128,6 +129,13 @@ const env = Layer.mergeAll(
 )
 
 const it = testEffect(env)
+
+// The writer spawns through spawnRef and never calls these.
+const unusedPromptOps: ActorPromptOps = {
+  cancel: () => {},
+  resolvePromptParts: () => Effect.succeed([]),
+  prompt: () => Effect.die("prompt is not used by the checkpoint writer"),
+}
 
 const reset = Effect.sync(() => {
   spawnLog.count = 0
@@ -555,6 +563,33 @@ describe("checkpoint writer forkContext shape per mode", () => {
       { config: { checkpoint: { fork: false } } },
     ),
   )
+
+  for (const usable of [1_000, 1_000_000]) {
+    it.live(
+      `fork:false forks the parent view only when the delta exceeds the usable window (usable ${usable})`,
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            yield* reset
+            installRecordingCapture()
+            const svc = yield* SessionCheckpoint.Service
+            const { info } = yield* seedFourMessages()
+
+            // The delta (no checkpoint yet) carries u2's ~12.5K-token padding.
+            const outcome = yield* svc.tryStartCheckpointWriter({
+              sessionID: info.id,
+              model: { providerID: "test", modelID: "test-model" },
+              promptOps: unusedPromptOps,
+              context: { usable, used: 500 },
+            })
+            expect(outcome).toBe("started")
+            expect(captureLog.calls).toHaveLength(1)
+            expect(captureLog.calls[0].agentName).toBe(usable < 10_000 ? "build" : "checkpoint-writer")
+          }),
+        { config: { checkpoint: { fork: false } } },
+      ),
+    )
+  }
 
   it.live(
     "missing prefix capture ref skips without spawning, creating a child, or advancing the watermark",
