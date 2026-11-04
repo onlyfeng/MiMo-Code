@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { Deferred, Effect, Layer } from "effect"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -35,7 +35,7 @@ import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
-import { Actor } from "../../src/actor/spawn"
+import { Actor, ownWritability } from "../../src/actor/spawn"
 import { Worktree } from "../../src/worktree"
 import { Memory } from "../../src/memory"
 import { History } from "../../src/history"
@@ -366,7 +366,8 @@ describe("postStop progress.md is gated by the subagent's write permission", () 
   // progress checker SKIPS — no nudge, no wasted re-entry turns — and no progress.md lands.
   // explore's findings are delivered to the caller via finalText, which is the read-only
   // contract. (Contrast: the `general` case above, where canWrite=true and the file lands.)
-  it.live("explore bound to task_id skips the progress check (no journal, clean finish)", () =>
+  // FC-040: a global catch-all allow (what `--yolo` merges in) must not make explore look writable.
+  for (const globalAllow of [false, true]) it.live(`explore bound to task_id skips the progress check (no journal, clean finish)${globalAllow ? " under a global allow" : ""}`, () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
@@ -412,7 +413,7 @@ describe("postStop progress.md is gated by the subagent's write permission", () 
         // No journal: read-only explore is not asked to maintain task progress.
         expect(exists).toBe(false)
       }),
-      { git: true, config: providerCfg },
+      { git: true, config: (url: string) => ({ ...providerCfg(url), ...(globalAllow ? { permission: { "*": "allow" as const } } : {}) }) },
     ),
   )
 
@@ -467,4 +468,21 @@ describe("postStop progress.md is gated by the subagent's write permission", () 
       { git: true, config: (url) => ({ ...providerCfg(url), memory: { disable_write: true } }) },
     ),
   )
+})
+
+describe("ownWritability (FC-040)", () => {
+  const rules = (...r: Array<[string, "allow" | "deny" | "ask"]>): Permission.Ruleset =>
+    r.map(([permission, action]) => ({ permission, pattern: "*", action }))
+  const writable = (ruleset: Permission.Ruleset) => !Permission.disabled(["write"], ownWritability(ruleset)).has("write")
+  test("a catch-all allow after the agent's catch-all deny keeps it read-only", () => {
+    expect(writable(rules(["*", "allow"], ["*", "deny"], ["read", "allow"], ["*", "allow"]))).toBe(false)
+  })
+  test("an explicit later write or edit allow still makes it writable", () => {
+    expect(writable(rules(["*", "deny"], ["*", "allow"], ["write", "allow"]))).toBe(true)
+    expect(writable(rules(["*", "deny"], ["edit", "allow"]))).toBe(true)
+  })
+  test("an agent without a catch-all deny is unchanged", () => {
+    expect(writable(rules(["*", "allow"], ["doom_loop", "ask"]))).toBe(true)
+    expect(writable(rules(["*", "allow"], ["write", "deny"]))).toBe(false)
+  })
 })
