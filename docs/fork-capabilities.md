@@ -15,13 +15,13 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-10-31
-- Upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
-- Prior reviewed upstream: `ee0a93b5dff36f689e28957b2e4377159a9a9731`
-- Main behavior (runtime/tests): `b7103b2b17f7201e96a3a563d0b5ac3d127ee51b` (host execution boundary for MCP/LSP/formatter configuration, legacy TOML and stored-config persistence; includes FC-020)
-- Inherited compat behavior: `f37f9b0ec111c54fb68f7eccb3d0534768f917ea` (shared changes inherited; compat config overlay unchanged)
-- Bundled guidance content: `19362075089580aef8b709de58a5433cbfd6608b` (available search/MCP and DuckDuckGo fallback; explicit Exa/search MCP configuration)
-- Prior fork `main` tip: `a8892c5c5036be2f6fc41fd70e53f42b59760ce9`
+- Last reviewed: 2026-11-04
+- Upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
+- Prior reviewed upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
+- Main behavior (runtime/tests): `2516c8e76ba2bd452998e66153878bfd35f15ddf` (C01–C07, including the selected-model variant correction and concurrent FC-042 integration)
+- Inherited compat behavior: `9a1e4d700607429f8218f7ede3ff37d51f82114f` (explicit/configured variant precedence and parent fallback; existing compatibility overlays retained)
+- Bundled guidance content: `fd04de73ced82599baac249e9cf96dfb55b9d778` (cloud-sharing commands/settings removed; unrelated fork guidance retained)
+- Prior fork `main` tip: `602f07bf662c1d0fb9c9c67982c24dedfa663f35`; concurrent accepted main: `4f6f694b22da00c79f6200c80ff9db3212039ac9`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+Latest reviewed synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+
+Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
 Previous synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
@@ -621,6 +623,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-004 — MCP configuration and connection lifecycle
 
+- 2026-11-04 synchronization: upstream `bfd5a2f4` reverses the 2026-10-31 execution-source filter. MCP/LSP/formatter and Claude imports again use ordinary configuration sources; `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS` remains a plugin-only boundary and `config/host.ts` is removed. The native control-overrides argument, pending defaults and explicit `auto_connect`/`enabled` precedence remain. FD-013 owns the retained source/persistence deviation: shared config loading retains fresh TOML parsing and models-only refresh without migration writes; `Config.update` retains raw stored JSONC validation and literal reference persistence. The updated positive project-source and persistence tests in `test/config/config.test.ts`, pending Claude import test and real Node plugin-host tests cover these decisions. The following 2026-10-31 paragraph is historical, not the current source policy.
+
 - 2026-10-31 synchronization: upstream `7bc7dc3a` adds the host execution policy (`config/host.ts`). On the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`, MCP sections from sources outside `MIMOCODE_CONFIG_DIR` and host-injected content are dropped before merging, so their startup controls never reach the Claude import merge. `mergeClaudeMcp` keeps the fork's control-overrides argument and returns before reading a Claude file from a rejected source. A host-source `auto_connect: true` therefore cannot supply startup authority to a project `.claude.json` transport; the leftover transportless control is ignored. Ordinary Bun CLI loading, pending imports and `auto_connect`/`enabled` precedence are unchanged. Evidence: `test/mcp/claude-auto-connect.test.ts` (`host execution policy skips a project Claude import…`, which fails if the guard is removed), `test/mcp/project-config-execution.test.ts`, and the host-policy cases in `test/config/config.test.ts`.
 
 - 2026-10-28 synchronization: local and remote MCP config accept optional `alwaysDirectTools`; sanitized server-local names select top-level tools outside deferred search/use, without changing host override precedence, connection lifecycle or startup controls. Config arrays use the existing mutable schema convention so ACP accepts the regenerated SDK types. FD-006 retains execution and frozen authority.
@@ -663,7 +667,6 @@ not change their implementation. The preceding review is retained in the
   per-entry configuration; retains fork validation and lifecycle hardening.
 - Watch surfaces: `packages/cli/src/mcp/index.ts`,
   `packages/cli/src/config/mcp.ts`, `packages/cli/src/config/config.ts`,
-  `packages/cli/src/config/host.ts`,
   `packages/cli/src/mcp/oauth-callback.ts`,
   `packages/cli/src/mcp/oauth-provider.ts`,
   `packages/cli/src/mcp/stdio-transport.ts`, plus request-local MCP
@@ -943,6 +946,8 @@ not change their implementation. The preceding review is retained in the
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-11-04 CI correction: the main-lane and subagent hanging-retry steer fixtures now release their deliberately pending HTTP reply only during cleanup, before awaiting the scripted server stop. Client abort does not cancel a JavaScript fetch-handler Promise. Production lifecycle behavior, all steer assertions and original test timeouts are unchanged; see the [sync evidence](upstream-sync-2026-11-04.md).
 
 - 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
 
