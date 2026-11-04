@@ -4,10 +4,6 @@ import z from "zod"
 import os from "os"
 import fs from "fs/promises"
 import path from "path"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
-import { Format } from "../../src/format"
-import { LSP } from "../../src/lsp"
-import { ApplyPatchTool } from "../../src/tool/apply_patch"
 import { Global } from "../../src/global"
 import { evalScript } from "../../src/workflow/sandbox"
 import { MessageID } from "../../src/session/schema"
@@ -987,50 +983,6 @@ describe("exec", () => {
       expect(result.output).toContain(selection === "full result" ? "returned value is" : "<return_value>\nsuccess\n")
     }, 15_000)
   }
-
-  // FC-044: the checkpoint writer returns only `.output`; the patch flow must not depend on the return value.
-  describe("real apply_patch through exec, returning only .output", () => {
-    const patchRuntime = ManagedRuntime.make(
-      Layer.mergeAll(LSP.defaultLayer, AppFileSystem.defaultLayer, Format.defaultLayer, Bus.layer, Truncate.defaultLayer, Agent.defaultLayer),
-    )
-    afterAll(() => patchRuntime.dispose())
-    const applyPatch = async (): Promise<Tool.Def> => {
-      const info = await patchRuntime.runPromise(ApplyPatchTool)
-      const def = await patchRuntime.runPromise(info.init())
-      return {
-        id: info.id,
-        description: def.description,
-        parameters: def.parameters,
-        execute: (args: unknown, ctx) => Effect.promise(() => patchRuntime.runPromise(def.execute(def.parameters.parse(args), ctx))),
-      }
-    }
-    const patch = (file: string, from: string, to: string) =>
-      `*** Begin Patch\n*** Update File: ${file}\n@@\n-${from}\n+${to}\n*** End Patch`
-
-    test("a successful patch lands and returns its summary without the diff", async () => {
-      const file = path.join(tmp, "exec-output-ok.md")
-      await fs.writeFile(file, "line one\nold line\nline three\n")
-      const def = await applyPatch()
-      const output = await runToolScript(`return (await tools.apply_patch({ patch_text: ${JSON.stringify(patch(file, "old line", "new line"))} })).output`, [def])
-      const full = await runToolScript(`return await tools.apply_patch({ patch_text: ${JSON.stringify(patch(file, "new line", "newer line"))} })`, [def])
-      expect(output.metadata.status).toBe("completed")
-      expect(output.output).toContain("Success. Updated the following files")
-      expect(output.output).not.toContain("@@")
-      // The full result is what the writer used to return: it carries the diff.
-      expect(full.metadata.status).toBe("completed")
-      expect(full.output).toContain("@@")
-      expect(await fs.readFile(file, "utf8")).toBe("line one\nnewer line\nline three\n")
-    })
-
-    test("a patch that does not apply still fails the exec and leaves the file", async () => {
-      const file = path.join(tmp, "exec-output-bad.md")
-      await fs.writeFile(file, "unchanged\n")
-      const result = await runToolScript(`return (await tools.apply_patch({ patch_text: ${JSON.stringify(patch(file, "missing line", "x"))} })).output`, [await applyPatch()])
-      expect(result.metadata.status).toBe("code_error")
-      expect(result.output).toContain("apply_patch")
-      expect(await fs.readFile(file, "utf8")).toBe("unchanged\n")
-    })
-  })
 
   test("caps the final serialized sub_parts snapshot at 256 KiB", async () => {
     const payload = "x".repeat(4096)

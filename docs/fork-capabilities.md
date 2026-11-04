@@ -3231,8 +3231,8 @@ logged`, and the peer `success`/`failure` variants of
   serialization; `tool/apply_patch.ts` result shape.
 - Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
   (the writer task carries the instruction; fails without it);
-  `packages/cli/test/tool/tool-script.test.ts` "real apply_patch through exec,
-  returning only .output" (the real tool applies the patch and returns the
+  `packages/cli/test/tool/exec-apply-patch-output.test.ts` (`testEffect`, the
+  registry's real `apply_patch` through `exec`: the patch applies and returns the
   summary without `@@`, the full result does carry the diff, and a patch that
   does not apply fails the `exec` and leaves the file unchanged).
 - Retirement condition: `exec` stops serializing nested tool metadata into the
