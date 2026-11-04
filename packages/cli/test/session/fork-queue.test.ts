@@ -4,7 +4,9 @@ import { AppLayer } from "../../src/effect/app-runtime"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
+import { SessionReminder } from "../../src/session/reminder"
 import { SessionRunState } from "../../src/session/run-state"
+import { Instance } from "../../src/project/instance"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
@@ -252,10 +254,30 @@ describe("Session.fork queue history", () => {
       const branch = yield* sessions.fork({ sessionID: source.id })
       yield* Effect.addFinalizer(() => prompt.cancel(branch.id))
       expect(yield* receipts(branch.id)).toEqual([])
+      const history = yield* sessions.messages({ sessionID: branch.id })
+      const followupID = MessageID.make("msg_000_followup")
+      expect(history.every((message) => message.info.id > followupID)).toBe(true)
       yield* llm.text("FOLLOWUP-ANSWER")
-      yield* prompt.prompt({ sessionID: branch.id, agent: "build", parts: [{ type: "text", text: "FOLLOWUP" }] })
+      yield* prompt.prompt({
+        sessionID: branch.id,
+        messageID: followupID,
+        agent: "build",
+        parts: [{ type: "text", text: "FOLLOWUP" }],
+      })
       expect(yield* llm.calls).toBe(1)
+      // The low-ID input is new in rendered order. Adding its window reminder
+      // must leave every already-sent message in the copied history untouched.
+      for (const message of history)
+        expect(MessageV2.get({ sessionID: branch.id, messageID: message.info.id })).toEqual(message)
+      const followup = MessageV2.get({ sessionID: branch.id, messageID: followupID })
+      expect(
+        followup.parts
+          .flatMap((part) => SessionReminder.tag(part) ?? [])
+          .filter((tag) => tag.key === "session-env"),
+      ).toEqual([{ key: "session-env", rev: Instance.directory }])
       const request = JSON.stringify((yield* llm.inputs)[0].messages)
+      expect(request.split("Session environment:")).toHaveLength(2)
+      expect(request).toContain(`- Session directory: ${Instance.directory}`)
       const positions = ["FIRST-INPUT", "FIRST-STEP", "LATE-INPUT", "FINAL-STEP", "FOLLOWUP"].map((text) => request.indexOf(text))
       expect(positions.every((position) => position >= 0)).toBe(true)
       expect(positions).toEqual([...positions].sort((a, b) => a - b))

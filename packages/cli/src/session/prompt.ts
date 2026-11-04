@@ -228,6 +228,7 @@ import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-re
 import { captureSkillCatalog, newSkillCatalogSlot, bindSkillCatalog, refreshFrozenSkillCatalog } from "./skill-catalog"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { isDeepStrictEqual } from "node:util"
+import { SessionReminder } from "./reminder"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -236,16 +237,23 @@ function capSyntheticText(text: string, label: string) {
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, label)
 }
 
-// Stable substring markers for user-side synthetic reminders that must be
-// persisted once per message (runLoop reloads msgs from DB every step; bare
-// parts.push re-attaches a new PartID and reorders the user tail → prompt-cache miss).
+// User-side synthetic reminders are persisted once per message (runLoop reloads
+// msgs from DB every step; bare parts.push re-attaches a new PartID and reorders
+// the user tail → prompt-cache miss) and identified by SessionReminder tags.
 // COMPOSE_REMINDER_MARKER re-exported from message-v2 (hydrate promotes it to head).
 export const LOOP_STREAK_REMINDER_MARKER = "repeating the same action without making progress"
 export const SESSION_MEMORY_DIR_MARKER = "Current session memory directory:"
 
-/** True when `parts` already carries a non-ignored synthetic text reminder containing `marker`. */
-export function hasSyntheticReminder(parts: readonly MessageV2.Part[], marker: string): boolean {
-  return parts.some((p) => p.type === "text" && p.synthetic === true && !p.ignored && p.text.includes(marker))
+export function buildSessionEnvReminderText(input: { directory: string; gitRoot?: string; platform: string }): string {
+  return [
+    "<system-reminder>",
+    "Session environment:",
+    `- Session directory: ${input.directory}`,
+    input.gitRoot ? `- Git repository root: ${input.gitRoot}` : "- Not inside a git repository",
+    `- Platform: ${input.platform}`,
+    "Relative paths in tool calls resolve against the session directory.",
+    "</system-reminder>",
+  ].join("\n")
 }
 
 export function buildMemoryPathsReminderText(input: { projectMemoryFile: string; sessionDir: string }): string {
@@ -256,33 +264,6 @@ export function buildMemoryPathsReminderText(input: { projectMemoryFile: string;
     `- ${SESSION_MEMORY_DIR_MARKER} ${input.sessionDir}/`,
     "</system-reminder>",
   ].join("\n")
-}
-
-// The system prompt keeps `<project_id>` / `<session_id>` literal so it stays
-// byte-identical across projects and sessions; the real paths ride on one user
-// message per context window, deduped by the session directory line.
-// `msgs` starts at the latest checkpoint/compaction boundary, so the
-// first own user message is the session's first message or the boundary.
-// A user message followed by any model reply (compaction summaries excluded)
-// was already sent without the reminder — batched or mid-turn inputs never
-// become a reply's parentID, so position is the test. Rewriting sent history
-// would invalidate the cached prefix, so copied fork history and sessions
-// predating the reminder get it on the newest own user message instead.
-export function memoryPathsReminderTarget(input: {
-  msgs: readonly MessageV2.WithParts[]
-  sessionID: SessionID
-  dir: string
-}): MessageV2.WithParts | undefined {
-  const users = input.msgs.filter((m) => m.info.role === "user" && m.info.sessionID === input.sessionID)
-  if (users.some((m) => hasSyntheticReminder(m.parts, `${SESSION_MEMORY_DIR_MARKER} ${input.dir}/`))) return undefined
-  const unsent = (target: MessageV2.WithParts | undefined) =>
-    target &&
-    !input.msgs
-      .slice(input.msgs.indexOf(target) + 1)
-      .some((m) => m.info.role === "assistant" && !m.info.summary)
-      ? target
-      : undefined
-  return unsent(users.at(0)) ?? unsent(users.at(-1))
 }
 
 export function buildLoopStreakReminderText(threshold: number): string {
@@ -1751,18 +1732,11 @@ export const layer = Layer.effect(
     // multi-step turns from stacking copies (same contract as plan/skill reminders).
     const ensurePersistedUserSynthetic = Effect.fn("SessionPrompt.ensurePersistedUserSynthetic")(function* (input: {
       message: MessageV2.WithParts
-      marker: string
+      reminder: SessionReminder.Tag
       text: string
       metadata?: Record<string, unknown>
     }) {
-      const existingIdx = input.message.parts.findIndex(
-        (p) =>
-          p.type === "text" &&
-          p.synthetic === true &&
-          !p.ignored &&
-          (p.text.includes(input.marker) || p.metadata?.syntheticMarker === input.marker),
-      )
-      if (existingIdx >= 0) return
+      if (SessionReminder.has(input.message.parts, input.reminder)) return
       const part = yield* sessions.updatePart({
         id: PartID.ascending(),
         messageID: input.message.info.id,
@@ -1770,7 +1744,7 @@ export const layer = Layer.effect(
         type: "text" as const,
         synthetic: true,
         text: input.text,
-        metadata: { ...(input.metadata ?? {}), syntheticMarker: input.marker },
+        metadata: { ...(input.metadata ?? {}), [SessionReminder.METADATA_KEY]: input.reminder },
       })
       input.message.parts.push(part)
     })
@@ -2894,7 +2868,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (text) {
           yield* ensurePersistedUserSynthetic({
             message: userMessage,
-            marker: mcpReminderMarker(entryMeta),
+            reminder: { key: "mcp", rev: mcpReminderMarker(entryMeta) },
             text,
             metadata: { [MCP_REMINDER_METADATA_KEY]: entryMeta },
           })
@@ -2930,7 +2904,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (!text) continue
         yield* ensurePersistedUserSynthetic({
           message: userMessage,
-          marker: mcpReminderMarker(meta),
+          reminder: { key: "mcp", rev: mcpReminderMarker(meta) },
           text,
           metadata: { [MCP_REMINDER_METADATA_KEY]: meta },
         })
@@ -6042,13 +6016,44 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           const usageRecovered = !!lastFinished && MessageV2.usageRecovered(msgs, lastFinished)
 
-          if (yield* actorRegistry.servesCheckpoint(sessionID, lastUser.agentID)) {
-            const sessionMemoryDir = metaDir(sessionID)
-            const target = memoryPathsReminderTarget({ msgs, sessionID, dir: sessionMemoryDir })
+          // Resolve the agent for this iteration once. The window reminders,
+          // the management hooks below (fireCheckpoints, overflow handler) and
+          // the agent-not-found check later in the iteration reuse this binding.
+          // Bounded computation agents (native + hidden — e.g. title, summary,
+          // compaction, checkpoint-writer) are exempt from window reminders and
+          // context management;
+          // see docs/superpowers/specs/2026-04-28-bounded-computation-agents-design.md
+          const agent = yield* resolveStoredAgent(agents, lastUser.agent)
+          const isBoundedComputation =
+            agent?.native === true && agent?.hidden === true
+
+          // The system prompt stays byte-identical across projects and sessions
+          // (no cwd, `<project_id>` / `<session_id>` placeholders); the real values
+          // ride on user messages, once per context window.
+          if (!isBoundedComputation) {
+            const ctx = yield* InstanceState.context
+            const reminder = { key: "session-env", rev: ctx.directory }
+            const target = SessionReminder.windowTarget({ msgs, sessionID, reminder })
             if (target) {
               yield* ensurePersistedUserSynthetic({
                 message: target,
-                marker: `${SESSION_MEMORY_DIR_MARKER} ${sessionMemoryDir}/`,
+                reminder,
+                text: buildSessionEnvReminderText({
+                  directory: ctx.directory,
+                  gitRoot: ctx.project.vcs === "git" ? ctx.worktree : undefined,
+                  platform: process.platform,
+                }),
+              })
+            }
+          }
+          if (yield* actorRegistry.servesCheckpoint(sessionID, lastUser.agentID)) {
+            const sessionMemoryDir = metaDir(sessionID)
+            const reminder = { key: "memory-paths", rev: sessionMemoryDir }
+            const target = SessionReminder.windowTarget({ msgs, sessionID, reminder })
+            if (target) {
+              yield* ensurePersistedUserSynthetic({
+                message: target,
+                reminder,
                 text: buildMemoryPathsReminderText({
                   projectMemoryFile: memoryPath((yield* InstanceState.context).project.id),
                   sessionDir: sessionMemoryDir,
@@ -6080,11 +6085,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ) {
             continue
           }
-
-          // Resolve the agent for this iteration once. Both bounded overflow
-          // placeholder recovery and the management hooks below reuse it.
-          const agent = yield* resolveStoredAgent(agents, lastUser.agent)
-          const isBoundedComputation = agent?.native === true && agent?.hidden === true
 
           if (!skipExistingClassify && lastAssistant && lastAssistant.id !== resumeFrom) {
             const classification = classifyAssistantStep({
@@ -6264,18 +6264,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               if (lastUserMsg) {
                 yield* ensurePersistedUserSynthetic({
                   message: lastUserMsg,
-                  marker: LOOP_STREAK_REMINDER_MARKER,
+                  reminder: { key: "loop-streak" },
                   text: buildLoopStreakReminderText(REPEATED_STEP_THRESHOLD),
                 })
               }
             }
           }
-
-          // Bounded computation is resolved above so existing-assistant overflow
-          // placeholders use the same policy as the management hooks below.
-          // Bounded computation agents (native + hidden — currently title,
-          // summary, checkpoint-writer) are exempt from context management;
-          // see docs/superpowers/specs/2026-04-28-bounded-computation-agents-design.md
 
           // Fire background checkpoint writers for any newly-crossed thresholds
           // based on the latest completed assistant message's tokens. These

@@ -56,6 +56,7 @@ import { Auth } from "../../src/auth"
 import { Database } from "../../src/storage"
 import { MessageTable, SessionTable, PartTable } from "../../src/session/session.sql"
 import { MessageV2 } from "../../src/session/message-v2"
+import { SessionReminder } from "../../src/session/reminder"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Instance } from "../../src/project/instance"
 import { InstanceRef } from "../../src/effect/instance-ref"
@@ -2415,6 +2416,73 @@ describe("Actor.spawn return-format injection (F21)", () => {
       { git: true, config: providerCfg },
     ),
   )
+
+  it.live("a subagent's own window carries the session environment reminder but not memory paths", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "session env subagent",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("done")
+
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "explore",
+          task: "search for foo",
+          context: "none",
+          tools: ["read", "grep", "glob"],
+          background: false,
+          model: ref,
+        })
+        yield* Deferred.await(result.outcome)
+
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
+        const subAgentUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
+        const tags = (subAgentUser?.parts ?? []).flatMap((part) => SessionReminder.tag(part) ?? [])
+        expect(tags).toContainEqual({ key: "session-env", rev: Instance.directory })
+        expect(tags.some((tag) => tag.key === "memory-paths")).toBe(false)
+        expect(JSON.stringify(yield* llm.inputs)).toContain(`- Session directory: ${Instance.directory}`)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("a bounded-computation agent gets no session environment reminder", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "session env writer",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("done")
+
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "checkpoint-writer",
+          task: "write the next checkpoint for this session",
+          context: "full",
+          tools: ["read", "write", "edit", "glob", "grep"],
+          background: false,
+          model: ref,
+        })
+        yield* Deferred.await(result.outcome)
+
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
+        const writerUsers = msgs.filter((m) => m.info.role === "user" && m.info.agentID === result.actorID)
+        expect(writerUsers.length).toBeGreaterThan(0)
+        for (const user of writerUsers)
+          expect(user.parts.some((part) => SessionReminder.tag(part)?.key === "session-env")).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -2587,16 +2655,22 @@ describe("Actor resume", () => {
         const actor = yield* Actor.Service
         const sessions = yield* Session.Service
         const parent = yield* sessions.create({ title: "resume persistent actor" })
+        const parentEnvironment =
+          "<system-reminder>\nSession environment:\n- Session directory: /tmp/example/parent\n</system-reminder>"
         const context = {
           modelIdentity: prefixModelIdentity(yield* (yield* ProviderSvc.Service).getModel(ref.providerID, ref.modelID)),
           system: ["frozen-resume-system"],
           turnContext: "frozen-resume-turn-context",
           tools: {},
-          inheritedMessages: [],
+          inheritedMessages: [
+            { role: "user" as const, content: `FROZEN-PARENT-INPUT\n${parentEnvironment}` },
+            { role: "assistant" as const, content: "FROZEN-PARENT-ANSWER" },
+          ],
           parentPermission: [],
           watermarkMsgID: MessageID.ascending(),
           model: ref,
         }
+        const frozenContext = JSON.stringify(context)
         yield* llm.error(400, { error: { message: "invalid request" } })
         const spawned = yield* actor.spawn({
           mode: "subagent",
@@ -2612,6 +2686,12 @@ describe("Actor resume", () => {
         })
         expect((yield* Deferred.await(spawned.outcome)).status).toBe("failure")
         const before = yield* sessions.messages({ sessionID: spawned.sessionID, agentID: spawned.actorID })
+        const users = before.filter((message) => message.info.role === "user")
+        expect(users).toHaveLength(1)
+        expect(
+          users[0].parts.flatMap((part) => SessionReminder.tag(part) ?? []).filter((tag) => tag.key === "session-env"),
+        ).toEqual([{ key: "session-env", rev: Instance.directory }])
+        expect(JSON.stringify(context)).toBe(frozenContext)
         const old = before.findLast((m) => m.info.role === "assistant")!
         expect(old.info.role === "assistant" && old.info.time.completed).toBeUndefined()
         expect(typeof actor.resume).toBe("function")
@@ -2628,8 +2708,17 @@ describe("Actor resume", () => {
         )
         expect(result.parts.some((p) => p.type === "text" && p.text === "resumed result")).toBe(true)
         expect(yield* actor.getForkContext(spawned.sessionID, spawned.actorID)).toBe(context)
-        expect(JSON.stringify((yield* llm.inputs)[1])).toContain("frozen-resume-system")
-        expect(JSON.stringify((yield* llm.inputs)[1]).split(context.turnContext)).toHaveLength(2)
+        expect(JSON.stringify(context)).toBe(frozenContext)
+        const requests = yield* llm.inputs
+        expect(requests).toHaveLength(2)
+        for (const request of requests) {
+          const serialized = JSON.stringify(request)
+          expect(serialized).toContain("frozen-resume-system")
+          expect(serialized.split(context.turnContext)).toHaveLength(2)
+          expect(serialized).toContain(JSON.stringify(parentEnvironment).slice(1, -1))
+          expect(serialized).toContain(`- Session directory: ${Instance.directory}`)
+          expect(serialized.split("Session environment:")).toHaveLength(3)
+        }
         expect((yield* (yield* ActorRegistry.Service).get(spawned.sessionID, spawned.actorID))?.lastOutcome).toBe(
           "success",
         )
