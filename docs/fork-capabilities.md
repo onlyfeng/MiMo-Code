@@ -156,6 +156,7 @@ not change their implementation. The preceding review is retained in the
 | FC-040 | Subagent writability for the progress check ignores catch-all allows after its own deny                   | Fork fix of upstream postStop check                              | Never ask a read-only subagent to write its journal under `--yolo`                       |
 | FC-041 | Exec `files.readText` reads the memory directory                                                          | Fork fix of upstream exec file jail                              | Let a harness without a read tool read task journals                                     |
 | FC-042 | A bounded agent's usage past the compaction trigger is not an overflow                                    | Fork fix of upstream bounded overflow                            | Stop a writer only when the provider rejects its request                                 |
+| FC-043 | `actor cancel` waits a bounded time for the actor to stop                                                 | Fork fix of upstream actor tool                                  | A stuck child never freezes the caller's turn                                            |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3169,3 +3170,31 @@ logged`, and the peer `success`/`failure` variants of
   settle after one request.
 - Retirement condition: upstream distinguishes the compaction trigger from a
   provider overflow for agents without context management.
+
+## FC-043 — `actor cancel` returns while a stuck actor is still stopping
+
+- Status: active
+- Canonical owner: fork `main` — the `cancel` branch and `actorCancelWait` in
+  `packages/cli/src/tool/actor.ts` (uses `awaitWithHardTimeout`,
+  `packages/cli/src/effect/hard-timeout.ts`)
+- Observable contract:
+  - `actor cancel` waits up to 30 s for `Actor.cancel` to finish. If the actor
+    has not stopped by then (a tool call in uninterruptible work), it returns
+    `status: "cancelling"` with a hint; the cancellation keeps running in a
+    detached fiber and completes when that work ends.
+  - Otherwise the result is unchanged (`status: "cancelled"`).
+- Motivation: `Actor.cancel` joins the actor's execution inside an
+  uninterruptible region. A subagent whose `exec` never settled made the
+  coordinator's `actor cancel` hang for 92 minutes; 15 inputs (user prompt,
+  cron fires, notifications) queued behind it until the process was restarted.
+- Upstream relationship: upstream's tool waits for cancellation without bound.
+  Fork fix; `dev/compat` inherits it. The workflow runtime already bounds its
+  own child cancels the same way (`RECLAIM_ACTOR_TIMEOUT_MS`).
+- Watch surfaces: `tool/actor.ts` cancel branch; `Actor.cancel` in
+  `packages/cli/src/actor/spawn.ts`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-cancel.test.ts` "cancel returns
+  cancelling when the actor does not stop in time, and keeps cancelling"
+  (an uninterruptible cancel; fails or hangs with an unbounded wait or a plain
+  `Effect.timeout`, which cannot interrupt it).
+- Retirement condition: upstream bounds the tool-level cancel wait, or
+  `Actor.cancel` no longer joins uninterruptibly.
