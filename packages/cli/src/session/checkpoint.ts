@@ -1029,7 +1029,7 @@ export const layer: Layer.Layer<
       // reuse. Users who need cold-start delta-only behavior can set
       // `checkpoint.fork: false` in their config.
       const cfg = yield* config.get()
-      const forkMode = cfg.checkpoint?.fork ?? true
+      const configuredFork = cfg.checkpoint?.fork ?? true
 
       const parentRow = yield* Effect.sync(() =>
         Database.use((d) =>
@@ -1067,7 +1067,20 @@ export const layer: Layer.Layer<
         msgs.map((m) => ({ info: { role: m.info.role }, parts: m.parts })),
         rawDeltaStart,
       )
-      const delta = forkMode ? [] : msgs.slice(alignedStart, watermarkIdx + 1)
+      const pending = configuredFork ? [] : msgs.slice(alignedStart, watermarkIdx + 1)
+      // FC-036: a delta that outgrows the window (no checkpoint yet, or writers
+      // kept failing while it grew) would overflow every writer, and the
+      // watermark would never advance. Fork the parent's view instead: it is the
+      // context the parent is running with, so it fits.
+      const deltaTooLarge =
+        !configuredFork && !!input.context && estimateViewTokens(pending) > input.context.usable
+      if (deltaTooLarge)
+        log.info("writer delta exceeds the usable window, forking the parent view", {
+          sessionID: input.sessionID,
+          usable: input.context?.usable,
+        })
+      const forkMode = configuredFork || deltaTooLarge
+      const delta = forkMode ? [] : pending
       if (!forkMode && delta.length === 0) {
         // Empty delta under fork:false signals either (a) a degenerate
         // session, or (b) a bug elsewhere advanced last_checkpoint_message_id
