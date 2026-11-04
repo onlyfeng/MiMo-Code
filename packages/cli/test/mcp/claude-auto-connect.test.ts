@@ -305,9 +305,9 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
     ),
   )
 
-  // A host-source startup control must not complete a project Claude import's
-  // transport: under the host execution policy that import is never merged.
-  it.live("host execution policy skips a project Claude import despite a host auto_connect control", () =>
+  // Plugin host restrictions do not filter MCP configuration sources.
+  // The native startup control still keeps the imported transport pending.
+  it.live("plugin restrictions preserve a project Claude import with an explicit pending control", () =>
     Effect.gen(function* () {
       const previousPolicy = process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS
       const previousDir = process.env.MIMOCODE_CONFIG_DIR
@@ -323,7 +323,7 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
         (dir) =>
           Effect.gen(function* () {
             const mcp = yield* MCP.Service
-            expect(yield* mcp.status()).toEqual({})
+            expect((yield* mcp.status()).selected).toEqual({ status: "pending" })
             expect(yield* Effect.promise(() => Bun.file(`${dir}/started`).exists())).toBe(false)
           }),
         {
@@ -338,7 +338,7 @@ if (!process.env.MIMOCODE_TEST_CLAUDE_MCP_CHILD) {
             )
             await Bun.write(
               `${dir}/host/mimocode.json`,
-              JSON.stringify({ mcp: { selected: { auto_connect: true } } }),
+              JSON.stringify({ mcp: { selected: { auto_connect: false } } }),
             )
             process.env.MIMOCODE_ONLY_CONFIG_DIR_PLUGINS = "1"
             process.env.MIMOCODE_CONFIG_DIR = `${dir}/host`

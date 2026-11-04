@@ -259,6 +259,12 @@ export interface SpawnInput {
   context: ContextMode
   tools: ToolWhitelist
   model?: { providerID: ProviderID; modelID: ModelID }
+  /**
+   * Reasoning variant for the child's turns (recorded on its user messages and merged
+   * by the LLM layer). The actor tool fills it from the parent turn; when omitted,
+   * the prompt layer can still apply the agent's configured variant.
+   */
+  variant?: string
   background: boolean
   // ActorTool owns foreground waiting and cancellation after admission. Other
   // callers retain the existing foreground join unless they explicitly opt out.
@@ -446,6 +452,7 @@ export const layer = Layer.effect(
       task: string
       task_id?: string
       model?: { providerID: ProviderID; modelID: ModelID }
+      variant?: string
       source: "spawn" | "hook"
       provenance?: MessageV2.Provenance
       format?: MessageV2.OutputFormat
@@ -457,6 +464,7 @@ export const layer = Layer.effect(
         source: input.source,
         provenance: input.provenance,
         model: input.model,
+        ...(input.variant ? { variant: input.variant } : {}),
         task_id: input.task_id,
         parts: [{ type: "text", text: input.task }],
         ...(input.format ? { format: input.format } : {}),
@@ -500,6 +508,7 @@ export const layer = Layer.effect(
       notifyOnCompletion?: Deferred.Deferred<boolean>
       expectedEpoch?: number
       model?: { providerID: ProviderID; modelID: ModelID }
+      variant?: string
       lifecycle: "ephemeral" | "persistent"
       generation: ForkGenerationOwner
       execution: Execution
@@ -1104,6 +1113,7 @@ export const layer = Layer.effect(
             expectedEpoch,
             actorMode: "peer",
             model: input.model,
+            variant: input.variant,
             lifecycle,
             generation,
             execution,
@@ -1165,6 +1175,7 @@ export const layer = Layer.effect(
             expectedEpoch,
             actorMode: "subagent",
             model: input.model,
+            variant: input.variant,
             lifecycle,
             generation,
             execution,

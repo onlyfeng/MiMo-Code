@@ -83,7 +83,6 @@ export const Flag = {
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env["OTEL_EXPORTER_OTLP_ENDPOINT"],
   OTEL_EXPORTER_OTLP_HEADERS: process.env["OTEL_EXPORTER_OTLP_HEADERS"],
 
-  MIMOCODE_AUTO_SHARE: truthy("MIMOCODE_AUTO_SHARE"),
   MIMOCODE_AUTO_HEAP_SNAPSHOT: truthy("MIMOCODE_AUTO_HEAP_SNAPSHOT"),
   MIMOCODE_GIT_BASH_PATH: process.env["MIMOCODE_GIT_BASH_PATH"],
   MIMOCODE_CONFIG: process.env["MIMOCODE_CONFIG"],
@@ -462,9 +461,9 @@ export const Flag = {
   get MIMOCODE_PURE() {
     return truthy("MIMOCODE_PURE")
   },
-  // Restricts external plugins, file hooks, TUI plugins and executable MCP/LSP/
-  // formatter configuration to host sources. Always on for the Node build,
-  // which cannot serve the plugin SDK to user code.
+  // Loads only external plugins, file hooks and TUI plugins provided by
+  // MIMOCODE_CONFIG_DIR. Always on for the Node build, which cannot serve the
+  // plugin SDK to user code.
   get MIMOCODE_ONLY_CONFIG_DIR_PLUGINS() {
     return truthy("MIMOCODE_ONLY_CONFIG_DIR_PLUGINS")
   },
