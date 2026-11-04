@@ -147,6 +147,7 @@ not change their implementation. The preceding review is retained in the
 | FC-033 | Tool run start time: gate admission and progress updates                                                  | Fork fix of upstream tool timing                                 | Start at admission; a progress update keeps the start                                    |
 | FC-034 | Durable cron: lock takeover by waiting schedulers, permanent recurring jobs                               | Fork fix of upstream scheduler ownership                         | Keep retrying the lock while idle; permanent only with durable recurring                 |
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
+| FC-036 | Checkpoint writer delta under `checkpoint.fork: false`: window check and parent-view fallback             | Fork fix of upstream writer view                                 | Fork the parent view when the delta would overflow; never start a writer that cannot fit |
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
@@ -2908,6 +2909,37 @@ logged`, and the peer `success`/`failure` variants of
 - Retirement condition: upstream attributes patch files to the tools that
   wrote them, or scopes undo and redo to the session's own writes.
 
+## FC-036 — a no-fork checkpoint writer whose delta would overflow forks the parent view
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer — `deltaTooLarge` in
+  `tryStartCheckpointWriter` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - With `checkpoint.fork: false` the writer is sent its own system prompt and
+    the messages since the last checkpoint. When the caller reports the
+    parent's usable window (`context`) and that delta's estimate exceeds it,
+    the writer forks the parent's view instead, exactly as under
+    `fork: true` (including FC-021's choice between the full and the parent's
+    own view). The log line is `writer delta exceeds the usable window,
+    forking the parent view`.
+  - Without `context`, or with a delta that fits, `fork: false` is unchanged.
+- Motivation: the delta has no other bound. With no checkpoint yet, or after
+  writers kept failing, it grows past the window; every writer then overflows,
+  the watermark never advances, and the delta keeps growing. The parent's view
+  is what the parent runs with, so it fits. A 2026-11-04 A/B on real models
+  (local report) found `fork: false` writers cost 1/4–1/2 of `fork: true` with
+  equal or better checkpoints, so the fallback is what lets `fork: false` be
+  used safely.
+- Upstream relationship: upstream has no fallback for either mode. Fork fix of
+  shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the file above; FC-021's view projection in the same
+  function; `estimateViewTokens`; the `context` passed by
+  `packages/cli/src/session/prune.ts`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
+  "fork:false forks the parent view only when the delta exceeds the usable
+  window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
+  writer's own). Dropping the fallback fails the first case.
+- Retirement condition: upstream bounds the no-fork writer's delta.
 ## FC-037 — a sender can read what became of its actor message
 
 - Status: active
