@@ -149,6 +149,7 @@ not change their implementation. The preceding review is retained in the
 | FC-035 | Undo scope: patch `written` files, and revert and unrevert of a session's own writes                      | Fork fix of upstream revert scope                                | Revert what the session's write tools wrote; leave other writers' files                  |
 | FC-036 | Checkpoint writer delta under `checkpoint.fork: false`: window check and parent-view fallback             | Fork fix of upstream writer view                                 | Fork the parent view when the delta would overflow; never start a writer that cannot fit |
 | FC-037 | Actor send receipts: `actor receipt` and the receiver model in send results                               | Fork addition to upstream actor tool                             | Let a sender check delivery itself; show the model and variant the receiver runs         |
+| FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2975,3 +2976,34 @@ logged`, and the peer `success`/`failure` variants of
   from the state each fails it. `registry-toolset.test.ts` and
   `actor.test.ts` cover the advertised action list and the flattened union.
 - Retirement condition: upstream exposes inbox receipts to the actor tool.
+
+## FC-039 — a terminal reply split across stdin reads is not typed into the prompt
+
+- Status: active
+- Canonical owner: fork `main` dependency patch —
+  `patches/@opentui%2Fcore@0.1.101.patch`, `StdinParser.pendingTimeoutMs`
+  (with `STRING_SEQUENCE_TIMEOUT_MS`)
+- Observable contract:
+  - While the parser is inside a DCS, OSC or APC string (after `ESC P`,
+    `ESC ]`, `ESC _`), it waits up to 1000 ms for the terminator before
+    flushing; everything else, a lone Escape included, keeps the 20 ms key
+    timeout.
+  - So a terminal reply delivered in two reads is still one `response` event
+    and nothing of it reaches the prompt.
+- Motivation: a window hosted by a terminal multiplexer showed text such as
+  `48;2;10;10;10m` in the prompt: the tail of a DECRPSS reply
+  (`ESC P 1 $ r 48;2;10;10;10m ESC \`) whose two halves arrived more than
+  20 ms apart. The parser flushed the head as an opaque response and parsed the
+  tail in ground state as typed keys (the closing `ESC \` became Alt+\).
+  Nobody types these introducers by hand, so the longer wait costs nothing.
+- Upstream relationship: upstream `@opentui/core` 0.1.101 applies the 20 ms
+  timeout to every pending sequence. Fork patch alongside the existing CJK
+  extmark fix in the same patch file; `dev/compat` inherits it.
+- Watch surfaces: the patch file; any `@opentui/core` upgrade, which must keep
+  or replace this behavior.
+- Tests/evidence: `packages/cli/test/cli/cmd/tui/stdin-split-reply.test.ts`
+  drives the real parser: a DCS and an OSC reply split by 60 ms stay one
+  response; a lone Escape is still a key. Both split cases fail on the
+  unpatched parser.
+- Retirement condition: upstream opentui gives open string sequences their own
+  timeout, or the dependency is upgraded past such a fix.
