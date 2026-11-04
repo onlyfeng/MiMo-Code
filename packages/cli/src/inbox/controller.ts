@@ -8,7 +8,7 @@ import { Session } from "@/session"
 import { ActorRegistryTable } from "@/actor/actor.sql"
 import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { Bus } from "@/bus"
-import type { MessageID, SessionID } from "@/session/schema"
+import { MessageID, type SessionID } from "@/session/schema"
 import { Log } from "@/util"
 import { ReceiptUpdated } from "./events"
 import {
@@ -199,14 +199,16 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         .returning().get()!
 
     // An ended input that was never consumed still renders on the lane's next
-    // turn, so it went unseen only while no turn has begun since it ended.
+    // turn, so it went unseen only while no turn has begun since it ended. IDs
+    // carry the wall-clock time they were minted at; `time_created` may be
+    // bumped past it, so it cannot be compared with `time_updated`.
     const unseen = (db: Database.TxOrDb, row: typeof InboxTable.$inferSelect) =>
       !row.consumed && !!row.input_message_id &&
       (row.state === "cancelled" || (row.state === "settled" && row.outcome === "never_ran")) &&
       !db.select({ id: MessageTable.id }).from(MessageTable).where(and(
         eq(MessageTable.session_id, row.receiver_session_id),
         eq(MessageTable.agent_id, row.receiver_actor_id),
-        gte(MessageTable.time_created, row.time_updated),
+        gte(MessageTable.id, MessageID.ascendingAfter(row.time_updated)),
         sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
       )).get()
 

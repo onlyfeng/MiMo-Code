@@ -2995,7 +2995,10 @@ logged`, and the peer `success`/`failure` variants of
     (`deduplicated: true`) while it is accepted, claimed, consumed, or ended
     and seen.
   - "Unseen" means: `cancelled` or settled `never_ran`, not consumed, and no
-    assistant message on the receiving lane since the row ended. (An ended,
+    assistant message on the receiving lane minted after the row ended —
+    compared by message ID (`MessageID.ascendingAfter`), whose time is the
+    wall clock at minting, because `time_created` may be bumped past the clock
+    and is not comparable with `time_updated`. (An ended,
     unconsumed input still renders on the lane's next turn, so a later turn
     counts as having seen it.) Such a row is queued again in the same
     transaction — the same row and the same user message, back to `accepted`
@@ -3025,9 +3028,12 @@ logged`, and the peer `success`/`failure` variants of
   once as the same message; unkeyed sends always go out);
   `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend revives the
   unseen row instead of adding a message, and only while unseen" (one sync
-  delta, one user message, a later user input does not count as seen, a later
-  assistant turn does, replay rebuilds the same state). Disabling the revive,
-  reviving consumed rows, ignoring the later turn or its role, reviving into a
+  delta, one user message, a later user input does not count as seen, an
+  assistant minted in the tick the input ended does not either even with a
+  bumped `time_created`, a later assistant turn does, replay rebuilds the same
+  state). Disabling the revive,
+  reviving consumed rows, ignoring the later turn or its role, comparing
+  `time_created` instead of the minted ID, shifting the ID bound by a tick, reviving into a
   stale epoch, dropping the sync record or either result flag, or not passing
   `reviveUnseen` from the tool each fails one of them.
 - Retirement condition: upstream offers keyed actor sends with these semantics.
