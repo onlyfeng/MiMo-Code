@@ -16,12 +16,13 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-11-04
-- Upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
-- Prior reviewed upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
-- Main behavior (runtime/tests): `2516c8e76ba2bd452998e66153878bfd35f15ddf` (C01–C07, including the selected-model variant correction and concurrent FC-042 integration)
-- Inherited compat behavior: `9a1e4d700607429f8218f7ede3ff37d51f82114f` (explicit/configured variant precedence and parent fallback; existing compatibility overlays retained)
-- Bundled guidance content: `fd04de73ced82599baac249e9cf96dfb55b9d778` (cloud-sharing commands/settings removed; unrelated fork guidance retained)
-- Prior fork `main` tip: `602f07bf662c1d0fb9c9c67982c24dedfa663f35`; concurrent accepted main: `4f6f694b22da00c79f6200c80ff9db3212039ac9`
+- Upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
+- Prior reviewed upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
+- Review completion: complete — capability review, focused validation, propagation and successful exact-SHA lint/typecheck/test on both source snapshots; docs-only descendants use the equivalence proof in the execution receipt
+- Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
+- Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
+- Bundled guidance content: `5d728151e06bfc187e90b244a9fbd91fe4126fe6` (FC-043 adds bounded Actor cancel guidance; skill guidance from `fd04de73ced82599baac249e9cf96dfb55b9d778` remains unchanged)
+- Prior fork `main` tip: `07ac991f73dfa73216938571660a17c54f3be916`; prior fork `dev/compat` tip: `12bc737c9542ef944dbf3b62540c367fbd30d04b`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -31,7 +32,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+Latest reviewed synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
+
+Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
 
 Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
@@ -526,6 +529,8 @@ not change their implementation. The preceding review is retained in the
   [the implementation report](audit-followups-2026-09-15.md).
 
 ## FC-002 — canonical checkpoint writer and mode-specific frozen context
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): identify memory paths by `{ key: "memory-paths", rev: sessionMemoryDir }` and places a `session-env` reminder before them, with the receiving `Instance.directory`, git root only inside git, and platform. `SessionReminder.windowTarget` selects only an unanswered own user in the current window; prior sent history and frozen system bytes stay unchanged. The environment reminder also reaches subagents that do not serve checkpoints, but excludes native hidden bounded agents. Strict `MessageV2.usageRecovered`, receipt-aware window ordering and FC-042's `compactsOnUsage` gate are preserved. Old untagged memory paths can be repeated once on the next eligible user before tag-based deduplication takes over; legacy file-tool placeholders remain supported.
 
 - 2026-11-02: the writer has no `task` tool and gets the parent session's tasks instead. It runs in a child session, so `task` read and wrote the child's empty list: in production 4,868 of 4,907 writer `task` calls in 72 hours returned "No tasks.", §4 Task trees came out empty, one checkpoint recorded "the DB keeps no tasks", and a writer `done` on a parent task failed its foreign key. Before spawning, the writer prompt now carries a TASK SNAPSHOT of the parent's tasks (`taskRegistry.list` with terminal tasks, rendered as a tree, capped at 300 tasks with unfinished tasks and their ancestors kept first, then the most recently active finished ones), and §4 comes only from it; the writer no longer changes task state, which never worked from the child session. Evidence: `test/session/checkpoint-child-session.test.ts` asserts the tool list without `task` and the snapshot lines for an open parent task and its finished subtask; the snapshot case fails when the block is removed from the prompt; `test/session/checkpoint-progress-reconcile.test.ts` "renderTaskSnapshot" keeps an active subtask under a finished root and an active task created after 400 finished ones, and fails when the cap keeps creation order.
 
@@ -1378,6 +1383,8 @@ logged`, and the peer `success`/`failure` variants of
   cleanup; the current actor/quarantine result is unaffected.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): replace text/`syntheticMarker` matching in `ensurePersistedUserSynthetic` with validated `metadata.reminder = { key, rev }`. Only non-ignored synthetic text counts; equal key and revision dedupe independently of wording. Memory paths, loop streak and MCP callers migrate; MCP keeps its separate announcement metadata. There is no text-only compatibility shim: an old memory reminder can be repeated once on the next eligible user, and loop streak can repeat if detection fires again on the same user. Hook/spawn provenance, stable persisted part identities, queue delivery and side-effect retry boundaries remain unchanged. Existing `TextPartInput.metadata` carries client tags without a public schema change.
 
 - 2026-10-21 synchronization: upstream `a7440d13` resets a dropped empty step by removing its parts instead of deleting and rebuilding the assistant under the same ID, so no `message.removed` is published for a turn that still delivers content. Adopted into the fork's pure-empty branch only: reasoning-only output keeps the run loop's scoped continuation, so upstream's think-only identity case is adapted to a pure-empty stop in `invalid-output-continuation.test.ts`. Upstream `88673c41` retires the persisted recall reminder; the memory paths reminder is persisted through the same marker-deduplicated `ensurePersistedUserSynthetic`, at most once per context window on an unsent own user message.
 
@@ -3140,6 +3147,8 @@ logged`, and the peer `success`/`failure` variants of
 - Retirement condition: upstream lets `exec` read the memory tree.
 
 ## FC-042 — a bounded agent stops on a rejected request, not on the compaction trigger
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): `isBoundedComputation` moves earlier in the loop so session-environment injection uses the same `native && hidden` predicate. The processor's `compactsOnUsage: !isBoundedComputation`, provider-overflow termination and step budgets are retained.
 
 - Status: active
 - Canonical owner: fork `main` — `compactsOnUsage` in the processor `Input`

@@ -15,12 +15,13 @@ renumbered to close gaps.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-11-04
-- Upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
-- Prior reviewed upstream: `7bc7dc3a9150b3606973164d076b602b5e064690`
-- Main behavior (runtime/tests): `2516c8e76ba2bd452998e66153878bfd35f15ddf` (C01–C07, including the selected-model variant correction and concurrent FC-042 integration)
-- Inherited compat behavior: `9a1e4d700607429f8218f7ede3ff37d51f82114f` (explicit/configured variant precedence and parent fallback; existing compatibility overlays retained)
-- Bundled guidance content: `fd04de73ced82599baac249e9cf96dfb55b9d778` (cloud-sharing commands/settings removed; unrelated fork guidance retained)
-- Prior fork `main` tip: `602f07bf662c1d0fb9c9c67982c24dedfa663f35`; concurrent accepted main: `4f6f694b22da00c79f6200c80ff9db3212039ac9`
+- Upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
+- Prior reviewed upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
+- Review completion: complete — capability review, focused validation, propagation and successful exact-SHA lint/typecheck/test on both source snapshots; docs-only descendants use the equivalence proof in the execution receipt
+- Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
+- Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
+- Bundled guidance content: `5d728151e06bfc187e90b244a9fbd91fe4126fe6` (FC-043 adds bounded Actor cancel guidance; skill guidance from `fd04de73ced82599baac249e9cf96dfb55b9d778` remains unchanged)
+- Prior fork `main` tip: `07ac991f73dfa73216938571660a17c54f3be916`; prior fork `dev/compat` tip: `12bc737c9542ef944dbf3b62540c367fbd30d04b`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -30,7 +31,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 now owns the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+Latest reviewed synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
+
+Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 now owns the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
 
 Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
 
@@ -466,6 +469,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
 
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): MCP synthetic parts are tagged with `{ key: "mcp", rev: mcpReminderMarker(meta) }` while retaining `metadata.mcpReminder` for announcement diffs and deferral evidence, including legacy parts. Readiness remains distinct from request authorization; shared announcement budgets, escaping, frozen membership/schema checks and hidden direct-call rules are unchanged. The Claude environment names `Shell.acceptable()` without changing resolved harness/template selection or the dynamic system-prompt gate.
+
 - 2026-10-30 registry correction: the synchronization below left two sidecar-era references in this entry. `packages/cli/src/tool/websearch/index.ts` leaves the watch surfaces: main's file is identical to upstream and resolves no model identity. The local-SSE `test/tool/websearch.test.ts` evidence leaves Tests/evidence: upstream `d0684a3d` deleted that test with the sidecar. No behavior changes.
 
 - 2026-10-30 synchronization: Adopt `d0684a3d`: remove the Xiaomi WebSearch sidecar and its resolved-API-id clause. Every provider needs explicit Exa enablement on main; compat additionally exposes configured native/fallback routes under DC-WEBSEARCH-001. Harness/prompt/toolset/retry identity remains active.
@@ -804,6 +809,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   the residual upstream difference.
 
 ## FD-009 — frozen-context capture fails closed before actor execution
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): add the receiving session's environment only to an unsent own user message. It neither recaptures nor changes the frozen system, tools, permissions, model identity or parent history. A non-bounded full-context child can retain the parent's reminder and receive its own; duplicate content in that request is accepted. Missing or empty capture still fails closed, and native hidden bounded agents receive no new session-environment part.
 
 - 2026-11-01: FC-002 changes how the `prefix-capture-ref.ts` slot is registered (live captors, so disposing one layer no longer clears another's). The fail-closed admission decision is unchanged.
 
