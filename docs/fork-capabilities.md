@@ -153,6 +153,7 @@ not change their implementation. The preceding review is retained in the
 | FC-039 | TUI stdin parser: split terminal replies (DCS/OSC/APC) wait for their terminator                          | Fork patch of upstream opentui parser                            | Keep a split reply one response; never type its tail into the prompt                     |
 | FC-040 | Subagent writability for the progress check ignores catch-all allows after its own deny                   | Fork fix of upstream postStop check                              | Never ask a read-only subagent to write its journal under `--yolo`                       |
 | FC-041 | Exec `files.readText` reads the memory directory                                                          | Fork fix of upstream exec file jail                              | Let a harness without a read tool read task journals                                     |
+| FC-042 | A bounded agent's usage past the compaction trigger is not an overflow                                    | Fork fix of upstream bounded overflow                            | Stop a writer only when the provider rejects its request                                 |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3131,3 +3132,35 @@ logged`, and the peer `success`/`failure` variants of
   memory root is dropped; the first alone cannot, because the test data dir
   lies under tmp).
 - Retirement condition: upstream lets `exec` read the memory tree.
+
+## FC-042 — a bounded agent stops on a rejected request, not on the compaction trigger
+
+- Status: active
+- Canonical owner: fork `main` — `compactsOnUsage` in the processor `Input`
+  (`packages/cli/src/session/processor.ts`), passed as `!isBoundedComputation`
+  from `packages/cli/src/session/prompt.ts`
+- Observable contract:
+  - For a bounded agent (native and hidden: `checkpoint-writer`, `title`,
+    `summary`, …) a step whose reported usage reaches the compaction trigger
+    (`usable` = 90% of the effective window, after `compaction.max_context`) is
+    not an overflow; the loop continues.
+  - The provider rejecting a request as too large still ends a bounded agent
+    after that one request with `ContextOverflowError` (unchanged).
+  - Agents with context management are unchanged: the trigger routes them to
+    compaction/checkpoint recovery.
+- Motivation: bounded agents have no compaction, so the trigger could only end
+  them. With `compaction.max_context: "272K"` on gpt-6-astra (window 1.05M) the
+  checkpoint writer was failed at 244.8K on steps the provider had accepted:
+  11 of 27 writers of one coordinator session in 5.5 hours ($45), each leaving
+  the checkpoint behind.
+- Upstream relationship: upstream marks the same usage overflow for every
+  agent. Fork fix; `dev/compat` inherits it.
+- Watch surfaces: `processor.ts` finish-step `isOverflow` check and `halt`;
+  `prompt.ts` `isBoundedComputation` and `writeBoundedOverflowError` branches.
+- Tests/evidence: `packages/cli/test/session/checkpoint-writer-runaway.test.ts`
+  "keeps running past the compaction trigger until the provider rejects a
+  request" (380K reported on a 400K window, second step runs; fails without
+  the flag in either file); the file's existing rejected-request cases still
+  settle after one request.
+- Retirement condition: upstream distinguishes the compaction trigger from a
+  provider overflow for agents without context management.
