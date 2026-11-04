@@ -218,6 +218,24 @@ export function buildReflectionMessage(
 }
 
 /**
+ * FC-045: extraction aims below the budget, not at it. A file trimmed to just
+ * under its budget goes over again within a step or two, so writers spent up to
+ * three re-prompts trimming a hundred tokens at a time.
+ */
+export const EXTRACTION_TARGET_RATIO = 0.85
+
+/** Each over-budget item's target and the amount to move, for the extraction prompt. */
+function extractionTargets(violations: Violation[]): string[] {
+  return violations.flatMap((v) => {
+    if (v.tokens == null || v.budget == null) return []
+    const target = Math.floor(v.budget * EXTRACTION_TARGET_RATIO)
+    const move = v.tokens - target
+    const what = v.rule === "section-budget-exceeded" ? `${v.file} ${v.detail.split(" is ")[0]}` : v.file
+    return [`  - ${what}: ${v.tokens} → at most ${target} tokens (move at least ${move} tokens, about ${move * 4} characters)`]
+  })
+}
+
+/**
  * Build a reflection prompt for extract-required budget violations. Instructs
  * the writer to split over-budget files into spillover files rather than
  * fixing structural errors.
@@ -226,8 +244,16 @@ export function buildExtractionReflection(violations: Violation[], current: Curr
   const overBudget = violations.filter((v) => v.severity === "extract-required")
   const files = overBudget.map((v) => `${v.file} (${v.detail})`).join(", ")
   const shown = currentFilesFor(overBudget, current)
+  const targets = extractionTargets(overBudget)
   return `EXTRACTION REQUIRED: The following files exceed their token budget: ${files}.
-
+${
+    targets.length > 0
+      ? `
+Reduce each one in this single pass to its target, which leaves room below the budget — not just under the budget, which the next checkpoint would exceed again:
+${targets.join("\n")}
+`
+      : ""
+  }
 Extract the LESS-IMPORTANT topic cluster from the over-budget file into a new spillover file:
   - Checkpoint spillover: checkpoint-<topic>.md (sibling of checkpoint.md)
   - Memory spillover: MEMORY-<topic>.md (sibling of MEMORY.md)

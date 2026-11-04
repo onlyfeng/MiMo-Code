@@ -10,9 +10,11 @@ import {
   loadPriorDiscoveredTitles,
   renderCurrentFile,
   CURRENT_FILE_CHAR_LIMIT,
+  EXTRACTION_TARGET_RATIO,
 } from "../../src/session/checkpoint-retry"
 import { checkpointPath, memoryPath, metaDir } from "../../src/session/checkpoint-paths"
 import type { SessionID } from "../../src/session/schema"
+import { validateBudget, validateBudgetSections } from "../../src/session/checkpoint-validator"
 import { ProjectID } from "../../src/project/schema"
 
 // Fixture: pre-seed the memory dirs for a synthetic sessionID under the
@@ -148,6 +150,26 @@ describe("buildExtractionReflection", () => {
     expect(msg).toContain("EXTRACTION REQUIRED")
     expect(msg).toContain("checkpoint.md (12000 tokens > 8000 budget)")
     expect(msg).toContain("spillover")
+  })
+})
+
+describe("buildExtractionReflection targets (FC-045)", () => {
+  test("asks for one pass to a target below each budget, with the amount to move", () => {
+    const msg = buildExtractionReflection([
+      ...validateBudget("x".repeat(12_094 * 4), 11_000, "checkpoint.md"),
+      ...validateBudgetSections(`## §5 Current work\n${"y".repeat(2_645 * 4)}`, { "§5 Current work": 2_000 }, "checkpoint.md"),
+    ])
+    expect(msg).toContain("in this single pass")
+    expect(msg).toContain(`checkpoint.md: 12094 → at most ${Math.floor(11_000 * EXTRACTION_TARGET_RATIO)} tokens (move at least ${12_094 - Math.floor(11_000 * EXTRACTION_TARGET_RATIO)} tokens`)
+    expect(msg).toContain(`checkpoint.md section "§5 Current work": 2650 → at most ${Math.floor(2_000 * EXTRACTION_TARGET_RATIO)} tokens`)
+    expect(EXTRACTION_TARGET_RATIO).toBeLessThan(1)
+  })
+
+  test("a violation without measured sizes keeps the plain prompt", () => {
+    const msg = buildExtractionReflection([
+      { file: "checkpoint.md", rule: "budget-exceeded", severity: "extract-required", detail: "12000 tokens > 8000 budget" },
+    ])
+    expect(msg).not.toContain("at most")
   })
 })
 
