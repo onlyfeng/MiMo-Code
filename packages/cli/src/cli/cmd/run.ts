@@ -4,7 +4,6 @@ import path from "path"
 import { pathToFileURL } from "url"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
-import { Flag } from "../../flag/flag"
 import { isSystemSession } from "../../session/auto-dream"
 import { bootstrap } from "../bootstrap"
 import { EOL } from "os"
@@ -27,6 +26,7 @@ import { ActorTool } from "../../tool/actor"
 import { SkillTool } from "../../tool/skill"
 import { BashTool } from "../../tool/bash"
 import { Locale } from "../../util"
+import { trimDiff } from "../../util/trim-diff"
 import { AppRuntime } from "@/effect/app-runtime"
 import { createCompletionTracker, type CompletionTracker } from "./run-completion"
 
@@ -137,7 +137,7 @@ function webfetch(info: ToolProps<typeof WebFetchTool>) {
 
 function edit(info: ToolProps<typeof EditTool>) {
   const title = normalizePath(info.input.file_path)
-  const diff = info.metadata.diff
+  const diff = info.metadata.diff && trimDiff(info.metadata.diff)
   block(
     {
       icon: "←",
@@ -229,10 +229,6 @@ export const RunCommand = cmd({
       .option("fork", {
         describe: "fork the session before continuing (requires --continue or --session)",
         type: "boolean",
-      })
-      .option("share", {
-        type: "boolean",
-        describe: "share the session",
       })
       .option("model", {
         type: "string",
@@ -383,21 +379,6 @@ export const RunCommand = cmd({
       const name = title()
       const result = await sdk.session.create({ title: name, permission: rules })
       return result.data?.id
-    }
-
-    async function share(sdk: OpencodeClient, sessionID: string) {
-      const cfg = await sdk.config.get()
-      if (!cfg.data) return
-      if (cfg.data.share !== "auto" && !Flag.MIMOCODE_AUTO_SHARE && !args.share) return
-      const res = await sdk.session.share({ sessionID }).catch((error) => {
-        if (error instanceof Error && error.message.includes("disabled")) {
-          UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)
-        }
-        return { error }
-      })
-      if (!res.error && "data" in res && res.data?.share?.url) {
-        UI.println(UI.Style.TEXT_INFO_BOLD + "~  " + res.data.share.url)
-      }
     }
 
     async function execute(sdk: OpencodeClient) {
@@ -642,7 +623,6 @@ export const RunCommand = cmd({
         await Log.exit(1)
         throw new Error("Log.exit returned unexpectedly")
       }
-      await share(sdk, sessionID)
 
       const queryLog = Log.create({ service: "cli.run.poll" })
       const tracker = createCompletionTracker({

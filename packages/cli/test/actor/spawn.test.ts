@@ -4129,3 +4129,59 @@ pauseIt.live("a child execution postStop hook can cancel its ancestor without jo
     expect((yield* Deferred.await(next.outcome).pipe(Effect.timeout("3 seconds"))).status).toBe("success")
   }), { git: true, config: providerCfg }), 15000,
 )
+
+// docs/compose/spec/reasoning-variants.md S2.3 — the spawn variant reaches the child's user message.
+describe("Actor.spawn reasoning variant", () => {
+  it.live("records the given variant on the child user message and sends its reasoning effort", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "variant passthrough",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* llm.text("done")
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "general",
+          task: "think hard",
+          context: "none",
+          tools: ["read"],
+          background: false,
+          model: ref,
+          variant: "high",
+        })
+        yield* Deferred.await(result.outcome)
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
+        const childUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
+        expect(childUser?.info.role === "user" ? childUser.info.model.variant : "not-user").toBe("high")
+        const inputs = yield* llm.inputs
+        expect(inputs.length).toBeGreaterThan(0)
+        expect(inputs.every((input) => input.reasoning_effort === "high")).toBe(true)
+      }),
+      {
+        git: true,
+        config: (url) => {
+          const config = providerCfg(url)
+          return {
+            ...config,
+            provider: {
+              test: {
+                ...config.provider.test,
+                models: {
+                  "test-model": {
+                    ...config.provider.test.models["test-model"],
+                    reasoning: true,
+                    variants: { high: { reasoningEffort: "high" } },
+                  },
+                },
+              },
+            },
+          }
+        },
+      },
+    ),
+  )
+})

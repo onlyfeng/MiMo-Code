@@ -84,7 +84,7 @@ async function writeClaudeConfig(file: string, config: object) {
   await Filesystem.write(file, JSON.stringify(config))
 }
 
-describe("host executable configuration policy", () => {
+describe("configuration persistence and legacy refresh", () => {
   const keys = [
     "MIMOCODE_ONLY_CONFIG_DIR_PLUGINS",
     "MIMOCODE_CONFIG_DIR",
@@ -118,7 +118,7 @@ describe("host executable configuration policy", () => {
 
   for (const restricted of [true, false]) {
     it.live(
-      `model updates preserve stored execution settings with host restrictions ${restricted ? "enabled" : "disabled"}`,
+      `project execution settings remain visible and persist with plugin restrictions ${restricted ? "enabled" : "disabled"}`,
       () =>
         provideTmpdirInstance(
           (dir) =>
@@ -150,9 +150,9 @@ describe("host executable configuration policy", () => {
               const svc = yield* Config.Service
               const effective = yield* svc.get()
               expect(effective.model).toBe("test/original")
-              expect(effective.mcp?.example).toEqual(restricted ? undefined : executable.mcp?.example)
-              expect(effective.lsp).toEqual(restricted ? undefined : executable.lsp)
-              expect(effective.formatter).toEqual(restricted ? undefined : executable.formatter)
+              expect(effective.mcp?.example).toEqual(executable.mcp?.example)
+              expect(effective.lsp).toEqual(executable.lsp)
+              expect(effective.formatter).toEqual(executable.formatter)
 
               for (const model of ["test/updated", "test/updated-again"]) {
                 yield* svc.update({ model })
@@ -202,163 +202,8 @@ describe("host executable configuration policy", () => {
     ),
   )
 
-  for (const filename of ["mimocode.json", "mimocode.jsonc", ".mimocode/mimocode.json", ".mimocode/mimocode.jsonc"]) {
-    test(`ignores executable sections from project ${filename} and preserves ordinary settings`, async () => {
-      await using tmp = await tmpdir({
-        git: true,
-        init: (dir) => writeConfig(dir, { ...executable, model: "test/model" }, filename),
-      })
-      await withHost(undefined, () =>
-        Instance.provide({
-          directory: tmp.path,
-          fn: async () => {
-            const config = await load()
-            expect(config.model).toBe("test/model")
-            expect(config.mcp?.example).toBeUndefined()
-            expect(config.mcp_origins?.example).toBeUndefined()
-            expect(config.lsp).toBeUndefined()
-            expect(config.formatter).toBeUndefined()
-          },
-        }),
-      )
-    })
-  }
-
-  test("preserves host executable configuration and excludes global and Claude MCP sources", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await using host = await tmpdir({ init: (dir) => writeConfig(dir, executable) })
-    await using global = await tmpdir({
-      init: (dir) =>
-        writeConfig(dir, {
-          mcp: { global: { type: "local", command: ["example-global"] } },
-        }),
-    })
-    const previous = Global.Path.config
-    Global.Path.config = global.path
-    try {
-      await writeClaudeConfig(path.join(Global.Path.home, ".claude.json"), {
-        mcpServers: { home: { command: "example-home" } },
-      })
-      await writeClaudeConfig(path.join(tmp.path, ".claude.json"), {
-        mcpServers: { project: { command: "example-project" } },
-      })
-      await writeConfig(tmp.path, {
-        mcp: { example: { enabled: true } },
-        lsp: { example: { command: ["example-override"], extensions: [".example"], env: { EXAMPLE: "untrusted" } } },
-        formatter: { example: { environment: { EXAMPLE: "untrusted" } } },
-      })
-      await withHost(host.path, () =>
-        Instance.provide({
-          directory: tmp.path,
-          fn: async () => {
-            const config = await load()
-            expect(config.mcp).toEqual(executable.mcp)
-            expect(config.lsp).toEqual(executable.lsp)
-            expect(config.formatter).toEqual(executable.formatter)
-            expect(config.mcp_origins).toEqual({
-              example: { type: "opencode", source: path.join(host.path, "mimocode.json") },
-            })
-          },
-        }),
-      )
-    } finally {
-      Global.Path.config = previous
-    }
-  })
-
-  test("allows executable settings injected by the host", async () => {
-    await using tmp = await tmpdir({
-      git: true,
-      config: { mcp: { example: { enabled: true }, defaults: { enabled: true } } },
-    })
-    await withHost(undefined, async () => {
-      process.env.MIMOCODE_CONFIG_CONTENT = JSON.stringify(executable)
-      process.env.MIMOCODE_CONFIG_DEFAULTS = JSON.stringify({
-        mcp: { defaults: { type: "local", command: ["example-default"], enabled: false } },
-      })
-      await Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const config = await load()
-          expect(config.mcp?.example).toEqual(executable.mcp?.example)
-          expect(config.mcp?.defaults).toEqual({ type: "local", command: ["example-default"], enabled: false })
-          expect(config.lsp).toEqual(executable.lsp)
-          expect(config.formatter).toEqual(executable.formatter)
-        },
-      })
-    })
-  })
-
-  test("resolves host directory symlinks but rejects escaped and adjacent config paths", async () => {
-    if (process.platform === "win32") return
-    await using tmp = await tmpdir({
-      git: true,
-      init: async (dir) => {
-        const host = path.join(dir, "host")
-        await fs.mkdir(host)
-        await writeConfig(dir, executable, "host-other/mimocode.json")
-        await fs.symlink(path.join(dir, "host-other", "mimocode.json"), path.join(host, "mimocode.json"))
-        await fs.symlink(host, path.join(dir, "host-link"))
-        await writeConfig(
-          host,
-          { mcp: { trusted: { type: "local", command: ["example-host"], enabled: false } } },
-          "mimocode.jsonc",
-        )
-        return host
-      },
-    })
-    // Global files are merged before instance loading; retain their individual
-    // source checks so a symlink cannot inherit its containing directory's trust.
-    const previous = Global.Path.config
-    Global.Path.config = tmp.extra
-    try {
-      await withHost(path.join(tmp.path, "host-link"), () =>
-        Instance.provide({
-          directory: path.join(tmp.path, "host-other"),
-          fn: async () => {
-            const config = await load()
-            expect(config.mcp).toEqual({ trusted: { type: "local", command: ["example-host"], enabled: false } })
-            expect(config.lsp).toBeUndefined()
-            expect(config.formatter).toBeUndefined()
-          },
-        }),
-      )
-    } finally {
-      Global.Path.config = previous
-    }
-  })
-
-  test("preserves trusted file sources when global config symlinks into the host directory", async () => {
-    if (process.platform === "win32") return
-    await using tmp = await tmpdir({ git: true, config: { model: "test/model" } })
-    await using host = await tmpdir({ init: (dir) => writeConfig(dir, executable, "allowed.json") })
-    await using global = await tmpdir({
-      init: (dir) => fs.symlink(path.join(host.path, "allowed.json"), path.join(dir, "mimocode.json")),
-    })
-    const previous = Global.Path.config
-    Global.Path.config = global.path
-    try {
-      await withHost(host.path, () =>
-        Instance.provide({
-          directory: tmp.path,
-          fn: async () => {
-            const config = await load()
-            expect(config.model).toBe("test/model")
-            expect(config.mcp).toEqual(executable.mcp)
-            expect(config.lsp).toEqual(executable.lsp)
-            expect(config.formatter).toEqual(executable.formatter)
-          },
-        }),
-      )
-    } finally {
-      Global.Path.config = previous
-    }
-  })
-
   for (const scenario of [
-    { name: "restricted global symlink", restricted: true, inHost: false },
     { name: "ordinary Bun migration", restricted: false, inHost: false },
-    { name: "restricted host migration", restricted: true, inHost: true },
   ]) {
     test(`legacy TOML configuration survives reload: ${scenario.name}`, async () => {
       if (process.platform === "win32") return
@@ -421,7 +266,7 @@ extensions = [".example"]
             })
             await clear(true)
           }
-          const migrated = !scenario.restricted || scenario.inHost
+          const migrated = true
           expect(await Bun.file(path.join(directory, "config")).exists()).toBe(!migrated)
           expect(await Bun.file(path.join(directory, "config.json")).exists()).toBe(migrated)
           expect(await Bun.file(path.join(host.path, "allowed.toml")).exists()).toBe(true)
@@ -1231,7 +1076,8 @@ test("handles command configuration", async () => {
   })
 })
 
-test("migrates autoshare to share field", async () => {
+// engine-runtime [TP-R14-02]
+test("ignores legacy cloud sharing settings", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
       await Filesystem.write(
@@ -1239,6 +1085,8 @@ test("migrates autoshare to share field", async () => {
         JSON.stringify({
           $schema: "https://opencode.ai/config.json",
           autoshare: true,
+          share: "auto",
+          enterprise: { url: "https://example.com" },
         }),
       )
     },
@@ -1247,8 +1095,9 @@ test("migrates autoshare to share field", async () => {
     directory: tmp.path,
     fn: async () => {
       const config = await load()
-      expect(config.share).toBe("auto")
-      expect(config.autoshare).toBe(true)
+      expect(config).not.toHaveProperty("share")
+      expect(config).not.toHaveProperty("autoshare")
+      expect(config).not.toHaveProperty("enterprise")
     },
   })
 })
@@ -2039,7 +1888,7 @@ test("managed settings override user settings", async () => {
     fn: async () => {
       const config = await load()
       expect(config.model).toBe("managed/model")
-      expect(config.share).toBe("disabled")
+      expect(config).not.toHaveProperty("share")
       expect(config.username).toBe("testuser")
     },
   })
@@ -2980,7 +2829,6 @@ test("parseManagedPlist strips MDM metadata keys", async () => {
           PayloadUUID: "AAAA-BBBB-CCCC",
           PayloadVersion: 1,
           _manualProfile: true,
-          share: "disabled",
           model: "mdm/model",
         }),
       ),
@@ -2988,7 +2836,6 @@ test("parseManagedPlist strips MDM metadata keys", async () => {
     ),
     "test:mobileconfig",
   )
-  expect(config.share).toBe("disabled")
   expect(config.model).toBe("mdm/model")
   // MDM keys must not leak into the parsed config
   expect((config as any).PayloadUUID).toBeUndefined()

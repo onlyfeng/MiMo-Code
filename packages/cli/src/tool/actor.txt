@@ -138,7 +138,7 @@ Both launch actions accept two optional selectors:
 
 - `model`: a tier/group name (e.g. `lite`) or a literal `provider/model`. Omit it to use the agent's configured model, else yours.
 - `variant`: a named variant of that resolved model, usually a reasoning-effort level. It must be one the model lists: call `{"operation":{"action":"models"}}` to see each model's variants. An unknown name fails before the subagent starts, and the error lists the valid ones.
-- Omitting `variant` keeps the default: the agent's configured variant when the subagent uses the agent's configured model, otherwise none. Your own current variant is not inherited, so pass it explicitly when the subagent needs the same reasoning level.
+- Omitting `variant` keeps the agent's configured variant when the subagent uses the agent's configured model, even when `model` explicitly names that resolved model. Otherwise, your current variant is inherited on the same model, or on a different model that lists it. An unsupported agent variant stays unset.
 - The variant stays fixed for the actor's lifetime: `send` follow-ups keep it, and `resume` cannot change it.
 
 {"operation":{"action":"spawn","subagent_type":"general","description":"Deep review","prompt":"<full task>","model":"ultra","variant":"high"}}

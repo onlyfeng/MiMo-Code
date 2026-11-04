@@ -136,7 +136,7 @@ const MODEL_PARAM_DESCRIPTION =
   "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. mimo-v2.5-pro). Overrides the agent's configured model; defaults to the agent's model, else the parent's. If no model_groups are configured, the tier names resolve to the default model. To discover valid provider/model values (e.g. a vision-capable model for image tasks), run `actor models` (or `actor models --vision`)."
 
 const VARIANT_PARAM_DESCRIPTION =
-  "(optional) Named variant of this subagent's model, usually a reasoning-effort level (e.g. low/high/max). It must be one the resolved model lists — run `actor models` to see each model's variants; an unknown name fails before the subagent starts and lists the valid ones. Omit it for the default: the agent's configured variant when the subagent uses the agent's configured model, otherwise none. Your own current variant is not inherited, and the variant stays fixed for the actor's lifetime."
+  "(optional) Named variant of this subagent's model, usually a reasoning-effort level (e.g. low/high/max). It must be one the resolved model lists — run `actor models` to see each model's variants; an unknown name fails before the subagent starts and lists the valid ones. When omitted, the agent's configured variant wins on its own resolved model; otherwise your current variant is inherited on the same model, or on a different model that lists it. An unsupported agent variant stays unset. The variant stays fixed for the actor's lifetime."
 
 // Default token budget for checkpoint context injected into subagent prompts.
 // ~11K tokens ≈ 44KB UTF-8, enough for a concise progress summary without
@@ -797,7 +797,21 @@ export const ActorTool = Tool.define(
         // An unsupported configured variant is dropped rather than failing the call: the
         // agent's config is not this call's request, and the prompt-side fallback ignores
         // an undefined variant the same way.
-        const variant = op.variant ?? (inherited && variants.includes(inherited) ? inherited : undefined)
+        let variant = op.variant ?? (inherited && variants.includes(inherited) ? inherited : undefined)
+        // DC-ACTOR-002 keeps explicit and agent-owned choices ahead of the shared
+        // parent fallback, including when a model selector resolves to the agent's model.
+        // An unsupported agent choice stays unset, as before.
+        const parentVariant = !op.variant && !inherited ? msg.info.variant : undefined
+        if (parentVariant) {
+          const sameModel = model.providerID === msg.info.providerID && model.modelID === msg.info.modelID
+          if (sameModel) variant = parentVariant
+          else {
+            const target = resolved ?? (yield* provider
+              .getModel(model.providerID, model.modelID)
+              .pipe(Effect.catchDefect(() => Effect.succeed(undefined))))
+            if (target?.variants && Object.hasOwn(target.variants, parentVariant)) variant = parentVariant
+          }
+        }
         const selection = variant ? { model, variant } : { model }
 
         const forkContext: ForkContext | undefined = yield* (op.context === "full"

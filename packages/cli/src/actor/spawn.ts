@@ -263,9 +263,9 @@ export interface SpawnInput {
   tools: ToolWhitelist
   model?: { providerID: ProviderID; modelID: ModelID }
   /**
-   * Named variant of `model`, already validated by the caller against that
-   * model's variants. Every prompt turn this spawn drives carries it, so it
-   * outranks the agent's configured variant; omitted → that fallback applies.
+   * Named variant of `model`, selected by the caller. Explicit actor tool selectors
+   * are validated before admission; an inherited same-model variant stays as recorded.
+   * Every prompt turn this spawn drives carries it, outranking the agent fallback.
    */
   variant?: string
   background: boolean

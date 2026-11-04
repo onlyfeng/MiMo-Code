@@ -27,7 +27,6 @@ import { zod, ZodOverride } from "@/util/effect-zod"
 import { ConfigAgent } from "./agent"
 import { ConfigCommand } from "./command"
 import { ConfigFormatter } from "./formatter"
-import { ConfigHost } from "./host"
 import { MIMOCODE_GITIGNORE_ENTRIES } from "./gitignore"
 import { ConfigLayout } from "./layout"
 import { ConfigLSP } from "./lsp"
@@ -47,17 +46,6 @@ import { ConfigVariable } from "./variable"
 
 const log = Log.create({ service: "config" })
 
-function filterExecutableConfig(config: Info, source: string): Info {
-  if (ConfigHost.allowsExecution(source)) return config
-  // Drop whole sections before merging: partial entries can enable a disabled
-  // server or inject environment/initialization into a trusted command.
-  const { mcp, lsp, formatter, ...safe } = config
-  if (mcp || lsp != null || formatter != null) {
-    log.warn("ignoring executable configuration outside host config sources", { source })
-  }
-  return safe
-}
-
 // Custom merge function that concatenates array fields instead of replacing them
 function mergeConfigConcatArrays(target: Info, source: Info): Info {
   const merged = mergeDeep(target, source)
@@ -72,6 +60,11 @@ function normalizeLoadedConfig(data: unknown, source: string) {
   const copy = { ...data }
   // History indexing is uniform; ignore settings written by older releases.
   delete copy.history
+  // Cloud sharing settings from existing files cannot enable a transport.
+  delete copy.share
+  delete copy.autoshare
+  // Only the removed share transport read the enterprise endpoint.
+  delete copy.enterprise
   if (isRecord(copy.compaction) && "prune" in copy.compaction) {
     const { prune: _, ...compaction } = copy.compaction
     copy.compaction = compaction
@@ -143,13 +136,6 @@ const InfoSchema = Schema.Struct({
   }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
-  share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
-    description:
-      "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
-  }),
-  autoshare: Schema.optional(Schema.Boolean).annotate({
-    description: "@deprecated Use 'share' field instead. Share newly created sessions automatically",
-  }),
   autoupdate: Schema.optional(Schema.Union([Schema.Boolean, Schema.Literal("notify")])).annotate({
     description:
       "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications",
@@ -248,11 +234,6 @@ const InfoSchema = Schema.Struct({
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(PermissionRef),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
-  enterprise: Schema.optional(
-    Schema.Struct({
-      url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }),
-    }),
-  ),
   compaction: Schema.optional(
     Schema.Struct({
       auto: Schema.optional(Schema.Boolean).annotate({
@@ -689,7 +670,7 @@ export const layer = Layer.effect(
       )
       const parsed = ConfigParse.jsonc(expanded, source)
       const data = ConfigParse.schema(Info, normalizeLoadedConfig(parsed, source), source)
-      if (!("path" in options) || options.modelsOnly) return filterExecutableConfig(data, source)
+      if (!("path" in options) || options.modelsOnly) return data
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
       if (!data.$schema || data.$schema === "https://opencode.ai/config.json") {
@@ -703,7 +684,7 @@ export const layer = Layer.effect(
           yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
         }
       }
-      return filterExecutableConfig(data, source)
+      return data
     })
 
     const loadFile = Effect.fnUntraced(function* (filepath: string, modelsOnly = false) {
@@ -740,12 +721,11 @@ export const layer = Layer.effect(
             try: () => ConfigParse.schema(Info, normalizeLoadedConfig(normalized, legacy), legacy),
             catch: (error) => error,
           })
-          result = mergeDeep(result, filterExecutableConfig(next, legacy))
+          result = mergeDeep(result, next)
           result.$schema = "https://mimo.xiaomi.com/mimocode/config.json"
           const destination = path.join(Global.Path.config, "config.json")
-          // Keep the original source when migration would cross the host
-          // boundary and make allowed configuration disappear on reload.
-          if (modelsOnly || !ConfigHost.allowsExecution(destination)) return
+          // Model refresh reads the legacy source without migrating it.
+          if (modelsOnly) return
           yield* fs.writeFileString(destination, JSON.stringify(result, null, 2))
           yield* fs.remove(legacy)
         }).pipe(Effect.catch(() => Effect.void))
@@ -865,7 +845,6 @@ export const layer = Layer.effect(
         })
 
         const mergeClaudeMcp = Effect.fnUntraced(function* (source: string, overrides: Info["mcp"]) {
-          if (!ConfigHost.allowsExecution(source)) return
           const data = yield* readClaudeConfig(source)
           if (!isRecord(data)) return
           if (!isRecord(data.mcpServers)) return
@@ -1081,10 +1060,6 @@ export const layer = Layer.effect(
 
         if (!result.username) result.username = os.userInfo().username
 
-        if (result.autoshare === true && !result.share) {
-          result.share = "auto"
-        }
-
         if (Flag.MIMOCODE_DISABLE_AUTOCOMPACT) {
           result.compaction = { ...result.compaction, auto: false }
         }
@@ -1169,7 +1144,7 @@ export const layer = Layer.effect(
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
       const file = path.join(dir, "config.json")
-      // Persist the stored configuration, preserving filtered sections and literal references.
+      // Persist the stored configuration, preserving existing sections and literal references.
       const before = (yield* readConfigFile(file)) || "{}"
       const existing = yield* Effect.try({
         try: () => ConfigParse.schema(Info, normalizeLoadedConfig(ConfigParse.jsonc(before, file), file), file),

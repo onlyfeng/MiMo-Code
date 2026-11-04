@@ -9,7 +9,6 @@ import { SessionCwd } from "./session-cwd"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertWriteAllowed } from "./external-directory"
-import { trimDiff } from "./edit"
 import { LSP } from "../lsp"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
@@ -78,7 +77,7 @@ export const ApplyPatchTool = Tool.define(
             const oldContent = ""
             const newContent =
               hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
-            const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
+            const diff = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
 
             let additions = 0
             let deletions = 0
@@ -121,7 +120,7 @@ export const ApplyPatchTool = Tool.define(
               return yield* Effect.fail(new Error(`apply_patch verification failed: ${error}`))
             }
 
-            const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
+            const diff = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
 
             let additions = 0
             let deletions = 0
@@ -162,7 +161,7 @@ export const ApplyPatchTool = Tool.define(
                   ),
                 ),
               )
-            const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
+            const deleteDiff = createTwoFilesPatch(filePath, filePath, contentToDelete, "")
 
             const deletions = contentToDelete.split("\n").length
 
