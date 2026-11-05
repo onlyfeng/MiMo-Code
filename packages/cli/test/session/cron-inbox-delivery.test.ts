@@ -16,6 +16,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import type { SessionID } from "../../src/session/schema"
 import type { InjectScheduledPromptInput } from "../../src/session/prompt"
 import { SessionStatus } from "../../src/session/status"
+import { SessionOwner } from "../../src/session/session-owner"
 import { Database, eq } from "../../src/storage"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -58,6 +59,16 @@ describe("durable cron delivery through the inbox (DC-SESSION-001)", () => {
         schedulerRef.current = { kick: (lane) => Effect.sync(() => void kicks.push(lane.sessionID)) }
         yield* Effect.addFinalizer(() => Effect.sync(() => void (schedulerRef.current = previous)))
 
+        // The process-wide scheduler can also receive persisted wakes for unrelated sessions.
+        const unrelated = yield* sessions.create({ title: "unrelated owned session wake" })
+        yield* Effect.addFinalizer(() => sessions.remove(unrelated.id))
+        Database.use((db) => {
+          SessionOwner.claim(db, unrelated.id)
+          SessionOwner.ringWake(db, { sessionID: unrelated.id, agentID: "main" })
+        })
+        for (let waited = 0; !kicks.includes(unrelated.id) && waited < 5_000; waited += 20) yield* Effect.sleep(20)
+        expect(kicks).toContain(unrelated.id)
+
         const task: CronTask = {
           id: "watch1",
           cron: "* * * * *",
@@ -91,7 +102,7 @@ describe("durable cron delivery through the inbox (DC-SESSION-001)", () => {
           }),
         ])
         expect(injected).toEqual([])
-        expect(kicks).toEqual([])
+        expect(kicks.filter((sessionID) => sessionID === here.id || sessionID === there.id)).toEqual([])
 
         // A restart before the fire was recorded fires the slot again; it is delivered once.
         yield* bridge.stop()
