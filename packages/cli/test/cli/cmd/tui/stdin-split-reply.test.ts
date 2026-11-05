@@ -87,6 +87,19 @@ describe("stdin parser late tails of flushed terminal replies (patch)", () => {
     expect(p.keys()).toEqual(["h", "i"])
   })
 
+  // Over SSH or a stalled loop, several keys can arrive in one read.
+  for (const [name, typed, keys] of [
+    ["text then Ctrl+G", "hello\x07", ["h", "e", "l", "l", "o", "\x07"]],
+    ["text then Alt+backslash", "ok\x1b\\", ["o", "k", "\x1b\\"]],
+  ] as const)
+    test(`coalesced ${name} after a flushed OSC reply is still typed`, () => {
+      const p = manual()
+      p.feed("\x1b]11;rgb:0a0a/")
+      p.wait(1500)
+      p.feed(typed)
+      expect(p.keys()).toEqual([...keys])
+    })
+
   test("a typed Alt+backslash after a flushed reply is still a key", () => {
     const p = manual()
     p.feed("\x1bP1$r")

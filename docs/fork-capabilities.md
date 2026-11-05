@@ -3071,11 +3071,13 @@ logged`, and the peer `success`/`failure` variants of
     and nothing of it reaches the prompt.
   - When the second half arrives after that wait anyway (a slow host, or an
     event loop stalled past it), the flushed string is remembered for 10 s:
-    a following read that is a run of printable bytes ending in the string
-    terminator (`ESC \`, or `BEL` for OSC) is taken as its tail and emitted
-    as an opaque response, not keys. Typed keys arrive one read at a time and
-    do not end in a terminator, so they are unaffected; a bare `ESC \`
-    (Alt+\\) is still a key.
+    a following read that is a run of reply characters (hex digits, `;:/,.$?=#`,
+    `r g b m`, space) ending in the string terminator (`ESC \`, or `BEL` for
+    OSC) is taken as its tail and emitted as an opaque response, not keys.
+    Typed text uses other letters, so coalesced typing ending in Ctrl+G or
+    Alt+\\ stays keys, and a bare `ESC \` is still a key. A typed run made only
+    of those characters and ending in a terminator, within 10 s of a flushed
+    reply, would be dropped — an accepted residual.
 - Motivation: a window hosted by a terminal multiplexer showed text such as
   `48;2;10;10;10m` (later `10m`, after the wait) in the prompt: the tail of a DECRPSS reply
   (`ESC P 1 $ r 48;2;10;10;10m ESC \`) whose two halves arrived more than
@@ -3092,8 +3094,9 @@ logged`, and the peer `success`/`failure` variants of
   response; a lone Escape is still a key. Both split cases fail on the
   unpatched parser. "late tails of flushed terminal replies": DCS, OSC-ST and
   OSC-BEL tails arriving 1.5 s later are not typed (fail without the
-  recovery); typing after a flush, a typed Alt+\\ and a tail after the 10 s
-  window are still keys.
+  recovery); typing after a flush, coalesced `hello` + Ctrl+G and `ok` +
+  Alt+\\ in one read, a typed Alt+\\ and a tail after the 10 s window are
+  still keys (the coalesced cases fail with a printable-only check).
 - Retirement condition: upstream opentui gives open string sequences their own
   timeout, or the dependency is upgraded past such a fix.
 
