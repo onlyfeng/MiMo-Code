@@ -2,18 +2,29 @@ diff --git a/node_modules/@opentui/core/.bun-tag-1a78c3343e7bc25e b/.bun-tag-1a7
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/index-xsfpee0k.js b/index-xsfpee0k.js
-index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f612ad9284 100644
+index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..52c61ddaf4305fd7f55cb2c9db40d27f280754dc 100644
 --- a/index-xsfpee0k.js
 +++ b/index-xsfpee0k.js
-@@ -6855,6 +6855,7 @@ var env = new Proxy({}, {
+@@ -6855,6 +6855,9 @@ var env = new Proxy({}, {
  // src/lib/stdin-parser.ts
  import { Buffer as Buffer3 } from "buffer";
  var DEFAULT_TIMEOUT_MS = 20;
 +var STRING_SEQUENCE_TIMEOUT_MS = 1000;
++var STRING_TAIL_RECOVERY_MS = 10000;
++var STRING_TAIL_MAX_BYTES = 4096;
  var DEFAULT_MAX_PENDING_BYTES = 64 * 1024;
  var INITIAL_PENDING_CAPACITY = 256;
  var ESC = 27;
-@@ -7248,9 +7249,17 @@ class StdinParser {
+@@ -7166,6 +7169,8 @@ class StdinParser {
+   timeoutId = null;
+   destroyed = false;
+   pendingSinceMs = null;
++  // MiMoCode: a string sequence (DCS/OSC/APC) flushed on timeout, whose tail may still arrive.
++  orphanString = null;
+   forceFlush = false;
+   justFlushedEsc = false;
+   state = { tag: "ground" };
+@@ -7248,9 +7253,17 @@ class StdinParser {
        onEvent(event);
      }
    }
@@ -32,7 +43,70 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
        return;
      }
      this.tryForceFlush();
-@@ -8126,7 +8135,7 @@ class StdinParser {
+@@ -7300,6 +7313,15 @@ class StdinParser {
+       switch (this.state.tag) {
+         case "ground": {
+           this.unitStart = this.cursor;
++          if (this.orphanString) {
++            const tail = this.orphanStringTail(bytes, this.cursor);
++            this.orphanString = null;
++            if (tail > 0) {
++              this.emitOpaqueResponse("unknown", bytes.subarray(this.cursor, tail));
++              this.consumePrefix(tail);
++              continue;
++            }
++          }
+           if (this.justFlushedEsc) {
+             if (byte === 91) {
+               this.justFlushedEsc = false;
+@@ -7840,6 +7862,7 @@ class StdinParser {
+               this.markPending();
+               return;
+             }
++            this.orphanString = { tag: "osc", at: this.clock.now() };
+             this.emitOpaqueResponse("unknown", bytes.subarray(this.unitStart, this.cursor));
+             this.state = { tag: "ground" };
+             this.consumePrefix(this.cursor);
+@@ -7877,6 +7900,7 @@ class StdinParser {
+               this.markPending();
+               return;
+             }
++            this.orphanString = { tag: "dcs", at: this.clock.now() };
+             this.emitOpaqueResponse("unknown", bytes.subarray(this.unitStart, this.cursor));
+             this.state = { tag: "ground" };
+             this.consumePrefix(this.cursor);
+@@ -7907,6 +7931,7 @@ class StdinParser {
+               this.markPending();
+               return;
+             }
++            this.orphanString = { tag: "apc", at: this.clock.now() };
+             this.emitOpaqueResponse("unknown", bytes.subarray(this.unitStart, this.cursor));
+             this.state = { tag: "ground" };
+             this.consumePrefix(this.cursor);
+@@ -8060,6 +8085,22 @@ class StdinParser {
+   markPending() {
+     this.pendingSinceMs = this.clock.now();
+   }
++  // MiMoCode: the late tail of a string sequence flushed on timeout (a split
++  // terminal reply, e.g. "10m" + ST of a DECRPSS) arrives as printable bytes
++  // ending in its terminator. Typed keys arrive one read at a time and do not
++  // end in ST, so only a printable run that is terminated in the same read is
++  // taken as that tail. Returns the end offset of the tail, or 0.
++  orphanStringTail(bytes, start) {
++    if (this.clock.now() - this.orphanString.at > STRING_TAIL_RECOVERY_MS) return 0;
++    const limit = Math.min(bytes.length, start + STRING_TAIL_MAX_BYTES);
++    for (let i = start; i < limit; i++) {
++      const byte = bytes[i];
++      if (byte === BEL && this.orphanString.tag === "osc") return i > start ? i + 1 : 0;
++      if (byte === ESC) return i > start && bytes[i + 1] === 92 ? i + 2 : 0;
++      if (byte < 32 || byte === 127) return 0;
++    }
++    return 0;
++  }
+   consumePasteBytes(chunk) {
+     const paste = this.paste;
+     const combined = concatBytes(paste.tail, chunk);
+@@ -8126,7 +8167,7 @@ class StdinParser {
        } catch (error) {
          console.error("stdin parser timeout flush failed", error);
        }
@@ -41,7 +115,15 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
    }
    clearTimeout() {
      if (!this.timeoutId) {
-@@ -9914,7 +9923,9 @@ class ExtmarksController {
+@@ -8139,6 +8180,7 @@ class StdinParser {
+     this.pending.reset(INITIAL_PENDING_CAPACITY);
+     this.events.length = 0;
+     this.pendingSinceMs = null;
++    this.orphanString = null;
+     this.forceFlush = false;
+     this.justFlushedEsc = false;
+     this.state = { tag: "ground" };
+@@ -9914,7 +9956,9 @@ class ExtmarksController {
          return;
        }
        this.originalDeleteCharBackward();
@@ -52,7 +134,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
      };
      this.editBuffer.deleteChar = () => {
        if (this.destroyed) {
-@@ -9923,9 +9934,10 @@ class ExtmarksController {
+@@ -9923,9 +9967,10 @@ class ExtmarksController {
        }
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
@@ -65,7 +147,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
          this.originalDeleteChar();
          return;
        }
-@@ -9946,8 +9958,13 @@ class ExtmarksController {
+@@ -9946,8 +9991,13 @@ class ExtmarksController {
          this.updateHighlights();
          return;
        }
@@ -80,7 +162,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
      };
      this.editBuffer.deleteRange = (startLine, startCol, endLine, endCol) => {
        if (this.destroyed) {
-@@ -9999,7 +10016,8 @@ class ExtmarksController {
+@@ -9999,7 +10049,8 @@ class ExtmarksController {
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
        this.originalInsertText(text);
@@ -90,7 +172,7 @@ index 964cc24e3051ec8d4aeac37b68eed747b433d1b5..26007a1850b43172e2c6d5765fc736f6
      };
      this.editBuffer.insertChar = (char) => {
        if (this.destroyed) {
-@@ -10009,7 +10027,8 @@ class ExtmarksController {
+@@ -10009,7 +10060,8 @@ class ExtmarksController {
        this.saveSnapshot();
        const currentOffset = this.editorView.getVisualCursor().offset;
        this.originalInsertChar(char);
