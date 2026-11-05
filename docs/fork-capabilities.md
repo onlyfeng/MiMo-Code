@@ -3069,8 +3069,17 @@ logged`, and the peer `success`/`failure` variants of
     timeout.
   - So a terminal reply delivered in two reads is still one `response` event
     and nothing of it reaches the prompt.
+  - When the second half arrives after that wait anyway (a slow host, or an
+    event loop stalled past it), the flushed string is remembered for 10 s:
+    a following read that is a run of reply characters (hex digits, `;:/,.$?=#`,
+    `r g b m`, space) ending in the string terminator (`ESC \`, or `BEL` for
+    OSC) is taken as its tail and emitted as an opaque response, not keys.
+    Typed text uses other letters, so coalesced typing ending in Ctrl+G or
+    Alt+\\ stays keys, and a bare `ESC \` is still a key. A typed run made only
+    of those characters and ending in a terminator, within 10 s of a flushed
+    reply, would be dropped — an accepted residual.
 - Motivation: a window hosted by a terminal multiplexer showed text such as
-  `48;2;10;10;10m` in the prompt: the tail of a DECRPSS reply
+  `48;2;10;10;10m` (later `10m`, after the wait) in the prompt: the tail of a DECRPSS reply
   (`ESC P 1 $ r 48;2;10;10;10m ESC \`) whose two halves arrived more than
   20 ms apart. The parser flushed the head as an opaque response and parsed the
   tail in ground state as typed keys (the closing `ESC \` became Alt+\).
@@ -3083,7 +3092,11 @@ logged`, and the peer `success`/`failure` variants of
 - Tests/evidence: `packages/cli/test/cli/cmd/tui/stdin-split-reply.test.ts`
   drives the real parser: a DCS and an OSC reply split by 60 ms stay one
   response; a lone Escape is still a key. Both split cases fail on the
-  unpatched parser.
+  unpatched parser. "late tails of flushed terminal replies": DCS, OSC-ST and
+  OSC-BEL tails arriving 1.5 s later are not typed (fail without the
+  recovery); typing after a flush, coalesced `hello` + Ctrl+G and `ok` +
+  Alt+\\ in one read, a typed Alt+\\ and a tail after the 10 s window are
+  still keys (the coalesced cases fail with a printable-only check).
 - Retirement condition: upstream opentui gives open string sequences their own
   timeout, or the dependency is upgraded past such a fix.
 
