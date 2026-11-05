@@ -330,6 +330,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-05 inherit FC-046
+
+Inherited from `main` PR #233 (FC-046: after a rebuild or compaction boundary the checkpoint ladder counts the non-final thresholds below the rebuilt context plus one ladder step as crossed; the final threshold still fires; compaction summaries are not read as the lane's context); no owner added or retired. Conflict-free; `prune.ts` has no compat overlay, and compat's `prune.test.ts` overlay (the `coverage` stub member) is untouched.
+
 ## 2026-11-05 inherit FC-039 late-tail recovery
 
 Inherited from `main` PR #231 (FC-039 extension: the tail of a DCS/OSC/APC reply that arrives after the 1 s string wait is recognized by its reply characters and terminator within 10 s and kept out of the prompt); no owner added or retired. Conflict-free; the opentui patch has no compat overlay.
