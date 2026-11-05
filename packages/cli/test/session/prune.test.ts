@@ -581,7 +581,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
   // and writer child sessions (stamped by Session.create) keep their order.
   const tick = Effect.sleep("5 millis")
 
-  const seedAssistant = (sessionID: SessionID, tokens: number) =>
+  const seedAssistant = (sessionID: SessionID, tokens: number, opts?: { summary?: boolean }) =>
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
       const created = Date.now()
@@ -606,6 +606,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
         path: { cwd: "/tmp/example", root: "/tmp/example" },
         cost: 0,
         finish: "stop",
+        ...(opts?.summary ? { summary: true } : {}),
         tokens: { total: tokens, input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         time: { created, completed: created },
       })
@@ -651,6 +652,27 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
         checkpointDir: "",
         checkpointNumber: 1,
         coveredUpTo: user.id,
+      })
+      yield* tick
+    })
+
+  const seedCompaction = (sessionID: SessionID) =>
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const user = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: user.id,
+        sessionID,
+        type: "compaction",
+        auto: true,
       })
       yield* tick
     })
@@ -732,15 +754,159 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
           const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
 
           // After the rebuild the ladder measures the new context, as after
-          // resetThresholds in the process that rebuilt.
+          // resetThresholds in the process that rebuilt. The 35K writer does
+          // not cover anything past the boundary.
           yield* seedAssistant(info.id, 35_000)
           yield* startWriter(info.id, "success")
           yield* seedRebuild(info.id)
+          yield* seedAssistant(info.id, 15_000)
 
-          yield* fire(info.id, 36_000)
+          // 30K is below the 35K the pre-rebuild writer covered, yet it fires:
+          // that writer no longer counts. (20K is within one 10K step of the
+          // 15K rebuilt context, so it is skipped — FC-046.)
+          yield* fire(info.id, 31_000)
           expect(starts.count).toBe(1)
         }),
-      ladder(["30K", "45K"]),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  // FC-046: a rebuild restarts the ladder from a context that already holds the
+  // checkpoint and the tail after its watermark. A threshold just above that
+  // baseline would start a writer for a range the rebuild had only just loaded.
+  restart.live("after a rebuild, thresholds within one step of the rebuilt context do not fire", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedRebuild(info.id)
+
+          // Ladder 20K/30K/40K, step 10K. The rebuilt context starts at 15K, so
+          // 20K is within one step of it and is skipped; 30K is not.
+          yield* fire(info.id, 15_000)
+          yield* fire(info.id, 21_000)
+          expect(starts.count).toBe(0)
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("after a rebuild, the final threshold is never skipped", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedRebuild(info.id)
+
+          // The rebuilt context is already past every threshold. The non-final
+          // ones are skipped, but the final one still starts a writer: nothing
+          // after it would cover the context before the next rebuild.
+          yield* fire(info.id, 41_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("after a restart, the baseline is the first step after the rebuild, not the current one", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The previous process rebuilt, took a 15K step, and grew to 33K
+          // before it stopped. Step 10K: measured from 15K only 20K is skipped,
+          // so 30K is due. Measured from 33K, 30K would be skipped as well.
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedRebuild(info.id)
+          yield* seedAssistant(info.id, 15_000)
+          yield* seedAssistant(info.id, 33_000)
+
+          yield* fire(info.id, 33_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("a rebuild in the running process skips the thresholds near the rebuilt context", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The ladder runs to its end in this process: one writer for the
+          // range up to 41K, which then succeeds.
+          yield* seedAssistant(info.id, 41_000)
+          yield* fire(info.id, 41_000)
+          expect(starts.count).toBe(1)
+          yield* startWriter(info.id, "success")
+
+          // Rebuild, as prompt.ts does: insert the boundary, then reset.
+          yield* seedRebuild(info.id)
+          yield* SessionPrune.Service.use((svc) => svc.resetThresholds(info.id))
+          yield* seedAssistant(info.id, 15_000)
+
+          yield* fire(info.id, 15_000)
+          yield* fire(info.id, 21_000)
+          expect(starts.count).toBe(1)
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(2)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("after a compaction, the summary's usage is not the baseline", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The summary right after the boundary records the summarization
+          // request over the old history (45K), not the resumed context. The
+          // first real step is 15K, so only 20K is skipped and 30K fires.
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedCompaction(info.id)
+          yield* seedAssistant(info.id, 45_000, { summary: true })
+          yield* seedAssistant(info.id, 15_000)
+
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("without a rebuild, the first threshold of a new session still fires", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // A session that never rebuilt has no checkpoint to restart from, so
+          // its first threshold is the first writer it gets.
+          yield* seedAssistant(info.id, 21_000)
+          yield* fire(info.id, 21_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
     ),
   )
 
