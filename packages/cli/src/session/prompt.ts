@@ -152,6 +152,7 @@ import {
   sessionErrorText,
 } from "./trajectory"
 import { prefixCaptureRef, prefixModelIdentity, registerPrefixCapture } from "./prefix-capture-ref"
+import { registerAgentModelResolver, type AgentModelResolveFn } from "./agent-model-ref"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { Interface as ActorInterface } from "@/actor/spawn"
 import { workflowRef } from "@/workflow/runtime-ref"
@@ -1007,6 +1008,31 @@ export const layer = Layer.effect(
     }
     const unregisterCapture = registerPrefixCapture(capture)
     yield* Effect.addFinalizer(() => Effect.sync(unregisterCapture))
+
+    // FC-047: late-bind the agent model resolver for the same layer-cycle reason
+    // as the captor above. An agent without a configured model, or one whose
+    // model does not resolve, yields undefined and the caller keeps its own.
+    const resolveAgentModel: AgentModelResolveFn = (agentName) =>
+      Effect.gen(function* () {
+        const ag = yield* agents.get(agentName)
+        if (!ag) return undefined
+        const ref = ag.modelRef
+          ? yield* provider
+              .resolveModelRef(ag.modelRef)
+              .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
+          : ag.model
+        if (!ref) return undefined
+        const model = yield* provider.getModel(ref.providerID, ref.modelID)
+        return { providerID: model.providerID, modelID: model.id, usable: usable({ cfg: yield* config.get(), model }) }
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : elog.warn("agent model resolution failed", { agentName, cause }).pipe(Effect.as(undefined)),
+        ),
+      )
+    const unregisterAgentModel = registerAgentModelResolver(resolveAgentModel)
+    yield* Effect.addFinalizer(() => Effect.sync(unregisterAgentModel))
 
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
       return yield* EffectBridge.make().pipe(RunApproval.capture)
