@@ -667,6 +667,25 @@ describe("checkpoint writer forkContext shape per mode", () => {
   )
 
   it.live(
+    "fork:false treats a writer model with an unknown window as unbounded",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          // usable 0 = the model publishes no context limit. The delta is not
+          // checked against it, so the writer still runs on its own model.
+          yield* writerModel(0)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "writer-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("writer-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
     "fork:true keeps the parent's model even when the writer names one",
     provideTmpdirInstance(
       () =>

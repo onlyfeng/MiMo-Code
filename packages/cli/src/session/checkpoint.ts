@@ -1085,8 +1085,11 @@ export const layer: Layer.Layer<
       const ownModel = configuredFork
         ? undefined
         : yield* agentModelRef.current?.("checkpoint-writer") ?? Effect.succeed(undefined)
-      const writerWindow = ownModel?.usable ?? input.context?.usable
-      const deltaTooLarge = !configuredFork && writerWindow != null && estimateViewTokens(pending) > writerWindow
+      // A usable window of 0 means the model publishes no limit; as in
+      // `isOverflow`, an unknown window bounds nothing.
+      const writerWindow = ownModel ? ownModel.usable : input.context?.usable
+      const deltaTooLarge =
+        !configuredFork && writerWindow != null && writerWindow > 0 && estimateViewTokens(pending) > writerWindow
       if (deltaTooLarge)
         log.info("writer delta exceeds the usable window, forking the parent view", {
           sessionID: input.sessionID,

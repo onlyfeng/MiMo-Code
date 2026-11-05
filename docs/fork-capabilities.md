@@ -3356,7 +3356,8 @@ logged`, and the peer `success`/`failure` variants of
     `checkpoint writer runs on its configured model`.
   - The FC-036 delta check uses that model's usable window. When the delta does
     not fit, the writer forks the parent's view on the parent's model, as
-    before.
+    before. A window of 0 (the model publishes no limit) bounds nothing, as in
+    `isOverflow`.
   - With `checkpoint.fork: true`, without a configured writer model, or when it
     does not resolve (logged as `agent model resolution failed`), the writer runs
     on the parent's model as before.
@@ -3375,12 +3376,13 @@ logged`, and the peer `success`/`failure` variants of
 - Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
   "fork:false runs the writer on its configured model", "fork:false checks the
   delta against the configured model's window and forks the parent view on the
-  parent's model", "fork:true keeps the parent's model even when the writer
-  names one" and "fork:false without a configured writer model keeps the
-  parent's model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
+  parent's model", "fork:false treats a writer model with an unknown window as
+  unbounded", "fork:true keeps the parent's model even when the writer names
+  one" and "fork:false without a configured writer model keeps the parent's
+  model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
   real resolver through `AppLayer` (literal model, model group, none,
   unresolvable). Always using the parent's model, checking against the parent's
-  window, dropping group resolution, or letting a resolution failure escape each
-  fails a case.
+  window, treating an unknown window as 0, dropping group resolution, or letting
+  a resolution failure escape each fails a case.
 - Retirement condition: upstream lets the writer run on its own configured
   model.
