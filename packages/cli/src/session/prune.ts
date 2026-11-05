@@ -171,18 +171,30 @@ export const layer: Layer.Layer<
     // gate does not survive a restart). 0 when no writer succeeded, or the lane
     // was rebuilt or compacted since (the ladder then measures the new, smaller
     // context, as after resetThresholds).
-    const reachedTokens = (sessionID: SessionID) =>
+    //
+    // FC-046: the same walk reports whether it stopped at a rebuild or
+    // compaction boundary, and the context size of the first step after it,
+    // which the ladder uses as the point it restarts from (see fireCheckpoints).
+    // The walk runs newest first, so the last assistant it passes before the
+    // boundary is that first step. It is undefined when no step has finished
+    // since the boundary.
+    const reachedTokens = (
+      sessionID: SessionID,
+    ): Effect.Effect<{ reached: number; rebuilt: boolean; firstAfterBoundary?: number }> =>
       Effect.sync(() => {
         const writerStart = SessionCheckpoint.lastSucceededWriterStart(sessionID)
-        if (writerStart == null) return 0
+        if (writerStart == null) return { reached: 0, rebuilt: false }
+        let firstAfterBoundary: number | undefined
         for (const msg of MessageV2.stream(sessionID)) {
-          if (isBoundaryUser(msg)) return 0
-          if (msg.info.role !== "assistant" || msg.info.time.created >= writerStart) continue
+          if (isBoundaryUser(msg)) return { reached: 0, rebuilt: true, firstAfterBoundary }
+          if (msg.info.role !== "assistant") continue
           const t = msg.info.tokens
           const total = t.total || t.input + t.output + t.cache.read + t.cache.write
-          if (total > 0) return total
+          if (total <= 0) continue
+          if (msg.info.time.created < writerStart) return { reached: total, rebuilt: false }
+          firstAfterBoundary = total
         }
-        return 0
+        return { reached: 0, rebuilt: false }
       })
 
     // Fires a checkpoint write for every threshold newly crossed by the
@@ -240,14 +252,38 @@ export const layer: Layer.Layer<
         input.tokens.total ||
         input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
 
-      const seen = crossed.get(input.sessionID)
-      const reached = seen ? 0 : yield* reachedTokens(input.sessionID)
-      const already = seen ?? new Set(thresholds.filter((threshold) => threshold <= reached))
       const maxThreshold = thresholds[thresholds.length - 1]
       // The ladder's own spacing: the token growth the design already accepts
       // as worth one writer. Used below as the recovery gate's step so a retry
-      // can never fire faster than a normal threshold would have.
+      // can never fire faster than a normal threshold would have, and as the
+      // growth a rebuilt context must show before a writer is started (FC-046).
       const step = thresholds.length > 1 ? maxThreshold - thresholds[thresholds.length - 2] : maxThreshold
+
+      const seen = crossed.get(input.sessionID)
+      const origin = seen ? undefined : yield* reachedTokens(input.sessionID)
+      const already = seen ?? new Set(thresholds.filter((threshold) => threshold <= (origin?.reached ?? 0)))
+      // FC-046: a rebuild restarts the ladder from a context that is already
+      // part full, because it carries the checkpoint, the verbatim tail after
+      // the checkpoint's watermark, and the system prompt. Thresholds just above
+      // that baseline were therefore crossed after a few steps, and each started
+      // a writer for a range the rebuild had only just loaded. The next writer
+      // covers that tail anyway, because the checkpoint still ends at the old
+      // watermark. So every threshold below the baseline plus one ladder step
+      // counts as crossed. The final threshold is never skipped: it is the only
+      // one with no successor to cover it, and it keeps the checkpoint fresh
+      // for the next rebuild.
+      if (origin?.rebuilt) {
+        const baseline = origin.firstAfterBoundary ?? currentTokens
+        const skipped = thresholds.filter((t) => t !== maxThreshold && t < baseline + step && !already.has(t))
+        for (const t of skipped) already.add(t)
+        if (skipped.length > 0)
+          log.info("checkpoint thresholds near the rebuilt context skipped", {
+            sessionID: input.sessionID,
+            baseline,
+            step,
+            skipped,
+          })
+      }
       const maxAllowed = maxAllowedFor(windowSize, cfg.checkpoint?.reserved)
 
       // FC-028: one writer covers everything up to now, so thresholds crossed
