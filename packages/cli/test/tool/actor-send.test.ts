@@ -177,13 +177,24 @@ describe("actor tool — send action", () => {
         const sessions = yield* Session.Service
         const chat = yield* sessions.create({ title: "coordinator" })
         const target = yield* sessions.create({ title: "worker" })
+        // A session this process owns, with a wake. The wake poller (every 1–1.5 s)
+        // kicks it, as it may kick any session the process owns, including ones
+        // earlier cases in this process left behind; only the target counts below.
+        const other = yield* sessions.create({ title: "other" })
+        Database.use((db) => {
+          SessionOwner.claim(db, other.id)
+          SessionOwner.ringWake(db, { sessionID: other.id, agentID: "main" })
+        })
         // With a lane scheduler present this process could run the receiver; it must not.
         const kicks: string[] = []
         const previous = schedulerRef.current
         schedulerRef.current = { kick: (lane) => Effect.sync(() => { kicks.push(lane.sessionID) }) }
         yield* Effect.addFinalizer(() => Effect.sync(() => { schedulerRef.current = previous }))
         const parsed = yield* sendAcross(chat.id, target.id)
-        expect(kicks).toEqual([])
+        // Give the poller a full round with the target's wake in the table.
+        yield* Effect.sleep("1600 millis")
+        expect(kicks).toContain(other.id)
+        expect(kicks).not.toContain(target.id)
         expect(parsed.inboxID).toBeTruthy()
         expect(parsed.delivery).toBe("receiver_not_open")
         expect(parsed.hint).toContain(target.id)
