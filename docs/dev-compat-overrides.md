@@ -330,6 +330,10 @@ does not substitute for C13's final branch-tip validation.
 - Validation: default path with ambient `MIMOCODE_EXPERIMENTAL` unset (`MIMOCODE_MCP_TOOL_SEARCH`, `MIMOCODE_CODEX_MODE` absent). At `a0d4a550`: package `bun run typecheck` exits 0; root lint reports 3599 warnings and zero errors; focused matrix (`prompt`, `clipboard-spill`, `compaction-reasoning-fallback`, `compaction-tool-choice`, `compaction-projection`, `message-v2`, `skill-catalog-system-tail`, `overflow`) 274 pass, 0 fail; `test/session/prompt-effect.test.ts` 212 pass, 2 existing skips, 0 fail — the compat baseline counts.
 - Shared ownership: FD/FC registries inherit final main byte-for-byte. Remote-tip CI and ancestry are checked after publication.
 
+## 2026-11-05 inherit FC-047 and the FC-046 deferral
+
+Inherited from `main` PR #235 (FC-046: with no step finished since a rebuild or compaction boundary the ladder is not initialized, so a compaction summary's usage never becomes the baseline) and PR #236 (FC-047: under `checkpoint.fork: false` the writer runs on `agent."checkpoint-writer".model` when one resolves; the FC-036 delta check uses that model's positive usable window, and a parent-view fork stays on the parent's model); no owner added or retired. The only conflict was the `checkpoint.ts` import block: compat's `@/storage` import (with `NotFoundError`, `sql`) and `alias` are kept, `agentModelRef` is added, and `InboxTable` stays imported once. Compat's `tryStartCheckpointWriter` overlay does not touch the no-fork model sites, so every no-fork prefix, fork-context and spawn model reads `writerModel` exactly as on `main`.
+
 ## 2026-11-05 inherit FC-046
 
 Inherited from `main` PR #233 (FC-046: after a rebuild or compaction boundary the checkpoint ladder counts the non-final thresholds below the rebuilt context plus one ladder step as crossed; the final threshold still fires; compaction summaries are not read as the lane's context); no owner added or retired. Conflict-free; `prune.ts` has no compat overlay, and compat's `prune.test.ts` overlay (the `coverage` stub member) is untouched.
