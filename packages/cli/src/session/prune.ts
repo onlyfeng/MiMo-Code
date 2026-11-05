@@ -188,6 +188,10 @@ export const layer: Layer.Layer<
         for (const msg of MessageV2.stream(sessionID)) {
           if (isBoundaryUser(msg)) return { reached: 0, rebuilt: true, firstAfterBoundary }
           if (msg.info.role !== "assistant") continue
+          // A compaction summary sits right after its boundary, but its usage is
+          // the summarization request over the old history, not the lane's
+          // context. Counting it would inflate both the baseline and `reached`.
+          if (msg.info.summary) continue
           const t = msg.info.tokens
           const total = t.total || t.input + t.output + t.cache.read + t.cache.write
           if (total <= 0) continue

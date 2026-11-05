@@ -3301,6 +3301,9 @@ logged`, and the peer `success`/`failure` variants of
     finished step after the boundary, or the current size when no step has
     finished since. The step is the ladder's last spacing, the same step the
     final-threshold recovery gate uses.
+  - A compaction summary is not a step of the lane: its usage is the
+    summarization request over the old history. The walk skips it, both for
+    the baseline and for FC-028's reached size.
   - The final threshold is never skipped, so a rebuilt context already past it
     starts a writer at once.
   - Sessions without a boundary, and thresholds a succeeded writer covers
@@ -3325,9 +3328,10 @@ logged`, and the peer `success`/`failure` variants of
   thresholds within one step of the rebuilt context do not fire", "after a
   rebuild, the final threshold is never skipped", "after a restart, the baseline
   is the first step after the rebuild, not the current one", "a rebuild in the
-  running process skips the thresholds near the rebuilt context", "without a
-  rebuild, the first threshold of a new session still fires", and the updated
+  running process skips the thresholds near the rebuilt context", "after a
+  compaction, the summary's usage is not the baseline", "without a rebuild, the
+  first threshold of a new session still fires", and the updated
   "a rebuild after the last writer arms the whole ladder again". Disabling the
-  skip, measuring from the current size, or letting the final threshold be
-  skipped each fails a case.
+  skip, measuring from the current size, letting the final threshold be
+  skipped, or counting the compaction summary each fails a case.
 - Retirement condition: upstream measures the ladder from the rebuilt context.

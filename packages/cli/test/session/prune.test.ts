@@ -581,7 +581,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
   // and writer child sessions (stamped by Session.create) keep their order.
   const tick = Effect.sleep("5 millis")
 
-  const seedAssistant = (sessionID: SessionID, tokens: number) =>
+  const seedAssistant = (sessionID: SessionID, tokens: number, opts?: { summary?: boolean }) =>
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
       const created = Date.now()
@@ -606,6 +606,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
         path: { cwd: "/tmp/example", root: "/tmp/example" },
         cost: 0,
         finish: "stop",
+        ...(opts?.summary ? { summary: true } : {}),
         tokens: { total: tokens, input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         time: { created, completed: created },
       })
@@ -651,6 +652,27 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
         checkpointDir: "",
         checkpointNumber: 1,
         coveredUpTo: user.id,
+      })
+      yield* tick
+    })
+
+  const seedCompaction = (sessionID: SessionID) =>
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const user = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: user.id,
+        sessionID,
+        type: "compaction",
+        auto: true,
       })
       yield* tick
     })
@@ -843,6 +865,29 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
           expect(starts.count).toBe(1)
           yield* fire(info.id, 31_000)
           expect(starts.count).toBe(2)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("after a compaction, the summary's usage is not the baseline", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // The summary right after the boundary records the summarization
+          // request over the old history (45K), not the resumed context. The
+          // first real step is 15K, so only 20K is skipped and 30K fires.
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedCompaction(info.id)
+          yield* seedAssistant(info.id, 45_000, { summary: true })
+          yield* seedAssistant(info.id, 15_000)
+
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
         }),
       ladder(["20K", "30K", "40K"]),
     ),
