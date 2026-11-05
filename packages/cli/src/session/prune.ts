@@ -277,7 +277,16 @@ export const layer: Layer.Layer<
       // one with no successor to cover it, and it keeps the checkpoint fresh
       // for the next rebuild.
       if (origin?.rebuilt) {
-        const baseline = origin.firstAfterBoundary ?? currentTokens
+        // No step has finished since the boundary, so nothing measures the
+        // rebuilt context yet: the tokens passed in can be the compaction
+        // summary's (prompt.ts hands over the newest finished assistant). Wait
+        // for that first step rather than fix the ladder to an old-history size;
+        // `crossed` stays unset, so the next evaluation starts over.
+        if (origin.firstAfterBoundary == null) {
+          log.info("checkpoint ladder waits for the first step after the boundary", { sessionID: input.sessionID })
+          return
+        }
+        const baseline = origin.firstAfterBoundary
         const skipped = thresholds.filter((t) => t !== maxThreshold && t < baseline + step && !already.has(t))
         for (const t of skipped) already.add(t)
         if (skipped.length > 0)
