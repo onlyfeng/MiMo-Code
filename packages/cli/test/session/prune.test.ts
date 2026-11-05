@@ -787,6 +787,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
 
           // Ladder 20K/30K/40K, step 10K. The rebuilt context starts at 15K, so
           // 20K is within one step of it and is skipped; 30K is not.
+          yield* seedAssistant(info.id, 15_000)
           yield* fire(info.id, 15_000)
           yield* fire(info.id, 21_000)
           expect(starts.count).toBe(0)
@@ -811,6 +812,7 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
           // The rebuilt context is already past every threshold. The non-final
           // ones are skipped, but the final one still starts a writer: nothing
           // after it would cover the context before the next rebuild.
+          yield* seedAssistant(info.id, 41_000)
           yield* fire(info.id, 41_000)
           expect(starts.count).toBe(1)
         }),
@@ -886,6 +888,34 @@ describe("SessionPrune.fireCheckpoints after a process restart", () => {
           yield* seedAssistant(info.id, 45_000, { summary: true })
           yield* seedAssistant(info.id, 15_000)
 
+          yield* fire(info.id, 31_000)
+          expect(starts.count).toBe(1)
+        }),
+      ladder(["20K", "30K", "40K"]),
+    ),
+  )
+
+  restart.live("before the first step after a compaction, the ladder waits instead of measuring the summary", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const starts = yield* WriterStarts
+          const info = yield* SessionNs.Service.use((ssn) => ssn.create({}))
+
+          // Only the summary has finished since the boundary, and prompt.ts
+          // passes its 35K usage in. Measuring from it would skip 20K and 30K for
+          // good; the ladder waits for the 15K first step instead, and then only
+          // 20K is skipped.
+          yield* seedAssistant(info.id, 44_000)
+          yield* startWriter(info.id, "success")
+          yield* seedCompaction(info.id)
+          yield* seedAssistant(info.id, 35_000, { summary: true })
+          yield* fire(info.id, 35_000)
+          expect(starts.count).toBe(0)
+
+          yield* seedAssistant(info.id, 15_000)
+          yield* fire(info.id, 15_000)
+          expect(starts.count).toBe(0)
           yield* fire(info.id, 31_000)
           expect(starts.count).toBe(1)
         }),
