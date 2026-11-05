@@ -9,6 +9,7 @@ import { ActorRegistry } from "../../src/actor/registry"
 import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { prefixCaptureRef, type PrefixCaptureFn } from "../../src/session/prefix-capture-ref"
+import { agentModelRef } from "../../src/session/agent-model-ref"
 import { TaskRegistry } from "../../src/task/registry"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
@@ -36,11 +37,21 @@ const ref = {
 // captureLog captures the prefix-capture function calls (agentName + msgs[0] info).
 // settle: when true, actor.spawn settles outcome with success immediately so the
 // settle watcher fires deterministically (mirrors checkpoint-child-session.test.ts).
-const spawnLog: { count: number; lastInput?: { sessionID: string; mode: string; forkContext?: unknown } } = { count: 0 }
+const spawnLog: {
+  count: number
+  lastInput?: {
+    sessionID: string
+    mode: string
+    forkContext?: unknown
+    forkModelID?: string
+    model?: { providerID: string; modelID: string }
+  }
+} = { count: 0 }
 const captureLog: {
   calls: Array<{
     sessionID: string
     agentName: string
+    modelID: string
     msgsLen: number
     firstMsgRole?: string
     firstMsgID?: string
@@ -60,7 +71,13 @@ const recordingActor = Layer.effect(
         Effect.gen(function* () {
           counter += 1
           spawnLog.count = counter
-          spawnLog.lastInput = { sessionID: input.sessionID, mode: input.mode, forkContext: input.forkContext }
+          spawnLog.lastInput = {
+            sessionID: input.sessionID,
+            mode: input.mode,
+            forkContext: input.forkContext,
+            forkModelID: input.forkContext?.model.modelID,
+            model: input.model,
+          }
           const outcome = yield* Deferred.make<AgentOutcome>()
           yield* Deferred.succeed(outcome, { status: "success", finalText: "ok" })
           return {
@@ -93,6 +110,7 @@ function installRecordingCapture() {
       captureLog.calls.push({
         sessionID: input.sessionID,
         agentName: input.agentName,
+        modelID: input.modelID,
         msgsLen: input.msgs.length,
         firstMsgRole: first?.role,
         firstMsgID: first?.id,
@@ -143,6 +161,7 @@ const reset = Effect.sync(() => {
   spawnLog.lastInput = undefined
   captureLog.calls = []
   prefixCaptureRef.current = undefined
+  agentModelRef.current = undefined
 })
 
 // Seed u1(text)/a1(tool)/u2(text)/a2(text). Padding u2 and a2 keeps the
@@ -592,6 +611,115 @@ describe("checkpoint writer forkContext shape per mode", () => {
     )
   }
 
+  // FC-047: a no-fork writer runs on `agent."checkpoint-writer".model` when one
+  // is configured; the delta must fit that model's window, and a parent-view
+  // fork stays on the parent's model.
+  const writerModel = (usable: number) =>
+    Effect.sync(() => {
+      agentModelRef.current = (agentName) =>
+        Effect.succeed(agentName === "checkpoint-writer" ? { providerID: "test", modelID: "writer-model", usable } : undefined)
+    })
+  const startWriter = (info: { id: SessionID }, usable: number) =>
+    SessionCheckpoint.Service.use((svc) =>
+      svc.tryStartCheckpointWriter({
+        sessionID: info.id,
+        model: { providerID: "test", modelID: "test-model" },
+        promptOps: unusedPromptOps,
+        context: { usable, used: 500 },
+      }),
+    )
+  const forkModel = () => spawnLog.lastInput?.forkModelID
+
+  it.live(
+    "fork:false runs the writer on its configured model",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          yield* writerModel(1_000_000)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "writer-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("writer-model")
+          expect(forkModel()).toBe("writer-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:false checks the delta against the configured model's window and forks the parent view on the parent's model",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          // The parent's window fits the ~12.5K-token delta; the writer model's does not.
+          yield* writerModel(1_000)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["build", "test-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("test-model")
+          expect(forkModel()).toBe("test-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:false treats a writer model with an unknown window as unbounded",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          // usable 0 = the model publishes no context limit. The delta is not
+          // checked against it, so the writer still runs on its own model.
+          yield* writerModel(0)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "writer-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("writer-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:true keeps the parent's model even when the writer names one",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          yield* writerModel(1_000_000)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => c.modelID)).toEqual(["test-model"])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("test-model")
+        }),
+      { config: { checkpoint: { fork: true } } },
+    ),
+  )
+
+  it.live(
+    "fork:false without a configured writer model keeps the parent's model",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          agentModelRef.current = () => Effect.succeed(undefined)
+          const { info } = yield* seedFourMessages()
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "test-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("test-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
   it.live(
     "missing prefix capture ref skips without spawning, creating a child, or advancing the watermark",
     provideTmpdirInstance(
@@ -649,6 +777,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
               captureLog.calls.push({
                 sessionID: input.sessionID,
                 agentName: input.agentName,
+                modelID: input.modelID,
                 msgsLen: input.msgs.length,
               })
               return {

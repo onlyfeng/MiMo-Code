@@ -162,6 +162,8 @@ not change their implementation. The preceding review is retained in the
 | FC-043 | `actor cancel` waits a bounded time for the actor to stop                                                 | Fork fix of upstream actor tool                                  | A stuck child never freezes the caller's turn                                            |
 | FC-044 | Checkpoint writer returns only `.output` from exec tool calls                                             | Fork addition to upstream writer prompt                          | Keep the full patch diff out of the writer's context                                     |
 | FC-045 | Checkpoint extraction prompt targets 85% of each budget                                                   | Fork addition to upstream writer retry                           | Trim once, with room, instead of a hundred tokens per re-prompt                          |
+| FC-046 | Checkpoint ladder after a rebuild: thresholds within one step of the rebuilt context                      | Fork fix of upstream threshold state                             | Start the first writer after the context has grown; never skip the final threshold      |
+| FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -2554,7 +2556,9 @@ logged`, and the peer `success`/`failure` variants of
     its threshold fires again after the restart; this also stands in for the
     final threshold's recovery gate, which does not survive a restart. With no
     succeeded writer, or with a rebuild or compaction boundary after it, the
-    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild.
+    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild —
+    except the non-final thresholds near the rebuilt context, which FC-046
+    counts as crossed.
   - When one evaluation finds several thresholds newly crossed, it starts one
     writer, for the highest, and marks them all crossed. The final-threshold
     recovery gate is unchanged within a process.
@@ -2943,6 +2947,9 @@ logged`, and the peer `success`/`failure` variants of
     own view). The log line is `writer delta exceeds the usable window,
     forking the parent view`.
   - Without `context`, or with a delta that fits, `fork: false` is unchanged.
+  - When the writer runs on its own configured model (FC-047), the delta is
+    checked against that model's usable window instead; the fork still runs on
+    the parent's model.
 - Motivation: the delta has no other bound. With no checkpoint yet, or after
   writers kept failing, it grows past the window; every writer then overflows,
   the watermark never advances, and the delta keeps growing. The parent's view
@@ -3284,3 +3291,102 @@ logged`, and the peer `success`/`failure` variants of
   sizes on either violation kind fails it.
 - Retirement condition: upstream aims extraction below the budget, or the
   writer stops being re-prompted for budget overruns.
+
+## FC-046 — a rebuilt context does not start a writer until it has grown
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`)
+- Observable contract:
+  - The first time the ladder is evaluated after a rebuild or compaction
+    boundary — in the process that rebuilt, after `resetThresholds`, or in a
+    restarted process — every threshold below the baseline plus one ladder step
+    counts as crossed. The baseline is the context size of the main lane's first
+    finished step after the boundary. Until that step exists the ladder is not
+    initialized at all — the tokens passed in can be the compaction summary's —
+    and the next evaluation starts over. The step is the ladder's last spacing,
+    the same step the final-threshold recovery gate uses.
+  - A compaction summary is not a step of the lane: its usage is the
+    summarization request over the old history. The walk skips it, both for
+    the baseline and for FC-028's reached size.
+  - The final threshold is never skipped, so a rebuilt context already past it
+    starts a writer at once.
+  - Sessions without a boundary, and thresholds a succeeded writer covers
+    (FC-028), behave as before.
+- Motivation: a rebuild loads the checkpoint, the verbatim tail after its
+  watermark and the system prompt, so the rebuilt context starts part full. With
+  the `30%/55%/75%` ladder on a 272K window it started at 58K–75K, and the 30%
+  threshold (73K) fired a few steps later. In one 12-hour window a session
+  rebuilt 20 times and ran 58 writers; 20 started before the context had grown
+  by 15% of the window since the rebuild, about 30% of that session's writer spend.
+  The next writer covers that tail anyway, because the checkpoint still ends at
+  the old watermark. On a 400K window a 144K rebuilt context would cross the
+  first threshold (108K) on its first step.
+- Upstream relationship: upstream re-arms the whole ladder on a rebuild. Fork
+  fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; `isBoundaryUser` in `packages/cli/src/session/tail-digest.ts`;
+  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts` (the
+  walk only runs when a writer has succeeded).
+- Tests/evidence: `packages/cli/test/session/prune.test.ts`
+  "SessionPrune.fireCheckpoints after a process restart": "after a rebuild,
+  thresholds within one step of the rebuilt context do not fire", "after a
+  rebuild, the final threshold is never skipped", "after a restart, the baseline
+  is the first step after the rebuild, not the current one", "a rebuild in the
+  running process skips the thresholds near the rebuilt context", "after a
+  compaction, the summary's usage is not the baseline", "before the first step
+  after a compaction, the ladder waits instead of measuring the summary",
+  "without a rebuild, the first threshold of a new session still fires", and the
+  updated
+  "a rebuild after the last writer arms the whole ladder again". Disabling the
+  skip, measuring from the current size, letting the final threshold be
+  skipped, counting the compaction summary, or falling back to the passed-in
+  size before the first step each fails a case.
+- Retirement condition: upstream measures the ladder from the rebuilt context.
+
+## FC-047 — a no-fork checkpoint writer can run on its own configured model
+
+- Status: active
+- Canonical owner: fork `main` — `ownModel`/`writerModel` in
+  `tryStartCheckpointWriter` (`packages/cli/src/session/checkpoint.ts`); the
+  late-bound resolver in `packages/cli/src/session/agent-model-ref.ts`,
+  registered by `SessionPrompt.layer` (`resolveAgentModel` in
+  `packages/cli/src/session/prompt.ts`)
+- Observable contract:
+  - With `checkpoint.fork: false`, a model configured as
+    `agent."checkpoint-writer".model` (a literal `provider/model` or a
+    model-group name) is the writer's model: its system prompt and tools are
+    built for that model, and the actor is spawned on it. The log line is
+    `checkpoint writer runs on its configured model`.
+  - The FC-036 delta check uses that model's usable window. When the delta does
+    not fit, the writer forks the parent's view on the parent's model, as
+    before. A window of 0 (the model publishes no limit) bounds nothing, as in
+    `isOverflow`.
+  - With `checkpoint.fork: true`, without a configured writer model, or when it
+    does not resolve (logged as `agent model resolution failed`), the writer runs
+    on the parent's model as before.
+- Motivation: the writer always ran on the parent's model, because the parent
+  model passed to the spawn wins over the agent's configured one. A no-fork
+  writer reads no parent prefix, so it gains nothing from sharing the parent's
+  model and cache. On a session with an expensive coordinator model, writers
+  were about a third of the session's spend (58 writers in 12 hours). This lets
+  a cheaper model be measured and chosen for the writer alone.
+- Upstream relationship: upstream spawns the writer on the parent's model. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: `tryStartCheckpointWriter` and the no-fork `buildPrefix` call
+  in `checkpoint.ts`; `registerPrefixCapture`/`registerAgentModelResolver` in
+  `SessionPrompt.layer`; `Agent` config merge of `model`/`modelRef`;
+  `Provider.resolveModelRef`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
+  "fork:false runs the writer on its configured model", "fork:false checks the
+  delta against the configured model's window and forks the parent view on the
+  parent's model", "fork:false treats a writer model with an unknown window as
+  unbounded", "fork:true keeps the parent's model even when the writer names
+  one" and "fork:false without a configured writer model keeps the parent's
+  model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
+  real resolver through `AppLayer` (literal model, model group, none,
+  unresolvable). Always using the parent's model, checking against the parent's
+  window, treating an unknown window as 0, dropping group resolution, or letting
+  a resolution failure escape each fails a case.
+- Retirement condition: upstream lets the writer run on its own configured
+  model.

@@ -15,6 +15,7 @@ import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, FailureInfo, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
+import { agentModelRef } from "./agent-model-ref"
 import { Database, NotFoundError, and, desc, eq, inArray, isNull, not, or, sql } from "@/storage"
 import { alias } from "drizzle-orm/sqlite-core"
 import { ActorRegistryTable } from "@/actor/actor.sql"
@@ -1103,14 +1104,32 @@ export const layer: Layer.Layer<
       // kept failing while it grew) would overflow every writer, and the
       // watermark would never advance. Fork the parent's view instead: it is the
       // context the parent is running with, so it fits.
+      //
+      // FC-047: a no-fork writer reads no parent prefix, so it can run on the
+      // model configured as `agent."checkpoint-writer".model`. The delta then has
+      // to fit that model's window. Forking the parent view always runs on the
+      // parent's model: that view only fits the window it came from.
+      const ownModel = configuredFork
+        ? undefined
+        : yield* agentModelRef.current?.("checkpoint-writer") ?? Effect.succeed(undefined)
+      // A usable window of 0 means the model publishes no limit; as in
+      // `isOverflow`, an unknown window bounds nothing.
+      const writerWindow = ownModel ? ownModel.usable : input.context?.usable
       const deltaTooLarge =
-        !configuredFork && !!input.context && estimateViewTokens(pending) > input.context.usable
+        !configuredFork && writerWindow != null && writerWindow > 0 && estimateViewTokens(pending) > writerWindow
       if (deltaTooLarge)
         log.info("writer delta exceeds the usable window, forking the parent view", {
           sessionID: input.sessionID,
-          usable: input.context?.usable,
+          usable: writerWindow,
         })
       const forkMode = configuredFork || deltaTooLarge
+      const writerModel = !forkMode && ownModel ? { providerID: ownModel.providerID, modelID: ownModel.modelID } : input.model
+      if (writerModel !== input.model)
+        log.info("checkpoint writer runs on its configured model", {
+          sessionID: input.sessionID,
+          providerID: writerModel.providerID,
+          modelID: writerModel.modelID,
+        })
       const delta = forkMode ? [] : pending
       if (!forkMode && delta.length === 0) {
         // Empty delta under fork:false signals either (a) a degenerate
@@ -1198,8 +1217,8 @@ export const layer: Layer.Layer<
             const writerPrefix = yield* buildPrefix({
               sessionID: input.sessionID,
               agentName: "checkpoint-writer",
-              providerID: input.model.providerID,
-              modelID: input.model.modelID,
+              providerID: writerModel.providerID,
+              modelID: writerModel.modelID,
               msgs: delta,
             })
 
@@ -1214,8 +1233,8 @@ export const layer: Layer.Layer<
               parentPermission: writerPrefix.parentPermission,
               watermarkMsgID: endMessageID as MessageID,
               model: {
-                providerID: input.model.providerID as ProviderID,
-                modelID: input.model.modelID as ModelID,
+                providerID: writerModel.providerID as ProviderID,
+                modelID: writerModel.modelID as ModelID,
               },
             } satisfies ForkContext
           })
@@ -1274,8 +1293,8 @@ export const layer: Layer.Layer<
         context: "full",
         tools: [...CHECKPOINT_WRITER_TOOLS],
         model: {
-          providerID: input.model.providerID as ProviderID,
-          modelID: input.model.modelID as ModelID,
+          providerID: writerModel.providerID as ProviderID,
+          modelID: writerModel.modelID as ModelID,
         },
         background: true,
         forkContext: forkCtx,
