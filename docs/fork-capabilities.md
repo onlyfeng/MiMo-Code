@@ -3298,9 +3298,10 @@ logged`, and the peer `success`/`failure` variants of
     boundary — in the process that rebuilt, after `resetThresholds`, or in a
     restarted process — every threshold below the baseline plus one ladder step
     counts as crossed. The baseline is the context size of the main lane's first
-    finished step after the boundary, or the current size when no step has
-    finished since. The step is the ladder's last spacing, the same step the
-    final-threshold recovery gate uses.
+    finished step after the boundary. Until that step exists the ladder is not
+    initialized at all — the tokens passed in can be the compaction summary's —
+    and the next evaluation starts over. The step is the ladder's last spacing,
+    the same step the final-threshold recovery gate uses.
   - A compaction summary is not a step of the lane: its usage is the
     summarization request over the old history. The walk skips it, both for
     the baseline and for FC-028's reached size.
@@ -3329,9 +3330,12 @@ logged`, and the peer `success`/`failure` variants of
   rebuild, the final threshold is never skipped", "after a restart, the baseline
   is the first step after the rebuild, not the current one", "a rebuild in the
   running process skips the thresholds near the rebuilt context", "after a
-  compaction, the summary's usage is not the baseline", "without a rebuild, the
-  first threshold of a new session still fires", and the updated
+  compaction, the summary's usage is not the baseline", "before the first step
+  after a compaction, the ladder waits instead of measuring the summary",
+  "without a rebuild, the first threshold of a new session still fires", and the
+  updated
   "a rebuild after the last writer arms the whole ladder again". Disabling the
   skip, measuring from the current size, letting the final threshold be
-  skipped, or counting the compaction summary each fails a case.
+  skipped, counting the compaction summary, or falling back to the passed-in
+  size before the first step each fails a case.
 - Retirement condition: upstream measures the ladder from the rebuilt context.
