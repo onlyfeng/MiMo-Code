@@ -1,5 +1,5 @@
 import z from "zod"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Semaphore } from "effect"
 import { Bus } from "../bus"
 import { Snapshot } from "../snapshot"
 import { Storage } from "@/storage"
@@ -12,6 +12,34 @@ import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
 
 const log = Log.create({ service: "session.revert" })
+
+// FC-051: a revert and a prompt's admission exclude each other per session. A
+// prompt admitted while a revert was still restoring files saw no revert to
+// commit and started its turn; the revert then marked the session reverted to a
+// point before that turn, so the TUI hid everything the turn did and the next
+// prompt's cleanup deleted it. Admissions share the gate; a revert or unrevert
+// takes all of it.
+const WHOLE = 1 << 20
+const gates = new Map<SessionID, Semaphore.Semaphore>()
+const gate = (sessionID: SessionID) => {
+  const hit = gates.get(sessionID)
+  if (hit) return hit
+  const next = Semaphore.makeUnsafe(WHOLE)
+  gates.set(sessionID, next)
+  return next
+}
+
+/** Runs a prompt admission: alongside other admissions, never during a revert or unrevert of the session. */
+export const admission =
+  (sessionID: SessionID) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    gate(sessionID).withPermits(1)(effect)
+
+/** Runs `effect` with the session to itself: no admission, revert or unrevert alongside. */
+export const exclusive =
+  (sessionID: SessionID) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    gate(sessionID).withPermits(WHOLE)(effect)
 
 export const RevertInput = z.object({
   sessionID: SessionID.zod,
@@ -47,7 +75,7 @@ export const layer = Layer.effect(
       yield* snap.restore(revert.snapshot)
     })
 
-    const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
+    const revertUnlocked = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
       const all = yield* sessions.messages({ sessionID: input.sessionID, agentID: "*" })
       let lastUser: MessageV2.User | undefined
@@ -103,7 +131,9 @@ export const layer = Layer.effect(
       return yield* sessions.get(input.sessionID)
     })
 
-    const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
+    const revert = (input: RevertInput) => exclusive(input.sessionID)(revertUnlocked(input))
+
+    const unrevertUnlocked = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
       log.info("unreverting", input)
       yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID)
@@ -112,6 +142,8 @@ export const layer = Layer.effect(
       yield* sessions.clearRevert(input.sessionID)
       return yield* sessions.get(input.sessionID)
     })
+
+    const unrevert = (input: { sessionID: SessionID }) => exclusive(input.sessionID)(unrevertUnlocked(input))
 
     const cleanup = Effect.fn("SessionRevert.cleanup")(function* (session: Session.Info) {
       if (!session.revert) return
