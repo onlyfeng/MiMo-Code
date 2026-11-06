@@ -11,7 +11,7 @@ import { UninstallCommand } from "./cli/cmd/uninstall"
 import { ModelsCommand } from "./cli/cmd/models"
 import { UI } from "./cli/ui"
 import { Installation } from "./installation"
-import { InstallationVersion } from "./installation/version"
+import { InstallationBuild, InstallationVersion, describeBuild } from "./installation/version"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { FormatError } from "./cli/error"
 import { ServeCommand } from "./cli/cmd/serve"
@@ -119,6 +119,8 @@ const cli = yargs(args)
 
     Log.Default.info("mimocode", {
       version: InstallationVersion,
+      build: describeBuild(),
+      built_at: InstallationBuild?.time,
       args: process.argv.slice(2),
       process_role: processMetadata.processRole,
       run_id: processMetadata.runID,

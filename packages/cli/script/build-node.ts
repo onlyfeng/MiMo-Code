@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { Script } from "../../../script/meta.ts"
+import { readBuildProvenance } from "../../../script/build-provenance.ts"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -10,6 +11,9 @@ const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
 
 process.chdir(dir)
+
+// Read before generate.ts runs, so its output cannot count as a local change.
+const provenance = await readBuildProvenance(path.resolve(dir, "../.."))
 
 await import("./generate.ts")
 
@@ -54,6 +58,7 @@ await Bun.build({
     MIMOCODE_MIGRATIONS: JSON.stringify(migrations),
     MIMOCODE_VERSION: `'${Script.version}'`,
     MIMOCODE_CHANNEL: `'${Script.channel}'`,
+    MIMOCODE_BUILD: JSON.stringify(provenance),
   },
   files: {
     "opencode-web-ui.gen.ts": "",
