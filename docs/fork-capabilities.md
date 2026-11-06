@@ -3429,7 +3429,8 @@ logged`, and the peer `success`/`failure` variants of
   "without an event timeout, keep-alive comments keep the chunk timer alive",
   "events keep resetting the event timeout across a longer stream" and "a
   keep-alive comment split across chunks is still not an event", through the
-  real provider fetch wrapper and an `@ai-sdk/openai-compatible` stream.
+  real provider fetch wrapper and an `@ai-sdk/openai-compatible` stream from a
+  local `Bun.serve` gateway.
   Counting comments as events, dropping the carried line state, ignoring
   `eventTimeout`, or never resetting the timer each fails a case.
 - Retirement condition: upstream bounds the time between SSE events apart from
