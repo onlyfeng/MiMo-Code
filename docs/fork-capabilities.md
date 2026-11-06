@@ -28,94 +28,19 @@ authority.
 - History: [fork-registry-history.md](fork-registry-history.md)
 
 `Upstream` remains the overall upstream review baseline. `Main behavior` names
-the reviewed runtime/test tree; bundled guidance has a separate content snapshot.
-Pure registry/history commits advance neither reference. The selected released
-capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
+the runtime/test tree the last upstream review covered; bundled guidance has a
+separate content snapshot. Pure registry/history commits advance neither
+reference, and neither do fork pull requests merged between synchronizations
+(FC-044 through FC-053 and later corrections to existing entries): each such
+entry names its own evidence, and the next synchronization reviews it. The
+selected released capability audit is recorded in
+[the model API review](released-model-api-review-2026-09-08.md).
 
 Latest reviewed synchronization: [2026-11-06 non-interactive trust documentation](upstream-sync-2026-11-06.md), C01 (N=1). Adopt upstream’s workspace-trust and headless permission description, retaining FC-012’s fork-specific private reporting routes and FD-001’s invocation-scoped approval. Starting main `9550108ac29870628a3a9c5c1d6b920259651eea` and compat `4ad2d84daa40c2e787becbdc081f06369cbaed78` already share the reviewed entry-point behavior. No runtime, tests, SDK, dependency or DC policy changes; no owner retires. Final publication and CI evidence is recorded in the execution receipt.
 
-Previous synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
-
-Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
-
-Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
-
-Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
-
-Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
-
-Previous synchronization: [2026-10-20/21 full sync through `cf8c09d5`](upstream-sync-2026-10-20-c1527b91.md), four capabilities. Contain non-interrupt prefix-capture defects around the complete frozen capture, count settled writer Deferreds from the drain snapshot, and retain the fork's scoped non-empty capture fixture. FD-009 still rejects empty captures before child creation; no shared owner retires. All four decisions are published on both branches; the live addition adopts Compose Next unavailable-input, spec source and finish guidance unchanged. Main `7e3b1ae7` and compat `6a02b3d3` each pass exact-SHA lint/typecheck/test, including compat Windows. The linked record contains all six runs; final docs-only descendant equivalence, refreshed tips/ancestry and scoped cleanup are checked in the execution receipt.
-
-Previous synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
-
-Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
-
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
-Previous synchronization: [2026-10-15 sync through `496bb8cb`](upstream-sync-2026-10-15.md), one capability. Adapt upstream's inbox wake ownership into FC-001's single `Inbox.wake`: an `Instance.claim` taken before receiver preparation lasts until the wake fiber exits, so ordinary disposal cannot close the scope holding a scheduled wake. Upstream's abort-immediately-after-send case is not adopted; FC-001 records the pre-existing asynchronous-admission gap it exposes.
-
-Previous synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
-
-Previous synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
-
-Previous synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
-
-Previous synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
-
-Previous synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
-
-Previous synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
-
-Previous synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
-
-Previous synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
-
-Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared Actor, workflow and approval contracts.
-
-Previous synchronization: [2026-09-26 full sync](upstream-sync-2026-09-26.md), six capabilities through `849ca66c`. Remove unpublished duplicate-call cancellation and TaskGate re-entry, adopt interactive subagent asks and host error classification, and retain shared fork approval, Actor lifecycle and scoped retry contracts.
-
-Previous synchronization: [2026-09-24 full sync](upstream-sync-2026-09-24.md), three capabilities through `2b993ac9`. Retire Orchestrator and tool-specific shell invocation, preserve local image attachment paths, and keep the shared fork permission, Actor, frozen context and request-authority contracts. FC-018 retires with its parser; the remaining FD/FC owners stay active.
-
-Previous synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. It removed PascalCase model-facing projection and tool-call flooding middleware, and introduced the now-retired same-step exact duplicate cancellation. Canonical tool IDs, FIFO and failure cascade, fork replay boundaries and hidden-MCP/native Actor snapshot identity remain active.
-
-Previous synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. It introduced the now-retired flooding and PascalCase projection alongside still-active failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, the 0.1.15 release, MCP confirmation elicitation and opt-in host model transport.
-
-Previous synchronization: [2026-09-21 full sync](upstream-sync-2026-09-21.md), eleven capabilities through `47920126`. Adopt concise prompts, explicit external skill roots, retired directory loaders, FIFO tool admission, generation-owned MCP connections and selected-session question cleanup. Adapt trailing-user recovery and cancellation to atomic admission, retained frozen Actor context, durable inbox progress and bounded retry scopes. No shared owner retires or moves.
-
-Previous synchronization: [2026-09-19 full sync](upstream-sync-2026-09-19.md), two capabilities through `50cd7139`. Adopt optional uncommitted-change hints and adapt main-resume subagent cascade to retained Actor ownership, preserving atomic message admission and compat boundaries.
-
-Previous synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
-
-Previous synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
-
-Previous synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
-
-Previous synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
-
-Previous synchronization: 2026-09-15, the specified upstream range
-`6fbb1732..5198ff54` (21 commits, 17 non-merge). The
-[capability inventory](upstream-sync-2026-09-15-5198ff54.md) records six incoming
-capabilities and the separately approved actor lifecycle follow-up. FC-003 is
-retired by an explicit behavior decision. FD-009 retains the system frozen-context
-contract; only compat exposes full-context model creation. History adopts uniform
-content and one-time resumable migration, with a bounded SQLite NUL projection
-correction. FD-004's previously accepted upstream behaviors remain unchanged.
-This is alignment to the selected SHA, not to newer upstream commits.
-Earlier per-owner behavior references remain historical where this range does
-not change their implementation. The preceding review is retained in the
-[shared history](fork-registry-history.md).
+Earlier synchronization summaries (35, from the 2026-09-15 specified range through the 2026-11-04 `10b03cf0` sync) moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization); the linked synchronization records remain authoritative.
 
 ## Sync index
 
@@ -171,8 +96,20 @@ not change their implementation. The preceding review is retained in the
 | FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
 | FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
 | FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
+| FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
 
-## FC-001 — linearized actor generations and persistent-peer lifecycle
+Grouped sections: [Actor and inbox](#actor-and-inbox) holds FC-001, FC-024, FC-031, FC-037, FC-038 and FC-043; [Checkpoint writer and ladder](#checkpoint-writer-and-ladder) holds FC-002, FC-021, FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047. Every other entry keeps its own section in numeric order. Retired identifiers FC-003 (2026-09-15) and FC-018 (2026-09-24) are not reused; their entries moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization).
+
+## Actor and inbox
+
+FC-001 owns actor generations, admission, settlement and recovery. FC-024,
+FC-031, FC-037, FC-038 and FC-043 are narrower fixes and additions on the same
+actor tool, inbox and lifecycle surfaces. Each keeps its own retirement
+condition; review the group together whenever upstream changes `actor/`,
+`inbox/`, `tool/actor.ts`, `effect/runner.ts` or `session/run-state.ts`. Each
+entry's own source list remains the complete watch surface.
+
+### FC-001 — linearized actor generations and persistent-peer lifecycle
 
 - 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
 
@@ -539,7 +476,206 @@ not change their implementation. The preceding review is retained in the
   BINARY. Producer and transaction regressions are recorded under F06 in
   [the implementation report](audit-followups-2026-09-15.md).
 
-## FC-002 — canonical checkpoint writer and mode-specific frozen context
+### FC-024 — boot reconciliation reports a delivered claim as interrupted
+
+- Status: active
+- Canonical owner: fork `main` inbox boot recovery in
+  `packages/cli/src/inbox/controller.ts` (`reconcileOnBoot`)
+- Observable contract:
+  - When a process restarts, `reconcileOnBoot` cancels its session's stale-epoch
+    and crashed `claimed` rows. A row whose input was already delivered into the
+    conversation (`consumed`) settles as `interrupted`; a row not yet delivered
+    settles as `never_ran`. Stale-epoch `accepted` rows are never consumed, so
+    they stay `never_ran`.
+  - This is the rule `cancelInputs` in the same file already applies when a
+    session stops.
+- Motivation: `reconcileOnBoot` wrote `never_ran` for every claimed row, so a
+  sender reading the receipt after a crash could not tell an input the model had
+  already seen and partly acted on from one it never received. Recovery rules
+  such as "resend once when `never_ran` and `consumed=0`" depend on that
+  difference; resending a consumed input replays work that already ran.
+- Upstream relationship: upstream `reconcileOnBoot` writes `never_ran`
+  unconditionally. Fork fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: `reconcileOnBoot` and `cancelInputs` in
+  `packages/cli/src/inbox/controller.ts`; the `consumed` anchor in
+  `packages/cli/src/session/prompt.ts`.
+- Tests/evidence: `packages/cli/test/inbox/queue-controller.test.ts`
+  "reconcileOnBoot reports a claim already delivered into the conversation as
+  interrupted" claims two inputs, marks one delivered, and expects
+  `interrupted` and `never_ran` respectively. Writing `never_ran` again fails it.
+  "reconcileOnBoot cancels claimed rows" still expects `never_ran` for an
+  undelivered claim.
+- Retirement condition: upstream distinguishes consumed claims on boot recovery.
+
+### FC-031 — an actor send names the sending lane, so it can be answered
+
+- Status: active
+- Canonical owner: fork `main` actor tool — the `send` action's
+  `senderActorID` in `packages/cli/src/tool/actor.ts`, and the `send` entry of
+  `packages/cli/src/tool/actor.txt`
+- Observable contract:
+  - An `actor send` records the sending lane's actor id as the inbox row's
+    `sender_actor_id`: `main` for a session's main lane, the actor id (such as
+    `general-1`) for a subagent or peer lane, for direct and `exec` calls alike.
+  - The receiver sees `<inbox from="<session_id>:<actor_id>">`, and a send to
+    that session and actor reaches the sender. The tool description says so.
+- Motivation: a direct call recorded `ctx.agent`, the agent's name, while an
+  `exec` call recorded the actor id. A main lane running agent `build`
+  therefore signed its messages `<session>:build`, and a reply to
+  `to_actor_id: "build"` failed with receiver not found, since the main lane's
+  actor id is `main`. In recorded collaboration 565 rows carried `build` as the
+  sender, 391 of them across sessions, so every such receiver had to know the
+  sender's lane out of band to answer.
+- Upstream relationship: upstream records `ctx.agent` for every send; the fork
+  already used the actor id for `exec` calls. Fork fix of shared code;
+  `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; `ctx.actorID` in the tool context built in
+  `packages/cli/src/session/prompt.ts`; `renderInboxRow` in
+  `packages/cli/src/inbox/render.ts`; receiver lookup in `Inbox.accept`
+  (`packages/cli/src/inbox/inbox.ts`).
+- Known limit: rows written before the fix keep the agent name.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "the sender is the
+  lane's actor id, so the receiver can reply to it": a main lane running `build`
+  sends across sessions, the row and the rendered `from` name `main`, a reply to
+  the rendered sender is accepted, and a subagent lane's send records its actor
+  id. Restoring the agent name fails it.
+- Retirement condition: upstream records the sending lane's actor id.
+
+### FC-037 — a sender can read what became of its actor message
+
+- Status: active
+- Canonical owner: fork `main` actor tool — `receipt` action, `receiptOf` and
+  `inputModel` in `packages/cli/src/tool/actor.ts`, documented in `actor.txt`
+- Observable contract:
+  - `actor receipt` with `inbox_id` (as returned by `send`) returns that
+    message's receipt: receiver session and actor, sender, `state`, `outcome`,
+    `consumed`, `delivered`, `error`, times, and `model` (provider, model,
+    variant of the receiver's input message). Without `inbox_id` it returns the
+    20 newest messages the calling session sent.
+  - Only the sending or the receiving session can read a receipt; any other
+    session gets `not found`, as for a missing id.
+  - `actor send`'s result carries the same `model`: the model and variant the
+    receiver's lane will run the message with (for example a lane at `max`).
+  - Subagents keep `send` only; `receipt` is for primary agents.
+- Motivation: a coordinating agent had no tool to learn whether a dispatch was
+  delivered, ran, or settled `never_ran`; its re-dispatch rule (resend once when
+  `never_ran` and not consumed) could only be run by reading SQLite directly.
+  It also could not see that a dispatched task would run at the receiver's
+  inherited variant.
+- Upstream relationship: upstream has no receipt query. Fork addition;
+  `dev/compat` inherits it and adds `delivery` to cross-session send results.
+- Watch surfaces: the file above; `InboxTable` in
+  `packages/cli/src/inbox/inbox.sql.ts`; the actor `operation` union, which
+  FC-025 flattens for grok.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a sender reads
+  what became of its message and the model the receiver runs it with" (send
+  result and receipt carry the receiver's `max` variant; sender and receiver
+  read the receipt, a third session does not; the list holds only sent rows; a
+  `never_ran` settlement reads as such). Reading receipts without the session
+  check, listing by receiver, dropping either `model`, or deriving `consumed`
+  from the state each fails it. `registry-toolset.test.ts` and
+  `actor.test.ts` cover the advertised action list and the flattened union.
+- Retirement condition: upstream exposes inbox receipts to the actor tool.
+
+### FC-038 — a keyed actor send is delivered once, and requeued only if it went unseen
+
+- Status: active
+- Canonical owner: fork `main` — `idempotency_key` of the `send` action in
+  `packages/cli/src/tool/actor.ts`, `reviveUnseen` in `AcceptInput`
+  (`packages/cli/src/inbox/schema.ts`) and `unseen`/the revive branch in
+  `writeAccept` (`packages/cli/src/inbox/controller.ts`), passed through
+  `Inbox.accept`
+- Observable contract:
+  - `actor send` with `idempotency_key` stores
+    `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
+    neither senders nor a receiver session's actors share keys, and none
+    collide with message-id keys.
+  - A send whose key already names a row returns that row
+    (`deduplicated: true`) while it is accepted, claimed, consumed, or ended
+    and seen.
+  - "Unseen" means: `cancelled` or settled `never_ran`, not consumed, and no
+    assistant message on the receiving lane minted after the row ended —
+    compared by message ID (`MessageID.ascendingAfter`), whose time is the
+    wall clock at minting, because `time_created` may be bumped past the clock
+    and is not comparable with `time_updated`. (An ended,
+    unconsumed input still renders on the lane's next turn, so a later turn
+    counts as having seen it.) Such a row is queued again in the same
+    transaction — the same row and the same user message, back to `accepted`
+    in the current epoch — and the result reports `revived: true`. No second
+    message is created, so nothing has to be hidden from rendering and receipt
+    GC cannot expose a duplicate.
+  - `deduplicated` and `revived` come from the accept transaction itself, so
+    overlapping keyed sends each report what their own transaction did.
+  - The revived message is the original one; a resend's own content is not
+    used.
+  - Sends without a key, and every other keyed accept (prompt receipts keyed
+    by message id), keep reusing the existing row unconditionally.
+- Motivation: a coordinator's rule "resend once with the same task key when a
+  message settled `never_ran` unconsumed" needs a key that dedupes live and
+  delivered messages but not lost ones; the store reused any keyed row, so a
+  resend after a loss was silently dropped.
+- Upstream relationship: upstream does not expose keys to the actor tool. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; `MessageV2.renderedOrder` and
+  `SessionCheckpoint.withEndedInputs` (ended unconsumed inputs render on the
+  next turn — the reason for the "unseen" rule); the partial unique index on
+  `(receiver_session_id, idempotency_key)`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a keyed resend
+  is a no-op until the earlier message ended unseen, then goes out once"
+  (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
+  and another receiver actor are separate; an unseen `never_ran` is revived
+  once as the same message; unkeyed sends always go out);
+  `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend revives the
+  unseen row instead of adding a message, and only while unseen" (one sync
+  delta, one user message, a later user input does not count as seen, an
+  assistant minted in the tick the input ended does not either even with a
+  bumped `time_created`, a later assistant turn does, replay rebuilds the same
+  state). Disabling the revive,
+  reviving consumed rows, ignoring the later turn or its role, comparing
+  `time_created` instead of the minted ID, shifting the ID bound by a tick, reviving into a
+  stale epoch, dropping the sync record or either result flag, or not passing
+  `reviveUnseen` from the tool each fails one of them.
+- Retirement condition: upstream offers keyed actor sends with these semantics.
+
+### FC-043 — `actor cancel` returns while a stuck actor is still stopping
+
+- Status: active
+- Canonical owner: fork `main` — the `cancel` branch and `actorCancelWait` in
+  `packages/cli/src/tool/actor.ts` (uses `awaitWithHardTimeout`,
+  `packages/cli/src/effect/hard-timeout.ts`)
+- Observable contract:
+  - `actor cancel` waits up to 30 s for `Actor.cancel` to finish. If the actor
+    has not stopped by then (a tool call in uninterruptible work), it returns
+    `status: "cancelling"` with a hint; the cancellation keeps running in a
+    detached fiber and completes when that work ends.
+  - Otherwise the result is unchanged (`status: "cancelled"`).
+- Motivation: `Actor.cancel` joins the actor's execution inside an
+  uninterruptible region. A subagent whose `exec` never settled made the
+  coordinator's `actor cancel` hang for 92 minutes; 15 inputs (user prompt,
+  cron fires, notifications) queued behind it until the process was restarted.
+- Upstream relationship: upstream's tool waits for cancellation without bound.
+  Fork fix; `dev/compat` inherits it. The workflow runtime already bounds its
+  own child cancels the same way (`RECLAIM_ACTOR_TIMEOUT_MS`).
+- Watch surfaces: `tool/actor.ts` cancel branch; `Actor.cancel` in
+  `packages/cli/src/actor/spawn.ts`; `actor.txt`.
+- Tests/evidence: `packages/cli/test/tool/actor-cancel.test.ts` "cancel returns
+  cancelling when the actor does not stop in time, and keeps cancelling"
+  (an uninterruptible cancel; fails or hangs with an unbounded wait or a plain
+  `Effect.timeout`, which cannot interrupt it).
+- Retirement condition: upstream bounds the tool-level cancel wait, or
+  `Actor.cancel` no longer joins uninterruptibly.
+
+## Checkpoint writer and ladder
+
+FC-002 owns the canonical checkpoint writer and its frozen context. FC-021,
+FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047 are
+narrower fixes and additions to the same writer, its prompts and the threshold
+ladder. Each keeps its own retirement condition; review the group together
+whenever upstream changes `session/checkpoint*.ts`, `session/prune.ts`,
+`session/tail-digest.ts` or `agent/prompt/checkpoint-writer.txt`. Each entry's
+own source list remains the complete watch surface.
+
+### FC-002 — canonical checkpoint writer and mode-specific frozen context
 
 - 2026-11-04 reminder synchronization (`10b03cf0`, validated): identify memory paths by `{ key: "memory-paths", rev: sessionMemoryDir }` and places a `session-env` reminder before them, with the receiving `Instance.directory`, git root only inside git, and platform. `SessionReminder.windowTarget` selects only an unanswered own user in the current window; prior sent history and frozen system bytes stay unchanged. The environment reminder also reaches subagents that do not serve checkpoints, but excludes native hidden bounded agents. Strict `MessageV2.usageRecovered`, receipt-aware window ordering and FC-042's `compactsOnUsage` gate are preserved. Old untagged memory paths can be repeated once on the next eligible user before tag-based deduplication takes over; legacy file-tool placeholders remain supported.
 
@@ -619,24 +755,456 @@ not change their implementation. The preceding review is retained in the
   shared. FD-002 still separates memory eligibility from fail-closed actor
   identity replacement.
 
-## FC-003 — actor- and instance-scoped read-before-edit state (retired)
+### FC-021 — the checkpoint writer stops, fits the window, and has a step budget
 
-- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1282` (scope read state by actor and instance, opened 2026-06-24) is closed as obsolete; upstream removed the read-before-edit gate it scoped, which is the retirement recorded below. Its head branch `codex/upstream-read-state-scope` is deleted from the fork.
+- Status: active
+- Canonical owner: fork `main` checkpoint writer bounds — `prompt.ts`
+  (bounded-agent overflow), `checkpoint.ts` and `prune.ts` (writer view sizing),
+  `agent.ts` (writer step budget)
+- Observable contract, three parts:
+  - Bounded-agent overflow. A bounded computation agent (native and hidden:
+    title, summary, checkpoint-writer) has no compaction or rebuild, so when
+    the provider rejects its request as a context overflow, nothing can shrink
+    the next one. That step is settled with a `ContextOverflowError` and the
+    loop ends, on the fork path and on the regular path alike. The actor
+    therefore fails as `kind: "overflow"`, `retryable: false`, and prune arms
+    no final-threshold recovery gate for it. `halt` in `processor.ts` has
+    already published the provider's error, so nothing is published twice.
+  - Writer view sizing. `prune.fireCheckpoints` passes the usable window and
+    the parent's latest provider-reported usage to `tryStartCheckpointWriter`.
+    The writer still reads the newest rebuild boundary's tail at full fidelity
+    unless `used + est(full view) − est(parent view)` exceeds the usable
+    window. In that case it forks the parent's own view
+    (`collapseCheckpointTail(window)`), whose boundary carries the checkpoint
+    and the tail digest, and the watermark is computed on that view, so a
+    successful writer moves the next rebuild's tail start past the old
+    segments. The estimate is the per-part maximum of chars/4 and bytes/3;
+    only the difference between the two views is estimated, the rest is the
+    provider's number. A writer started by `rebuildEnsuringCheckpoint` passes
+    no context and keeps the full view.
+  - Writer step budget. `checkpoint-writer` declares
+    `steps: CHECKPOINT_WRITER_STEPS` (120). At the budget the last step goes
+    out with `toolChoice: "none"` and the MAX_STEPS reminder, so the writer
+    has to answer in text. Each validator re-prompt (`MAX_PRE_REACT` = 3) is a
+    new prompt with its own budget, which bounds a writer at 480 steps. A user
+    `agent.checkpoint-writer.steps` still overrides it.
+- Motivation: on 2026-10-31 local sessions on a 1M-token model kept failing
+  with `maximum context length is 1048576 tokens; the prompt has 1051956
+  tokens`. The failing requests were the checkpoint writer's. Its first
+  request was 996,878 tokens while the parent's own request at the same moment
+  was 723,407: the writer had re-expanded a rebuild tail that spanned every
+  rebuild since the last good checkpoint (2,576 messages). A step truncated at
+  the window edge left an invalid tool call, every later request was
+  1,051,956 tokens, and the writer re-sent it every six seconds for 4,392
+  steps, until the process exited. Because a failed writer leaves the watermark
+  where it was, each failure made the next writer's view larger: another
+  session's writer started at 2,091,097 tokens. Separately, two writers on a
+  third session never stopped calling tools (alternating `task` list and
+  `read`, saying "Stop." in their reasoning), each step about 925K cached
+  tokens, for about 6,000 steps.
+- Upstream relationship: upstream `7bc7dc3a` has all three gaps. Its bounded
+  agents return `"continue"` on a provider-signalled overflow, its writer
+  always takes the full-fidelity tail (documented as a deliberate quality
+  choice in `llm-request-prefix.ts`), and `checkpoint-writer` declares no
+  `steps`. This is fork hardening of shared code; the full-fidelity default is
+  kept whenever it fits.
+- Watch surfaces: in `packages/cli/src/session/prompt.ts`,
+  `isBoundedComputation`, `writeBoundedOverflowError`, both `result ===
+  "overflow"` sites, and `maxSteps`/`isLastStep`; in
+  `packages/cli/src/session/checkpoint.ts`, the view selection in
+  `tryStartCheckpointWriter`, `TryStartCheckpointWriterInput.context`,
+  `estimateViewTokens`, `withRebuildTail`/`readRebuildTail` and
+  `computeBoundary`; `packages/cli/src/session/tail-digest.ts`
+  (`collapseCheckpointTail`); the writer start in
+  `packages/cli/src/session/prune.ts`; the `checkpoint-writer` definition in
+  `packages/cli/src/agent/agent.ts`; `classifyAssistantError` and
+  `MAX_PRE_REACT` in `packages/cli/src/actor/spawn.ts`; the overflow branch of
+  `halt` in `packages/cli/src/session/processor.ts`; and the parent/writer
+  divergence note in `packages/cli/src/session/llm-request-prefix.ts`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-writer-runaway.test.ts`
+  drives real sessions against a content-routed stub that tells writer
+  requests from foreground ones:
+  - a writer whose request is rejected as an overflow settles as a
+    non-retryable `overflow` failure after exactly one request. The stub holds
+    the writer's request until the settlement wait has started, because a
+    writer that settles first leaves no slot and the wait reports `no-writer`;
+  - a bounded agent prompted directly (no fork context) stops after one
+    rejected request with `ContextOverflowError`;
+  - with every writer failing, two rebuilds on one stale checkpoint leave a
+    tail larger than the window; the next writer, for `fork: true` and
+    `fork: false`, receives the boundary and none of the tail's file content;
+  - a writer whose model never stops calling tools ends after exactly
+    `CHECKPOINT_WRITER_STEPS` requests, the last with `tool_choice: "none"`.
 
-- Status: retired by the approved 2026-09-15 behavior change.
-- Scope: shared main and inherited dev/compat.
-- Decision: adopt upstream `99a5f9eb` through `5198ff54`, removing the
-  read-before-edit gate itself. Actor/instance-scoped evidence no longer has a
-  consumer. This supersedes the former requirement for equivalent upstream
-  scoping; it does not claim that upstream supplied that implementation.
-- Retired surfaces: `src/tool/read-state.ts`, Read's `markFileRead` calls,
-  Edit/NotebookEdit's prior-read checks, and scope-only read-state tests.
-- Retained behavior: permission and path checks, current-file edit matching,
-  stable current-session path resolution, finite media types, and attachment
-  refusal/compression. The latter assertions remain in `test/tool/read.test.ts`;
-  path, no-prior-read, and self-written-file edits remain in `test/tool/edit.test.ts`.
-- Historical isolation and attachment-gate reviews remain in the shared registry
-  history. Reintroducing a gate would require a new explicit behavior decision.
+  The full-tail behavior for a tail that fits stays covered by
+  `checkpoint-writer-rebuild-tail.test.ts`. Mutation-checked: disabling the
+  fork-path overflow branch makes the writer re-send 106 times in 20 seconds;
+  disabling the regular-path branch makes the direct prompt re-send 67 times;
+  disabling the view fallback puts the tail's file content back into both
+  fork modes; removing `steps` lets the writer run past 320 requests. Each
+  fails on its assertion, not on a timeout. The legacy boundary (tail inside
+  the window) goes through the same expression via `collapseCheckpointTail`
+  and has no end-to-end case of its own.
+- Retirement condition: per part — upstream stops a bounded agent on a
+  provider-signalled overflow; upstream bounds the writer's view by the window;
+  upstream gives the writer a step budget. The regression cases stay in every
+  case.
+
+### FC-027 — the checkpoint writer closes with one line
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer prompt in
+  `packages/cli/src/agent/prompt/checkpoint-writer.txt` (Turn 2, constraint 8)
+  and the writer task in `packages/cli/src/session/checkpoint.ts`
+  (`composeWriterPrompt`)
+- Observable contract:
+  - After its edits the writer is told to end with one short line such as
+    `Checkpoint updated.`, without a summary and never with an empty reply. The
+    last instruction of the writer task says the same.
+  - Nothing else about the writer changes: its tools, the edit pass, its budgets
+    and the success rule (the watermark advances only when the run succeeds).
+- Motivation: a final step with no text, no reasoning and no tool call is
+  invalid output. The processor retries it, and for a background system agent
+  the bounded retries (FC-013) then fail the run. The writer prompt said "then
+  stop", "your response is complete. Do not summarize what you wrote" and "stop
+  immediately". Most models still closed with a line; a GPT-family model behind
+  a gateway took it literally. In recorded runs one session's writers on that
+  model failed 16 of 21 times in about 16 hours, all with "empty output", and
+  the failed runs cost $85 of the $108 its writers spent. The inspected failure
+  had already rewritten checkpoint.md when its empty reply failed the run. The
+  watermark stayed at the last success for twelve hours, so every later writer
+  and rebuild covered the same growing range again.
+- Upstream relationship: upstream's prompt and task carry the same three
+  "stop" instructions and the same empty-output handling. Fork fix of shared
+  prompt text; `dev/compat` inherits it unchanged.
+- Watch surfaces: Turn 2 and constraint 8 in `checkpoint-writer.txt`; the last
+  line of `composeWriterPrompt`; the empty-output retry in
+  `packages/cli/src/session/processor.ts` and `classifyAssistantStep` in
+  `packages/cli/src/session/classify.ts`; the system-agent retry bound (FC-013).
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  "writer is told to close with one line, not to end with an empty reply" reads
+  the spawned writer's task and expects the closing-line instructions and none
+  of the old "stop" wording; restoring the old wording fails it. The case pins
+  the instruction, not a model's compliance, which is read from recorded writer
+  outcomes.
+- Retirement condition: upstream asks the writer for a closing line, or the
+  runtime accepts an empty final reply from a writer whose edits applied.
+
+### FC-028 — the checkpoint ladder survives a restart and starts one writer at a time
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`) and
+  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - The first time a process evaluates a session's ladder, every threshold at or
+    below the context size the session had reached when it started its last
+    writer that succeeded counts as crossed. That size is the main lane's newest
+    assistant usage from before the writer's child session was created; the
+    writer is that child session's `checkpoint-writer` actor with outcome
+    `success`. A later writer that failed or never finished does not count, so
+    its threshold fires again after the restart; this also stands in for the
+    final threshold's recovery gate, which does not survive a restart. With no
+    succeeded writer, or with a rebuild or compaction boundary after it, the
+    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild —
+    except the non-final thresholds near the rebuilt context, which FC-046
+    counts as crossed.
+  - When one evaluation finds several thresholds newly crossed, it starts one
+    writer, for the highest, and marks them all crossed. The final-threshold
+    recovery gate is unchanged within a process.
+- Motivation: `crossed` is process memory, so a restarted process treated every
+  threshold a session had passed as new. In recorded restarts three sessions
+  each started a writer at their first turn after the restart for a threshold
+  passed before it (for example 270000 at 609251 tokens), and two sessions also
+  queued a second writer behind the first for the same range. Each writer is a
+  pass over the whole context. The checkpoint watermark cannot stand in for the
+  ladder: `computeBoundary` leaves a tail of 10K–20K tokens after it, so the
+  context at the watermark sits below the threshold that fired.
+- Upstream relationship: upstream keeps `crossed` in memory only and starts a
+  writer per newly crossed threshold. Fork fix of shared code; `dev/compat`
+  inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; the writer child session and its pending-writer slot in
+  `tryStartCheckpointWriter`, and `lastSucceededWriterStart` in
+  `checkpoint.ts`; the writer actor's `last_outcome` in
+  `packages/cli/src/actor/actor.sql.ts`; `isBoundaryUser` in
+  `packages/cli/src/session/tail-digest.ts`.
+- Tests/evidence: `packages/cli/test/session/prune.test.ts`
+  "SessionPrune.fireCheckpoints after a process restart" builds a fresh layer
+  per case: "a threshold a succeeded writer was started for does not fire
+  again", "the context reached is read from before the writer started, not
+  after", "a threshold whose last writer failed or never finished fires again",
+  "a rebuild after the last writer arms the whole ladder again" and "thresholds
+  crossed together start one writer". "resetThresholds drops a pending gate" now
+  expects one writer for the two thresholds its replay crosses together.
+  Seeding nothing, ignoring the rebuild boundary, reading the newest usage
+  instead of the one before the writer, or counting a writer that did not
+  succeed each fails its case; a writer per threshold fails the last case and
+  the reset case.
+- Retirement condition: upstream rebuilds the ladder after a restart and starts
+  one writer per evaluation.
+
+### FC-029 — the checkpoint writer is given the text it edits
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer inputs — `renderCurrentFiles`
+  and `composeWriterPrompt` in `packages/cli/src/session/checkpoint.ts`,
+  `renderCurrentFile`, `readCurrentFiles`, `buildExtractionReflection` and
+  `buildReflectionMessage` in `packages/cli/src/session/checkpoint-retry.ts`,
+  the `actor.preStop` hook in `packages/cli/src/plugin/checkpoint-splitover.ts`,
+  and Turn 1 and the notes.md instruction in
+  `packages/cli/src/agent/prompt/checkpoint-writer.txt`
+- Observable contract:
+  - The writer task carries a CURRENT FILES block: the text of CHECKPOINT_PATH,
+    MEMORY_PATH and NOTES_PATH read when the writer starts, each between
+    `<current-file name="…" path="…">` tags, followed by NOTES_TEMPLATE. Turn 1
+    tells the writer to work from that block and not to read those three files
+    again; the notes.md reset uses the template block.
+  - A validation re-prompt from the `actor.preStop` hook carries the current
+    text of each file it names: the over-budget files for an extraction, the
+    files with errors otherwise. A file within its budget and without errors is
+    not repeated.
+  - CHECKPOINT_PATH and MEMORY_PATH, which the writer edits in place, are shown
+    up to `CURRENT_FILE_CHAR_LIMIT` (100,000 characters): to the last whole line
+    within the limit, never splitting a surrogate pair, followed by a line
+    saying how much is shown. Turn 1 then has a writer that can read the
+    rest, and one that cannot leave the unseen part as it is. NOTES_PATH is
+    always shown whole, because Turn 2 resets it and a part not shown would be
+    deleted unreconciled; it is emptied at every checkpoint, so it holds only
+    what was appended since the last writer.
+- Motivation: on the Codex harness (GPT-family models) the tool set has no
+  `read`, `write` or `edit`; files are read through `exec`'s `files`, whose jail
+  is the worktree and the OS temp directory. The memory directory is outside
+  it, so a writer on that harness could not read the checkpoint it was told to
+  read and edit, nor see the result of its own `apply_patch` edits. In recorded
+  runs such writers reported reads failing with "path outside allowed roots",
+  found no read tool in `ALL_TOOLS`, and declined the extraction re-prompts
+  because they could not see the section to extract. One session's checkpoint
+  grew to 62,876 characters (its whole budget is about 44,000) with §5 at
+  22,372, while its writers spent every re-prompt on refusals.
+- Upstream relationship: upstream's writer prompt and re-prompts point at the
+  paths only, and its Codex harness has the same `files` jail. Fork fix of
+  shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the files above; the writer's tool whitelist
+  `CHECKPOINT_WRITER_TOOLS`; `available` and `tools` in
+  `packages/cli/src/tool/registry.ts` (which tools the Codex harness drops);
+  `resolveJailed` in `packages/cli/src/tool/tool-script.ts`; FC-021's writer view
+  sizing, which does not count the task.
+- Known limit: the block is not counted in FC-021's view projection. It holds
+  at most two files of `CURRENT_FILE_CHAR_LIMIT` characters plus notes.md, and
+  a writer that can read would read the same text into its context anyway.
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  "writer task carries the current text of the files it edits and the notes
+  template" seeds the three files (notes.md empty) and expects each verbatim
+  between its tags, the template, and none of the old "Read BOTH" wording;
+  "writer task shows notes.md whole even past the current-file limit" seeds a
+  notes.md longer than the limit and expects all of it.
+  `packages/cli/test/plugin/checkpoint-splitover.test.ts`: the extraction case
+  expects the over-budget checkpoint verbatim and no MEMORY block; the
+  duplicate-title case expects the erroring checkpoint verbatim instead of
+  "Read your output". `packages/cli/test/session/checkpoint-retry.test.ts`
+  "renderCurrentFile": a file within the limit is shown whole, a longer one is
+  cut after its last whole line, and a single over-long line is cut before a
+  surrogate pair. Dropping the block from the task, the text from either
+  re-prompt, the files from the hook, the line cut, the surrogate guard or the
+  whole-notes exception each fails its case.
+- Retirement condition: upstream gives the writer the files' text, or the
+  Codex harness can read the memory directory.
+
+### FC-036 — a no-fork checkpoint writer whose delta would overflow forks the parent view
+
+- Status: active
+- Canonical owner: fork `main` checkpoint writer — `deltaTooLarge` in
+  `tryStartCheckpointWriter` in `packages/cli/src/session/checkpoint.ts`
+- Observable contract:
+  - With `checkpoint.fork: false` the writer is sent its own system prompt and
+    the messages since the last checkpoint. When the caller reports the
+    parent's usable window (`context`) and that delta's estimate exceeds it,
+    the writer forks the parent's view instead, exactly as under
+    `fork: true` (including FC-021's choice between the full and the parent's
+    own view). The log line is `writer delta exceeds the usable window,
+    forking the parent view`.
+  - Without `context`, or with a delta that fits, `fork: false` is unchanged.
+  - When the writer runs on its own configured model (FC-047), the delta is
+    checked against that model's usable window instead; the fork still runs on
+    the parent's model.
+- Motivation: the delta has no other bound. With no checkpoint yet, or after
+  writers kept failing, it grows past the window; every writer then overflows,
+  the watermark never advances, and the delta keeps growing. The parent's view
+  is what the parent runs with, so it fits. A 2026-11-04 A/B on real models
+  (local report) found `fork: false` writers cost 1/4–1/2 of `fork: true` with
+  equal or better checkpoints, so the fallback is what lets `fork: false` be
+  used safely.
+- Upstream relationship: upstream has no fallback for either mode. Fork fix of
+  shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: the file above; FC-021's view projection in the same
+  function; `estimateViewTokens`; the `context` passed by
+  `packages/cli/src/session/prune.ts`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
+  "fork:false forks the parent view only when the delta exceeds the usable
+  window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
+  writer's own). Dropping the fallback fails the first case.
+- Retirement condition: upstream bounds the no-fork writer's delta.
+### FC-044 — the checkpoint writer returns only `.output` from exec calls
+
+- Status: active
+- Canonical owner: fork `main` — `checkpointWriterExecReturn`, placed after the
+  tool contract in `composeWriterPrompt` (`packages/cli/src/session/checkpoint.ts`)
+- Observable contract:
+  - The writer task tells a writer that calls its tools through `exec` (the
+    Codex harness, where `apply_patch` replaces edit/write) to return each
+    result's `.output`, not the whole result.
+  - Patch application is unchanged: the tool writes the file inside the call;
+    the `exec` return value is only what reaches the model. A patch that does
+    not apply still throws, so the `exec` reports `code_error`.
+- Motivation: a returned `apply_patch` result carries `metadata.diff` and
+  `files[].patch` — since upstream `eb8ee1cd` the untrimmed full diff. In one
+  coordinator session 97% of the writers' exec output (≈405K characters over 16
+  writers) was these echoes, re-read on every later writer step.
+- Upstream relationship: upstream's writer prompt has no such instruction.
+  Fork addition; `dev/compat` inherits it.
+- Watch surfaces: `composeWriterPrompt`; `tool/tool-script.ts` return
+  serialization; `tool/apply_patch.ts` result shape.
+- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
+  (the writer task carries the instruction; fails without it);
+  `packages/cli/test/tool/exec-apply-patch-output.test.ts` (`testEffect`, the
+  registry's real `apply_patch` through `exec`: the patch applies and returns the
+  summary without `@@`, the full result does carry the diff, and a patch that
+  does not apply fails the `exec` and leaves the file unchanged).
+- Retirement condition: `exec` stops serializing nested tool metadata into the
+  return value, or the writer stops calling tools through `exec`.
+
+### FC-045 — an over-budget checkpoint is trimmed once, to a target below the budget
+
+- Status: active
+- Canonical owner: fork `main` — `EXTRACTION_TARGET_RATIO` and the targets in
+  `buildExtractionReflection` (`packages/cli/src/session/checkpoint-retry.ts`);
+  `tokens`/`budget` on budget violations (`packages/cli/src/session/checkpoint-validator.ts`)
+- Observable contract:
+  - The `EXTRACTION REQUIRED` re-prompt lists, for every over-budget file and
+    section, its size, a target of 85% of the budget and the amount to move
+    (tokens and about 4 characters per token), and asks for one pass to that
+    target rather than to just under the budget.
+  - Validation is unchanged: a file passes at its budget, as before. Only the
+    prompt aims lower, so no new re-prompt is introduced.
+  - A violation without measured sizes keeps the previous prompt.
+- Motivation: from 2026-11-01 to 2026-11-05, 146 of 345 writers were re-prompted
+  to extract; 47 needed two or three rounds. The median overshoot was 113
+  tokens, each round removed a median of 167 tokens, and the file was left a
+  median of 53 tokens over after a round — writers trimmed to the line, so the
+  next round or the next writer went over again. Steps after the first
+  extraction prompt cost 8% of all writer spend, and the prompts carried 4.5M
+  characters of file text.
+- Upstream relationship: upstream's prompt names the overshoot only. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the files above; `plugin/checkpoint-splitover.ts` (the
+  re-prompt loop); `CHECKPOINT_SECTION_BUDGETS`/`MEMORY_SECTION_BUDGETS`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-retry.test.ts`
+  "buildExtractionReflection targets (FC-045)" (targets for a file and a
+  section from real validators; the plain prompt for a violation without
+  sizes). Setting the ratio to 1, dropping the targets, or not carrying the
+  sizes on either violation kind fails it.
+- Retirement condition: upstream aims extraction below the budget, or the
+  writer stops being re-prompted for budget overruns.
+
+### FC-046 — a rebuilt context does not start a writer until it has grown
+
+- Status: active
+- Canonical owner: fork `main` checkpoint ladder in
+  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`)
+- Observable contract:
+  - The first time the ladder is evaluated after a rebuild or compaction
+    boundary — in the process that rebuilt, after `resetThresholds`, or in a
+    restarted process — every threshold below the baseline plus one ladder step
+    counts as crossed. The baseline is the context size of the main lane's first
+    finished step after the boundary. Until that step exists the ladder is not
+    initialized at all — the tokens passed in can be the compaction summary's —
+    and the next evaluation starts over. The step is the ladder's last spacing,
+    the same step the final-threshold recovery gate uses.
+  - A compaction summary is not a step of the lane: its usage is the
+    summarization request over the old history. The walk skips it, both for
+    the baseline and for FC-028's reached size.
+  - The final threshold is never skipped, so a rebuilt context already past it
+    starts a writer at once.
+  - Sessions without a boundary, and thresholds a succeeded writer covers
+    (FC-028), behave as before.
+- Motivation: a rebuild loads the checkpoint, the verbatim tail after its
+  watermark and the system prompt, so the rebuilt context starts part full. With
+  the `30%/55%/75%` ladder on a 272K window it started at 58K–75K, and the 30%
+  threshold (73K) fired a few steps later. In one 12-hour window a session
+  rebuilt 20 times and ran 58 writers; 20 started before the context had grown
+  by 15% of the window since the rebuild, about 30% of that session's writer spend.
+  The next writer covers that tail anyway, because the checkpoint still ends at
+  the old watermark. On a 400K window a 144K rebuilt context would cross the
+  first threshold (108K) on its first step.
+- Upstream relationship: upstream re-arms the whole ladder on a rebuild. Fork
+  fix of shared code; `dev/compat` inherits it unchanged.
+- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
+  `prune.ts`; `isBoundaryUser` in `packages/cli/src/session/tail-digest.ts`;
+  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts` (the
+  walk only runs when a writer has succeeded).
+- Tests/evidence: `packages/cli/test/session/prune.test.ts`
+  "SessionPrune.fireCheckpoints after a process restart": "after a rebuild,
+  thresholds within one step of the rebuilt context do not fire", "after a
+  rebuild, the final threshold is never skipped", "after a restart, the baseline
+  is the first step after the rebuild, not the current one", "a rebuild in the
+  running process skips the thresholds near the rebuilt context", "after a
+  compaction, the summary's usage is not the baseline", "before the first step
+  after a compaction, the ladder waits instead of measuring the summary",
+  "without a rebuild, the first threshold of a new session still fires", and the
+  updated
+  "a rebuild after the last writer arms the whole ladder again". Disabling the
+  skip, measuring from the current size, letting the final threshold be
+  skipped, counting the compaction summary, or falling back to the passed-in
+  size before the first step each fails a case.
+- Retirement condition: upstream measures the ladder from the rebuilt context.
+
+### FC-047 — a no-fork checkpoint writer can run on its own configured model
+
+- Status: active
+- Canonical owner: fork `main` — `ownModel`/`writerModel` in
+  `tryStartCheckpointWriter` (`packages/cli/src/session/checkpoint.ts`); the
+  late-bound resolver in `packages/cli/src/session/agent-model-ref.ts`,
+  registered by `SessionPrompt.layer` (`resolveAgentModel` in
+  `packages/cli/src/session/prompt.ts`)
+- Observable contract:
+  - With `checkpoint.fork: false`, a model configured as
+    `agent."checkpoint-writer".model` (a literal `provider/model` or a
+    model-group name) is the writer's model: its system prompt and tools are
+    built for that model, and the actor is spawned on it. The log line is
+    `checkpoint writer runs on its configured model`.
+  - The FC-036 delta check uses that model's usable window. When the delta does
+    not fit, the writer forks the parent's view on the parent's model, as
+    before. A window of 0 (the model publishes no limit) bounds nothing, as in
+    `isOverflow`.
+  - With `checkpoint.fork: true`, without a configured writer model, or when it
+    does not resolve (logged as `agent model resolution failed`), the writer runs
+    on the parent's model as before.
+- Motivation: the writer always ran on the parent's model, because the parent
+  model passed to the spawn wins over the agent's configured one. A no-fork
+  writer reads no parent prefix, so it gains nothing from sharing the parent's
+  model and cache. On a session with an expensive coordinator model, writers
+  were about a third of the session's spend (58 writers in 12 hours). This lets
+  a cheaper model be measured and chosen for the writer alone.
+- Upstream relationship: upstream spawns the writer on the parent's model. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: `tryStartCheckpointWriter` and the no-fork `buildPrefix` call
+  in `checkpoint.ts`; `registerPrefixCapture`/`registerAgentModelResolver` in
+  `SessionPrompt.layer`; `Agent` config merge of `model`/`modelRef`;
+  `Provider.resolveModelRef`.
+- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
+  "fork:false runs the writer on its configured model", "fork:false checks the
+  delta against the configured model's window and forks the parent view on the
+  parent's model", "fork:false treats a writer model with an unknown window as
+  unbounded", "fork:true keeps the parent's model even when the writer names
+  one" and "fork:false without a configured writer model keeps the parent's
+  model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
+  real resolver through `AppLayer` (literal model, model group, none,
+  unresolvable). Always using the parent's model, checking against the parent's
+  window, treating an unknown window as 0, dropping group resolution, or letting
+  a resolution failure escape each fails a case.
+- Retirement condition: upstream lets the writer run on its own configured
+  model.
 
 ## FC-004 — MCP configuration and connection lifecycle
 
@@ -964,6 +1532,8 @@ not change their implementation. The preceding review is retained in the
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
+
 - 2026-11-04 CI correction: the main-lane and subagent hanging-retry steer fixtures now release their deliberately pending HTTP reply only during cleanup, before awaiting the scripted server stop. Client abort does not cancel a JavaScript fetch-handler Promise. Production lifecycle behavior, all steer assertions and original test timeouts are unchanged; see the [sync evidence](upstream-sync-2026-11-04.md).
 
 - 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
@@ -1127,7 +1697,8 @@ not change their implementation. The preceding review is retained in the
   self/ancestor cancellation. Workflow agent timeouts
   bound the cancellation join to the existing reclaim grace while detached
   cleanup continues; shared cancellation retains interrupt/join semantics.
-  The dated actor quarantine entries below describe their historical snapshots.
+  The dated 2026-09-12 to 2026-09-14 actor quarantine entries, kept in the
+  [shared history](fork-registry-history.md#2026-11-07-registry-normalization), describe their historical snapshots.
   The separate workflow deadline case is restored. The restored
   `it.live` case proves the hanging LLM request was consumed, a child worktree
   and running Instance existed, the exact workflow deadline fired, and the
@@ -1187,11 +1758,10 @@ not change their implementation. The preceding review is retained in the
   cites the successful exact-SHA runs of an ancestor whose tree outside `docs/`
   is identical. The `test` workflow retains `.test.tsx`
   discovery, assigns all ordinary inputs by a stable path hash, runs enabled
-  worktree cases in normal shards, and runs the real stdio observer and HTTP
-  actor recovery suites in separate processes. The former requires the real
-  transport despite process-global mocks; the latter requires the live
-  AppRuntime prefix captor despite scoped unit-test prompt layers. No case is
-  skipped by this isolation. Each shard and dedicated job removes its prior report and
+  worktree cases and the HTTP actor recovery and subagent-resume suites in
+  normal shards, and runs the real stdio observer suite in a separate process,
+  because it requires the real transport despite process-global mocks. No case
+  is skipped by this isolation. Each shard and dedicated job removes its prior report and
   then requires strict XML/count consistency, at least one executed case, a
   non-empty suite for every reported file, and exact expected-file coverage.
   The explicit Linux zero-case inputs are still loaded by Bun and excluded only
@@ -1227,48 +1797,6 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   mutation-checked against a suppressed notification and against one misrouted
   to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
   notification routing.
-- 2026-09-14 TP-R14-12 unquarantined: `[TP-R14-12] undeliverable terminal
-notification is logged` runs again, and the rationale it was quarantined under
-  — upstream behaviour the fork's actor pipeline does not yet reproduce — was
-  wrong. The case asserts upstream's log wording, `actor terminal notification
-failed`; the fork's own inbox send in `spawn.ts` logged
-  `actor inbox notification failed`, a line upstream does not have. Aligning
-  that one message is the whole fix, mutation-checked: with the fork wording the
-  case fails its assertion, with upstream's it passes. #107 had passed it from
-  its first commit (CI run 34693434562, shard 4/4), which the 2026-09-13
-  follow-up below did not record. At that snapshot two cases stayed quarantined, both reducing to
-  the postStop publish-ordering product decision recorded there: `[TP-R14-07]
-postStop LLM failure preserves the successful result with a warning` and
-  `inbox waits for the entire spawn execution before starting a continuation`.
-- 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
-  envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
-  entry. At that snapshot three cases stayed quarantined, all `skip`ped in place with their
-  inline rationale:
-  `[TP-R14-07] postStop LLM failure preserves the successful result with a
-warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
-spawn execution before starting a continuation`
-  (`test/actor/execution-integration.test.ts`) both reduce to one blocker — the
-  fork publishes an actor's outcome and leaves it idle _before_ postStop, where
-  upstream publishes after — and the second additionally needs a spawn-side
-  execution claim held across the whole spawn. What holds these open is a
-  product decision, not a test conflict: publishing after postStop means a
-  spawn's caller, and a blocking `actor run`, resolves only once postStop
-  finishes. Exactly one fork case reads on the early publish, `delivered no-op
-cancel preserves forkContext while postStop is still running`, and only in how
-  it sequences its awaits.
-  `[TP-R14-12] undeliverable terminal notification is logged`
-  (`test/actor/cancel-notification.test.ts`) is independent of that ordering and
-  is untouched by this PR.
-- 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
-  an inline rationale — `inbox waits for the entire spawn execution before
-starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
-logged`, and the peer `success`/`failure` variants of
-  `[TP-R14-08] [TP-R14-09] ... continuation settles ... once`. They assert
-  upstream behavior the fork's actor pipeline does not yet reproduce after the
-  FC-001 wake-routing retirement. Each is `skip`ped rather than deleted so the
-  gap stays visible, and is tracked for a dedicated follow-up fork PR; no
-  upstream PR is opened. The peer `cancelled` variant and both subagent variants
-  run normally.
 - Upstream relationship: stronger runtime cleanup plus a narrower quarantine
   than the reviewed upstream workflow; the adopted package-scoped enterprise
   storage fixture retired with upstream's package removal.
@@ -1337,19 +1865,6 @@ logged`, and the peer `success`/`failure` variants of
   fork already has relevant fixture isolation and all three pass on both
   pre-sync branch SHAs. Existing unrelated CI timeouts are tracked separately;
   this decision does not claim that the fixture removal fixes those failures.
-- 2026-09-07 model API lifecycle review (historical; retired by FD-004 on
-  2026-09-14): token verification precedes body and
-  bootstrap; both optional API modes use bounded uploads and cancellation-aware
-  instance waiting. SSE retains admission and its instance lease until EOF or
-  producer cancellation acknowledgement, including cancellation at response
-  handoff. Bun cancellation uses an explicit SSE error and close; unrelated
-  shared bootstrap producers remain owned by their original callers. CLI stop
-  closes admission before instance disposal. Direct and native HTTP regressions
-  cover these seams without changing the ordinary actor/workflow lifecycle.
-- Selected model API evidence (historical tests of the retired implementation): CLI test children have a 20-second execution
-  bound, unconditional kill and a bounded two-second drain on cleanup; multi-child
-  cases declare their total 60-second budget. Image/SDK cancellation and Node
-  checks cover adjacent API resources, not a rerun of all workflow lifecycle tests.
 - POLICY-03 lifecycle review (the model API admission clauses are historical
   and retired by FD-004; listener shutdown still exists): the TUI worker stops model API admission and
   joins pending listener startup before checkpoint draining and instance
@@ -1371,7 +1886,8 @@ logged`, and the peer `success`/`failure` variants of
   Its local pass is supporting evidence; the final published `main` SHA remains
   subject to the strict XML/count and exact-file CI gates.
 - 2026-09-14 capability route disposition: the 2026-09-07 model API lifecycle
-  review, the selected model API evidence and the model API clauses of the
+  review and the selected model API evidence (both kept in the
+  [shared history](fork-registry-history.md#2026-11-07-registry-normalization)) and the model API clauses of the
   POLICY-03 lifecycle review above describe the retired fork model API and are
   historical. FD-004 now owns `/v1` and adopts upstream's capability route
   whole: token verification runs in the route after `InstanceMiddleware` has
@@ -1385,13 +1901,6 @@ logged`, and the peer `success`/`failure` variants of
   settlement. Restoring a quarantined test requires effective assertions and
   bounded exact-SHA CI settlement; the workflow case's restored execution alone
   does not close the Linux timeout follow-up above.
-
-- 2026-09-15 retired-fixture inventory: `test/fixture/llm-server-cli-child.ts`,
-  `test/fixture/model-api-default-child.ts` and `test/llm-server/tokens-child.ts`
-  have no current callers in the tracked tree. They retain former model/audio
-  API or token-helper assumptions and do not count as executed validation of
-  today's capability API. Delete or deliberately reconnect them in a focused
-  cleanup; the current actor/quarantine result is unaffected.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
@@ -1976,37 +2485,6 @@ logged`, and the peer `success`/`failure` variants of
 - Review basis: upstream `5198ff540efb5ca9fff2baa64555324d43a721b9`, main runtime/test behavior `4eacc84dccf83c22f533c35bea282d4c5a38cacd` (history fixes already present at `64e47eb7695e3ce137ba95a6d1f5b4b381eed58d`).
 - Retirement condition: upstream supplies equivalent NUL fidelity, SQL-side field/list budgets and structural locator-safe omission behavior, proven against raw retrieval and real preview formatting. The legacy retry normalization retires separately, once upstream normalizes or migrates error-based retry rows at the same read boundaries.
 
-## FC-018 — explicit empty values in actor shell flags (retired)
-
-- Status: retired on 2026-09-24 by upstream `2b993ac9`: the tool shell invocation format, parser and flag mappings were removed. JSON Actor schema validation remains active under FD-006, but this shell-only hardening has no runtime surface. The former contract and evidence below are historical.
-- Former status: active
-- Canonical owner: fork `main` actor shell argument parsing
-- Observable contract: `extractNamedFlags` rejects an explicitly empty value in
-  both flag forms. `--flag=` already failed; `--flag ""` now fails the same way
-  with `actor: --<flag> requires a value`. A recognized flag is therefore either
-  absent or carries a non-empty value, so the verb mappings' truthiness spreads
-  cannot silently drop a value the caller supplied. Non-empty values, position-
-  independent flag scanning, heredoc prompts and unrelated tokens are unchanged.
-- Upstream relationship: upstream accepts the empty space-form value and then
-  drops the selector while mapping, so `actor run explore "d" "p" --model ""`
-  launches at the default model instead of reporting the empty value. This is
-  fork hardening of shared code, not a rejected upstream decision.
-- Watch surfaces: `packages/cli/src/tool/actor.ts` — `extractNamedFlags`
-  and the run/spawn/send flag mappings that consume its result.
-- Tests/evidence: `packages/cli/test/tool/actor.shell.test.ts`, "an
-  explicitly empty flag value fails like a missing one", covering `--model ""`,
-  `--model=""`, `--task ""` and `--command ""`. Reverting the guard to the
-  `undefined`-only check fails that case and nothing else.
-- Propagation note: propagated to `dev/compat` on 2026-09-16 through merge
-  `e3920adbbb91f44959a6110a48d6ca5cb1f5087d` with adaptation
-  `452123b7b4941ef0f605961fd9e8f8a23a079462`. That branch previously kept an
-  explicitly empty `--variant ""` for its strict schema; the shared parser now
-  rejects it at parse time, its shell test asserts that error, and DC-ACTOR-002
-  records the parse-time contract.
-- Retirement condition: upstream rejects empty values in both flag forms, or the
-  flag mappings stop depending on truthiness so an empty value reaches schema
-  validation with an equivalent error.
-
 ## FC-019 — QuickJS heap views survive WASM memory growth
 
 - Status: active
@@ -2170,101 +2648,6 @@ logged`, and the peer `success`/`failure` variants of
   that the persisted input and `execute` agree. The regression cases stay in
   either case.
 
-## FC-021 — the checkpoint writer stops, fits the window, and has a step budget
-
-- Status: active
-- Canonical owner: fork `main` checkpoint writer bounds — `prompt.ts`
-  (bounded-agent overflow), `checkpoint.ts` and `prune.ts` (writer view sizing),
-  `agent.ts` (writer step budget)
-- Observable contract, three parts:
-  - Bounded-agent overflow. A bounded computation agent (native and hidden:
-    title, summary, checkpoint-writer) has no compaction or rebuild, so when
-    the provider rejects its request as a context overflow, nothing can shrink
-    the next one. That step is settled with a `ContextOverflowError` and the
-    loop ends, on the fork path and on the regular path alike. The actor
-    therefore fails as `kind: "overflow"`, `retryable: false`, and prune arms
-    no final-threshold recovery gate for it. `halt` in `processor.ts` has
-    already published the provider's error, so nothing is published twice.
-  - Writer view sizing. `prune.fireCheckpoints` passes the usable window and
-    the parent's latest provider-reported usage to `tryStartCheckpointWriter`.
-    The writer still reads the newest rebuild boundary's tail at full fidelity
-    unless `used + est(full view) − est(parent view)` exceeds the usable
-    window. In that case it forks the parent's own view
-    (`collapseCheckpointTail(window)`), whose boundary carries the checkpoint
-    and the tail digest, and the watermark is computed on that view, so a
-    successful writer moves the next rebuild's tail start past the old
-    segments. The estimate is the per-part maximum of chars/4 and bytes/3;
-    only the difference between the two views is estimated, the rest is the
-    provider's number. A writer started by `rebuildEnsuringCheckpoint` passes
-    no context and keeps the full view.
-  - Writer step budget. `checkpoint-writer` declares
-    `steps: CHECKPOINT_WRITER_STEPS` (120). At the budget the last step goes
-    out with `toolChoice: "none"` and the MAX_STEPS reminder, so the writer
-    has to answer in text. Each validator re-prompt (`MAX_PRE_REACT` = 3) is a
-    new prompt with its own budget, which bounds a writer at 480 steps. A user
-    `agent.checkpoint-writer.steps` still overrides it.
-- Motivation: on 2026-10-31 local sessions on a 1M-token model kept failing
-  with `maximum context length is 1048576 tokens; the prompt has 1051956
-  tokens`. The failing requests were the checkpoint writer's. Its first
-  request was 996,878 tokens while the parent's own request at the same moment
-  was 723,407: the writer had re-expanded a rebuild tail that spanned every
-  rebuild since the last good checkpoint (2,576 messages). A step truncated at
-  the window edge left an invalid tool call, every later request was
-  1,051,956 tokens, and the writer re-sent it every six seconds for 4,392
-  steps, until the process exited. Because a failed writer leaves the watermark
-  where it was, each failure made the next writer's view larger: another
-  session's writer started at 2,091,097 tokens. Separately, two writers on a
-  third session never stopped calling tools (alternating `task` list and
-  `read`, saying "Stop." in their reasoning), each step about 925K cached
-  tokens, for about 6,000 steps.
-- Upstream relationship: upstream `7bc7dc3a` has all three gaps. Its bounded
-  agents return `"continue"` on a provider-signalled overflow, its writer
-  always takes the full-fidelity tail (documented as a deliberate quality
-  choice in `llm-request-prefix.ts`), and `checkpoint-writer` declares no
-  `steps`. This is fork hardening of shared code; the full-fidelity default is
-  kept whenever it fits.
-- Watch surfaces: in `packages/cli/src/session/prompt.ts`,
-  `isBoundedComputation`, `writeBoundedOverflowError`, both `result ===
-  "overflow"` sites, and `maxSteps`/`isLastStep`; in
-  `packages/cli/src/session/checkpoint.ts`, the view selection in
-  `tryStartCheckpointWriter`, `TryStartCheckpointWriterInput.context`,
-  `estimateViewTokens`, `withRebuildTail`/`readRebuildTail` and
-  `computeBoundary`; `packages/cli/src/session/tail-digest.ts`
-  (`collapseCheckpointTail`); the writer start in
-  `packages/cli/src/session/prune.ts`; the `checkpoint-writer` definition in
-  `packages/cli/src/agent/agent.ts`; `classifyAssistantError` and
-  `MAX_PRE_REACT` in `packages/cli/src/actor/spawn.ts`; the overflow branch of
-  `halt` in `packages/cli/src/session/processor.ts`; and the parent/writer
-  divergence note in `packages/cli/src/session/llm-request-prefix.ts`.
-- Tests/evidence: `packages/cli/test/session/checkpoint-writer-runaway.test.ts`
-  drives real sessions against a content-routed stub that tells writer
-  requests from foreground ones:
-  - a writer whose request is rejected as an overflow settles as a
-    non-retryable `overflow` failure after exactly one request. The stub holds
-    the writer's request until the settlement wait has started, because a
-    writer that settles first leaves no slot and the wait reports `no-writer`;
-  - a bounded agent prompted directly (no fork context) stops after one
-    rejected request with `ContextOverflowError`;
-  - with every writer failing, two rebuilds on one stale checkpoint leave a
-    tail larger than the window; the next writer, for `fork: true` and
-    `fork: false`, receives the boundary and none of the tail's file content;
-  - a writer whose model never stops calling tools ends after exactly
-    `CHECKPOINT_WRITER_STEPS` requests, the last with `tool_choice: "none"`.
-
-  The full-tail behavior for a tail that fits stays covered by
-  `checkpoint-writer-rebuild-tail.test.ts`. Mutation-checked: disabling the
-  fork-path overflow branch makes the writer re-send 106 times in 20 seconds;
-  disabling the regular-path branch makes the direct prompt re-send 67 times;
-  disabling the view fallback puts the tail's file content back into both
-  fork modes; removing `steps` lets the writer run past 320 requests. Each
-  fails on its assertion, not on a timeout. The legacy boundary (tail inside
-  the window) goes through the same expression via `collapseCheckpointTail`
-  and has no end-to-end case of its own.
-- Retirement condition: per part — upstream stops a bounded agent on a
-  provider-signalled overflow; upstream bounds the writer's view by the window;
-  upstream gives the writer a step budget. The regression cases stay in every
-  case.
-
 ## FC-022 — cloned loggers keep their own tags
 
 - Status: active
@@ -2359,37 +2742,6 @@ logged`, and the peer `success`/`failure` variants of
   `max` turn keeps `max`, one on another model or after a turn without a
   variant has none. Dropping the variant from the boundary fails it.
 - Retirement condition: upstream continues the variant along with the model.
-
-## FC-024 — boot reconciliation reports a delivered claim as interrupted
-
-- Status: active
-- Canonical owner: fork `main` inbox boot recovery in
-  `packages/cli/src/inbox/controller.ts` (`reconcileOnBoot`)
-- Observable contract:
-  - When a process restarts, `reconcileOnBoot` cancels its session's stale-epoch
-    and crashed `claimed` rows. A row whose input was already delivered into the
-    conversation (`consumed`) settles as `interrupted`; a row not yet delivered
-    settles as `never_ran`. Stale-epoch `accepted` rows are never consumed, so
-    they stay `never_ran`.
-  - This is the rule `cancelInputs` in the same file already applies when a
-    session stops.
-- Motivation: `reconcileOnBoot` wrote `never_ran` for every claimed row, so a
-  sender reading the receipt after a crash could not tell an input the model had
-  already seen and partly acted on from one it never received. Recovery rules
-  such as "resend once when `never_ran` and `consumed=0`" depend on that
-  difference; resending a consumed input replays work that already ran.
-- Upstream relationship: upstream `reconcileOnBoot` writes `never_ran`
-  unconditionally. Fork fix of shared code; `dev/compat` inherits it unchanged.
-- Watch surfaces: `reconcileOnBoot` and `cancelInputs` in
-  `packages/cli/src/inbox/controller.ts`; the `consumed` anchor in
-  `packages/cli/src/session/prompt.ts`.
-- Tests/evidence: `packages/cli/test/inbox/queue-controller.test.ts`
-  "reconcileOnBoot reports a claim already delivered into the conversation as
-  interrupted" claims two inputs, marks one delivered, and expects
-  `interrupted` and `never_ran` respectively. Writing `never_ran` again fails it.
-  "reconcileOnBoot cancels claimed rows" still expects `never_ran` for an
-  undelivered claim.
-- Retirement condition: upstream distinguishes consumed claims on boot recovery.
 
 ## FC-025 — Grok receives a flat `operation` envelope
 
@@ -2509,167 +2861,6 @@ logged`, and the peer `success`/`failure` variants of
 - Retirement condition: upstream keeps the scheduler across instance recycling
   or mounts it on instance creation.
 
-## FC-027 — the checkpoint writer closes with one line
-
-- Status: active
-- Canonical owner: fork `main` checkpoint writer prompt in
-  `packages/cli/src/agent/prompt/checkpoint-writer.txt` (Turn 2, constraint 8)
-  and the writer task in `packages/cli/src/session/checkpoint.ts`
-  (`composeWriterPrompt`)
-- Observable contract:
-  - After its edits the writer is told to end with one short line such as
-    `Checkpoint updated.`, without a summary and never with an empty reply. The
-    last instruction of the writer task says the same.
-  - Nothing else about the writer changes: its tools, the edit pass, its budgets
-    and the success rule (the watermark advances only when the run succeeds).
-- Motivation: a final step with no text, no reasoning and no tool call is
-  invalid output. The processor retries it, and for a background system agent
-  the bounded retries (FC-013) then fail the run. The writer prompt said "then
-  stop", "your response is complete. Do not summarize what you wrote" and "stop
-  immediately". Most models still closed with a line; a GPT-family model behind
-  a gateway took it literally. In recorded runs one session's writers on that
-  model failed 16 of 21 times in about 16 hours, all with "empty output", and
-  the failed runs cost $85 of the $108 its writers spent. The inspected failure
-  had already rewritten checkpoint.md when its empty reply failed the run. The
-  watermark stayed at the last success for twelve hours, so every later writer
-  and rebuild covered the same growing range again.
-- Upstream relationship: upstream's prompt and task carry the same three
-  "stop" instructions and the same empty-output handling. Fork fix of shared
-  prompt text; `dev/compat` inherits it unchanged.
-- Watch surfaces: Turn 2 and constraint 8 in `checkpoint-writer.txt`; the last
-  line of `composeWriterPrompt`; the empty-output retry in
-  `packages/cli/src/session/processor.ts` and `classifyAssistantStep` in
-  `packages/cli/src/session/classify.ts`; the system-agent retry bound (FC-013).
-- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
-  "writer is told to close with one line, not to end with an empty reply" reads
-  the spawned writer's task and expects the closing-line instructions and none
-  of the old "stop" wording; restoring the old wording fails it. The case pins
-  the instruction, not a model's compliance, which is read from recorded writer
-  outcomes.
-- Retirement condition: upstream asks the writer for a closing line, or the
-  runtime accepts an empty final reply from a writer whose edits applied.
-
-## FC-028 — the checkpoint ladder survives a restart and starts one writer at a time
-
-- Status: active
-- Canonical owner: fork `main` checkpoint ladder in
-  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`) and
-  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts`
-- Observable contract:
-  - The first time a process evaluates a session's ladder, every threshold at or
-    below the context size the session had reached when it started its last
-    writer that succeeded counts as crossed. That size is the main lane's newest
-    assistant usage from before the writer's child session was created; the
-    writer is that child session's `checkpoint-writer` actor with outcome
-    `success`. A later writer that failed or never finished does not count, so
-    its threshold fires again after the restart; this also stands in for the
-    final threshold's recovery gate, which does not survive a restart. With no
-    succeeded writer, or with a rebuild or compaction boundary after it, the
-    whole ladder stays armed, as `resetThresholds` leaves it after a rebuild —
-    except the non-final thresholds near the rebuilt context, which FC-046
-    counts as crossed.
-  - When one evaluation finds several thresholds newly crossed, it starts one
-    writer, for the highest, and marks them all crossed. The final-threshold
-    recovery gate is unchanged within a process.
-- Motivation: `crossed` is process memory, so a restarted process treated every
-  threshold a session had passed as new. In recorded restarts three sessions
-  each started a writer at their first turn after the restart for a threshold
-  passed before it (for example 270000 at 609251 tokens), and two sessions also
-  queued a second writer behind the first for the same range. Each writer is a
-  pass over the whole context. The checkpoint watermark cannot stand in for the
-  ladder: `computeBoundary` leaves a tail of 10K–20K tokens after it, so the
-  context at the watermark sits below the threshold that fired.
-- Upstream relationship: upstream keeps `crossed` in memory only and starts a
-  writer per newly crossed threshold. Fork fix of shared code; `dev/compat`
-  inherits it unchanged.
-- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
-  `prune.ts`; the writer child session and its pending-writer slot in
-  `tryStartCheckpointWriter`, and `lastSucceededWriterStart` in
-  `checkpoint.ts`; the writer actor's `last_outcome` in
-  `packages/cli/src/actor/actor.sql.ts`; `isBoundaryUser` in
-  `packages/cli/src/session/tail-digest.ts`.
-- Tests/evidence: `packages/cli/test/session/prune.test.ts`
-  "SessionPrune.fireCheckpoints after a process restart" builds a fresh layer
-  per case: "a threshold a succeeded writer was started for does not fire
-  again", "the context reached is read from before the writer started, not
-  after", "a threshold whose last writer failed or never finished fires again",
-  "a rebuild after the last writer arms the whole ladder again" and "thresholds
-  crossed together start one writer". "resetThresholds drops a pending gate" now
-  expects one writer for the two thresholds its replay crosses together.
-  Seeding nothing, ignoring the rebuild boundary, reading the newest usage
-  instead of the one before the writer, or counting a writer that did not
-  succeed each fails its case; a writer per threshold fails the last case and
-  the reset case.
-- Retirement condition: upstream rebuilds the ladder after a restart and starts
-  one writer per evaluation.
-
-## FC-029 — the checkpoint writer is given the text it edits
-
-- Status: active
-- Canonical owner: fork `main` checkpoint writer inputs — `renderCurrentFiles`
-  and `composeWriterPrompt` in `packages/cli/src/session/checkpoint.ts`,
-  `renderCurrentFile`, `readCurrentFiles`, `buildExtractionReflection` and
-  `buildReflectionMessage` in `packages/cli/src/session/checkpoint-retry.ts`,
-  the `actor.preStop` hook in `packages/cli/src/plugin/checkpoint-splitover.ts`,
-  and Turn 1 and the notes.md instruction in
-  `packages/cli/src/agent/prompt/checkpoint-writer.txt`
-- Observable contract:
-  - The writer task carries a CURRENT FILES block: the text of CHECKPOINT_PATH,
-    MEMORY_PATH and NOTES_PATH read when the writer starts, each between
-    `<current-file name="…" path="…">` tags, followed by NOTES_TEMPLATE. Turn 1
-    tells the writer to work from that block and not to read those three files
-    again; the notes.md reset uses the template block.
-  - A validation re-prompt from the `actor.preStop` hook carries the current
-    text of each file it names: the over-budget files for an extraction, the
-    files with errors otherwise. A file within its budget and without errors is
-    not repeated.
-  - CHECKPOINT_PATH and MEMORY_PATH, which the writer edits in place, are shown
-    up to `CURRENT_FILE_CHAR_LIMIT` (100,000 characters): to the last whole line
-    within the limit, never splitting a surrogate pair, followed by a line
-    saying how much is shown. Turn 1 then has a writer that can read the
-    rest, and one that cannot leave the unseen part as it is. NOTES_PATH is
-    always shown whole, because Turn 2 resets it and a part not shown would be
-    deleted unreconciled; it is emptied at every checkpoint, so it holds only
-    what was appended since the last writer.
-- Motivation: on the Codex harness (GPT-family models) the tool set has no
-  `read`, `write` or `edit`; files are read through `exec`'s `files`, whose jail
-  is the worktree and the OS temp directory. The memory directory is outside
-  it, so a writer on that harness could not read the checkpoint it was told to
-  read and edit, nor see the result of its own `apply_patch` edits. In recorded
-  runs such writers reported reads failing with "path outside allowed roots",
-  found no read tool in `ALL_TOOLS`, and declined the extraction re-prompts
-  because they could not see the section to extract. One session's checkpoint
-  grew to 62,876 characters (its whole budget is about 44,000) with §5 at
-  22,372, while its writers spent every re-prompt on refusals.
-- Upstream relationship: upstream's writer prompt and re-prompts point at the
-  paths only, and its Codex harness has the same `files` jail. Fork fix of
-  shared code; `dev/compat` inherits it unchanged.
-- Watch surfaces: the files above; the writer's tool whitelist
-  `CHECKPOINT_WRITER_TOOLS`; `available` and `tools` in
-  `packages/cli/src/tool/registry.ts` (which tools the Codex harness drops);
-  `resolveJailed` in `packages/cli/src/tool/tool-script.ts`; FC-021's writer view
-  sizing, which does not count the task.
-- Known limit: the block is not counted in FC-021's view projection. It holds
-  at most two files of `CURRENT_FILE_CHAR_LIMIT` characters plus notes.md, and
-  a writer that can read would read the same text into its context anyway.
-- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
-  "writer task carries the current text of the files it edits and the notes
-  template" seeds the three files (notes.md empty) and expects each verbatim
-  between its tags, the template, and none of the old "Read BOTH" wording;
-  "writer task shows notes.md whole even past the current-file limit" seeds a
-  notes.md longer than the limit and expects all of it.
-  `packages/cli/test/plugin/checkpoint-splitover.test.ts`: the extraction case
-  expects the over-budget checkpoint verbatim and no MEMORY block; the
-  duplicate-title case expects the erroring checkpoint verbatim instead of
-  "Read your output". `packages/cli/test/session/checkpoint-retry.test.ts`
-  "renderCurrentFile": a file within the limit is shown whole, a longer one is
-  cut after its last whole line, and a single over-long line is cut before a
-  surrogate pair. Dropping the block from the task, the text from either
-  re-prompt, the files from the hook, the line cut, the surrogate guard or the
-  whole-notes exception each fails its case.
-- Retirement condition: upstream gives the writer the files' text, or the
-  Codex harness can read the memory directory.
-
 ## FC-030 — a resumed session shows its variant without overwriting the saved choice
 
 - Status: active
@@ -2721,40 +2912,6 @@ logged`, and the peer `success`/`failure` variants of
   fails its case.
 - Retirement condition: upstream restores the variant without saving it and
   keeps the saved choice when history records none.
-
-## FC-031 — an actor send names the sending lane, so it can be answered
-
-- Status: active
-- Canonical owner: fork `main` actor tool — the `send` action's
-  `senderActorID` in `packages/cli/src/tool/actor.ts`, and the `send` entry of
-  `packages/cli/src/tool/actor.txt`
-- Observable contract:
-  - An `actor send` records the sending lane's actor id as the inbox row's
-    `sender_actor_id`: `main` for a session's main lane, the actor id (such as
-    `general-1`) for a subagent or peer lane, for direct and `exec` calls alike.
-  - The receiver sees `<inbox from="<session_id>:<actor_id>">`, and a send to
-    that session and actor reaches the sender. The tool description says so.
-- Motivation: a direct call recorded `ctx.agent`, the agent's name, while an
-  `exec` call recorded the actor id. A main lane running agent `build`
-  therefore signed its messages `<session>:build`, and a reply to
-  `to_actor_id: "build"` failed with receiver not found, since the main lane's
-  actor id is `main`. In recorded collaboration 565 rows carried `build` as the
-  sender, 391 of them across sessions, so every such receiver had to know the
-  sender's lane out of band to answer.
-- Upstream relationship: upstream records `ctx.agent` for every send; the fork
-  already used the actor id for `exec` calls. Fork fix of shared code;
-  `dev/compat` inherits it unchanged.
-- Watch surfaces: the files above; `ctx.actorID` in the tool context built in
-  `packages/cli/src/session/prompt.ts`; `renderInboxRow` in
-  `packages/cli/src/inbox/render.ts`; receiver lookup in `Inbox.accept`
-  (`packages/cli/src/inbox/inbox.ts`).
-- Known limit: rows written before the fix keep the agent name.
-- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "the sender is the
-  lane's actor id, so the receiver can reply to it": a main lane running `build`
-  sends across sessions, the row and the rendered `from` name `main`, a reply to
-  the rendered sender is accepted, and a subagent lane's send records its actor
-  id. Restoring the agent name fails it.
-- Retirement condition: upstream records the sending lane's actor id.
 
 ## FC-032 — a timed-out ssh command is reported as possibly still running remotely
 
@@ -2942,136 +3099,6 @@ logged`, and the peer `success`/`failure` variants of
 - Retirement condition: upstream attributes patch files to the tools that
   wrote them, or scopes undo and redo to the session's own writes.
 
-## FC-036 — a no-fork checkpoint writer whose delta would overflow forks the parent view
-
-- Status: active
-- Canonical owner: fork `main` checkpoint writer — `deltaTooLarge` in
-  `tryStartCheckpointWriter` in `packages/cli/src/session/checkpoint.ts`
-- Observable contract:
-  - With `checkpoint.fork: false` the writer is sent its own system prompt and
-    the messages since the last checkpoint. When the caller reports the
-    parent's usable window (`context`) and that delta's estimate exceeds it,
-    the writer forks the parent's view instead, exactly as under
-    `fork: true` (including FC-021's choice between the full and the parent's
-    own view). The log line is `writer delta exceeds the usable window,
-    forking the parent view`.
-  - Without `context`, or with a delta that fits, `fork: false` is unchanged.
-  - When the writer runs on its own configured model (FC-047), the delta is
-    checked against that model's usable window instead; the fork still runs on
-    the parent's model.
-- Motivation: the delta has no other bound. With no checkpoint yet, or after
-  writers kept failing, it grows past the window; every writer then overflows,
-  the watermark never advances, and the delta keeps growing. The parent's view
-  is what the parent runs with, so it fits. A 2026-11-04 A/B on real models
-  (local report) found `fork: false` writers cost 1/4–1/2 of `fork: true` with
-  equal or better checkpoints, so the fallback is what lets `fork: false` be
-  used safely.
-- Upstream relationship: upstream has no fallback for either mode. Fork fix of
-  shared code; `dev/compat` inherits it unchanged.
-- Watch surfaces: the file above; FC-021's view projection in the same
-  function; `estimateViewTokens`; the `context` passed by
-  `packages/cli/src/session/prune.ts`.
-- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
-  "fork:false forks the parent view only when the delta exceeds the usable
-  window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
-  writer's own). Dropping the fallback fails the first case.
-- Retirement condition: upstream bounds the no-fork writer's delta.
-## FC-037 — a sender can read what became of its actor message
-
-- Status: active
-- Canonical owner: fork `main` actor tool — `receipt` action, `receiptOf` and
-  `inputModel` in `packages/cli/src/tool/actor.ts`, documented in `actor.txt`
-- Observable contract:
-  - `actor receipt` with `inbox_id` (as returned by `send`) returns that
-    message's receipt: receiver session and actor, sender, `state`, `outcome`,
-    `consumed`, `delivered`, `error`, times, and `model` (provider, model,
-    variant of the receiver's input message). Without `inbox_id` it returns the
-    20 newest messages the calling session sent.
-  - Only the sending or the receiving session can read a receipt; any other
-    session gets `not found`, as for a missing id.
-  - `actor send`'s result carries the same `model`: the model and variant the
-    receiver's lane will run the message with (for example a lane at `max`).
-  - Subagents keep `send` only; `receipt` is for primary agents.
-- Motivation: a coordinating agent had no tool to learn whether a dispatch was
-  delivered, ran, or settled `never_ran`; its re-dispatch rule (resend once when
-  `never_ran` and not consumed) could only be run by reading SQLite directly.
-  It also could not see that a dispatched task would run at the receiver's
-  inherited variant.
-- Upstream relationship: upstream has no receipt query. Fork addition;
-  `dev/compat` inherits it and adds `delivery` to cross-session send results.
-- Watch surfaces: the file above; `InboxTable` in
-  `packages/cli/src/inbox/inbox.sql.ts`; the actor `operation` union, which
-  FC-025 flattens for grok.
-- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a sender reads
-  what became of its message and the model the receiver runs it with" (send
-  result and receipt carry the receiver's `max` variant; sender and receiver
-  read the receipt, a third session does not; the list holds only sent rows; a
-  `never_ran` settlement reads as such). Reading receipts without the session
-  check, listing by receiver, dropping either `model`, or deriving `consumed`
-  from the state each fails it. `registry-toolset.test.ts` and
-  `actor.test.ts` cover the advertised action list and the flattened union.
-- Retirement condition: upstream exposes inbox receipts to the actor tool.
-
-## FC-038 — a keyed actor send is delivered once, and requeued only if it went unseen
-
-- Status: active
-- Canonical owner: fork `main` — `idempotency_key` of the `send` action in
-  `packages/cli/src/tool/actor.ts`, `reviveUnseen` in `AcceptInput`
-  (`packages/cli/src/inbox/schema.ts`) and `unseen`/the revive branch in
-  `writeAccept` (`packages/cli/src/inbox/controller.ts`), passed through
-  `Inbox.accept`
-- Observable contract:
-  - `actor send` with `idempotency_key` stores
-    `actor-send:<sender session>:<sender actor>:<receiver actor>:<key>`, so
-    neither senders nor a receiver session's actors share keys, and none
-    collide with message-id keys.
-  - A send whose key already names a row returns that row
-    (`deduplicated: true`) while it is accepted, claimed, consumed, or ended
-    and seen.
-  - "Unseen" means: `cancelled` or settled `never_ran`, not consumed, and no
-    assistant message on the receiving lane minted after the row ended —
-    compared by message ID (`MessageID.ascendingAfter`), whose time is the
-    wall clock at minting, because `time_created` may be bumped past the clock
-    and is not comparable with `time_updated`. (An ended,
-    unconsumed input still renders on the lane's next turn, so a later turn
-    counts as having seen it.) Such a row is queued again in the same
-    transaction — the same row and the same user message, back to `accepted`
-    in the current epoch — and the result reports `revived: true`. No second
-    message is created, so nothing has to be hidden from rendering and receipt
-    GC cannot expose a duplicate.
-  - `deduplicated` and `revived` come from the accept transaction itself, so
-    overlapping keyed sends each report what their own transaction did.
-  - The revived message is the original one; a resend's own content is not
-    used.
-  - Sends without a key, and every other keyed accept (prompt receipts keyed
-    by message id), keep reusing the existing row unconditionally.
-- Motivation: a coordinator's rule "resend once with the same task key when a
-  message settled `never_ran` unconsumed" needs a key that dedupes live and
-  delivered messages but not lost ones; the store reused any keyed row, so a
-  resend after a loss was silently dropped.
-- Upstream relationship: upstream does not expose keys to the actor tool. Fork
-  addition; `dev/compat` inherits it.
-- Watch surfaces: the files above; `MessageV2.renderedOrder` and
-  `SessionCheckpoint.withEndedInputs` (ended unconsumed inputs render on the
-  next turn — the reason for the "unseen" rule); the partial unique index on
-  `(receiver_session_id, idempotency_key)`; `actor.txt`.
-- Tests/evidence: `packages/cli/test/tool/actor-send.test.ts` "a keyed resend
-  is a no-op until the earlier message ended unseen, then goes out once"
-  (queued, consumed and seen-`never_ran` resends dedupe; another sender's key
-  and another receiver actor are separate; an unseen `never_ran` is revived
-  once as the same message; unkeyed sends always go out);
-  `packages/cli/test/inbox/queue-sync.test.ts` "a keyed resend revives the
-  unseen row instead of adding a message, and only while unseen" (one sync
-  delta, one user message, a later user input does not count as seen, an
-  assistant minted in the tick the input ended does not either even with a
-  bumped `time_created`, a later assistant turn does, replay rebuilds the same
-  state). Disabling the revive,
-  reviving consumed rows, ignoring the later turn or its role, comparing
-  `time_created` instead of the minted ID, shifting the ID bound by a tick, reviving into a
-  stale epoch, dropping the sync record or either result flag, or not passing
-  `reviveUnseen` from the tool each fails one of them.
-- Retirement condition: upstream offers keyed actor sends with these semantics.
-
 ## FC-039 — a terminal reply split across stdin reads is not typed into the prompt
 
 - Status: active
@@ -3210,195 +3237,6 @@ logged`, and the peer `success`/`failure` variants of
   settle after one request.
 - Retirement condition: upstream distinguishes the compaction trigger from a
   provider overflow for agents without context management.
-
-## FC-043 — `actor cancel` returns while a stuck actor is still stopping
-
-- Status: active
-- Canonical owner: fork `main` — the `cancel` branch and `actorCancelWait` in
-  `packages/cli/src/tool/actor.ts` (uses `awaitWithHardTimeout`,
-  `packages/cli/src/effect/hard-timeout.ts`)
-- Observable contract:
-  - `actor cancel` waits up to 30 s for `Actor.cancel` to finish. If the actor
-    has not stopped by then (a tool call in uninterruptible work), it returns
-    `status: "cancelling"` with a hint; the cancellation keeps running in a
-    detached fiber and completes when that work ends.
-  - Otherwise the result is unchanged (`status: "cancelled"`).
-- Motivation: `Actor.cancel` joins the actor's execution inside an
-  uninterruptible region. A subagent whose `exec` never settled made the
-  coordinator's `actor cancel` hang for 92 minutes; 15 inputs (user prompt,
-  cron fires, notifications) queued behind it until the process was restarted.
-- Upstream relationship: upstream's tool waits for cancellation without bound.
-  Fork fix; `dev/compat` inherits it. The workflow runtime already bounds its
-  own child cancels the same way (`RECLAIM_ACTOR_TIMEOUT_MS`).
-- Watch surfaces: `tool/actor.ts` cancel branch; `Actor.cancel` in
-  `packages/cli/src/actor/spawn.ts`; `actor.txt`.
-- Tests/evidence: `packages/cli/test/tool/actor-cancel.test.ts` "cancel returns
-  cancelling when the actor does not stop in time, and keeps cancelling"
-  (an uninterruptible cancel; fails or hangs with an unbounded wait or a plain
-  `Effect.timeout`, which cannot interrupt it).
-- Retirement condition: upstream bounds the tool-level cancel wait, or
-  `Actor.cancel` no longer joins uninterruptibly.
-
-## FC-044 — the checkpoint writer returns only `.output` from exec calls
-
-- Status: active
-- Canonical owner: fork `main` — `checkpointWriterExecReturn`, placed after the
-  tool contract in `composeWriterPrompt` (`packages/cli/src/session/checkpoint.ts`)
-- Observable contract:
-  - The writer task tells a writer that calls its tools through `exec` (the
-    Codex harness, where `apply_patch` replaces edit/write) to return each
-    result's `.output`, not the whole result.
-  - Patch application is unchanged: the tool writes the file inside the call;
-    the `exec` return value is only what reaches the model. A patch that does
-    not apply still throws, so the `exec` reports `code_error`.
-- Motivation: a returned `apply_patch` result carries `metadata.diff` and
-  `files[].patch` — since upstream `eb8ee1cd` the untrimmed full diff. In one
-  coordinator session 97% of the writers' exec output (≈405K characters over 16
-  writers) was these echoes, re-read on every later writer step.
-- Upstream relationship: upstream's writer prompt has no such instruction.
-  Fork addition; `dev/compat` inherits it.
-- Watch surfaces: `composeWriterPrompt`; `tool/tool-script.ts` return
-  serialization; `tool/apply_patch.ts` result shape.
-- Tests/evidence: `packages/cli/test/session/checkpoint-child-session.test.ts`
-  (the writer task carries the instruction; fails without it);
-  `packages/cli/test/tool/exec-apply-patch-output.test.ts` (`testEffect`, the
-  registry's real `apply_patch` through `exec`: the patch applies and returns the
-  summary without `@@`, the full result does carry the diff, and a patch that
-  does not apply fails the `exec` and leaves the file unchanged).
-- Retirement condition: `exec` stops serializing nested tool metadata into the
-  return value, or the writer stops calling tools through `exec`.
-
-## FC-045 — an over-budget checkpoint is trimmed once, to a target below the budget
-
-- Status: active
-- Canonical owner: fork `main` — `EXTRACTION_TARGET_RATIO` and the targets in
-  `buildExtractionReflection` (`packages/cli/src/session/checkpoint-retry.ts`);
-  `tokens`/`budget` on budget violations (`packages/cli/src/session/checkpoint-validator.ts`)
-- Observable contract:
-  - The `EXTRACTION REQUIRED` re-prompt lists, for every over-budget file and
-    section, its size, a target of 85% of the budget and the amount to move
-    (tokens and about 4 characters per token), and asks for one pass to that
-    target rather than to just under the budget.
-  - Validation is unchanged: a file passes at its budget, as before. Only the
-    prompt aims lower, so no new re-prompt is introduced.
-  - A violation without measured sizes keeps the previous prompt.
-- Motivation: from 2026-11-01 to 2026-11-05, 146 of 345 writers were re-prompted
-  to extract; 47 needed two or three rounds. The median overshoot was 113
-  tokens, each round removed a median of 167 tokens, and the file was left a
-  median of 53 tokens over after a round — writers trimmed to the line, so the
-  next round or the next writer went over again. Steps after the first
-  extraction prompt cost 8% of all writer spend, and the prompts carried 4.5M
-  characters of file text.
-- Upstream relationship: upstream's prompt names the overshoot only. Fork
-  addition; `dev/compat` inherits it.
-- Watch surfaces: the files above; `plugin/checkpoint-splitover.ts` (the
-  re-prompt loop); `CHECKPOINT_SECTION_BUDGETS`/`MEMORY_SECTION_BUDGETS`.
-- Tests/evidence: `packages/cli/test/session/checkpoint-retry.test.ts`
-  "buildExtractionReflection targets (FC-045)" (targets for a file and a
-  section from real validators; the plain prompt for a violation without
-  sizes). Setting the ratio to 1, dropping the targets, or not carrying the
-  sizes on either violation kind fails it.
-- Retirement condition: upstream aims extraction below the budget, or the
-  writer stops being re-prompted for budget overruns.
-
-## FC-046 — a rebuilt context does not start a writer until it has grown
-
-- Status: active
-- Canonical owner: fork `main` checkpoint ladder in
-  `packages/cli/src/session/prune.ts` (`fireCheckpoints`, `reachedTokens`)
-- Observable contract:
-  - The first time the ladder is evaluated after a rebuild or compaction
-    boundary — in the process that rebuilt, after `resetThresholds`, or in a
-    restarted process — every threshold below the baseline plus one ladder step
-    counts as crossed. The baseline is the context size of the main lane's first
-    finished step after the boundary. Until that step exists the ladder is not
-    initialized at all — the tokens passed in can be the compaction summary's —
-    and the next evaluation starts over. The step is the ladder's last spacing,
-    the same step the final-threshold recovery gate uses.
-  - A compaction summary is not a step of the lane: its usage is the
-    summarization request over the old history. The walk skips it, both for
-    the baseline and for FC-028's reached size.
-  - The final threshold is never skipped, so a rebuilt context already past it
-    starts a writer at once.
-  - Sessions without a boundary, and thresholds a succeeded writer covers
-    (FC-028), behave as before.
-- Motivation: a rebuild loads the checkpoint, the verbatim tail after its
-  watermark and the system prompt, so the rebuilt context starts part full. With
-  the `30%/55%/75%` ladder on a 272K window it started at 58K–75K, and the 30%
-  threshold (73K) fired a few steps later. In one 12-hour window a session
-  rebuilt 20 times and ran 58 writers; 20 started before the context had grown
-  by 15% of the window since the rebuild, about 30% of that session's writer spend.
-  The next writer covers that tail anyway, because the checkpoint still ends at
-  the old watermark. On a 400K window a 144K rebuilt context would cross the
-  first threshold (108K) on its first step.
-- Upstream relationship: upstream re-arms the whole ladder on a rebuild. Fork
-  fix of shared code; `dev/compat` inherits it unchanged.
-- Watch surfaces: `fireCheckpoints`, `reachedTokens` and `resetThresholds` in
-  `prune.ts`; `isBoundaryUser` in `packages/cli/src/session/tail-digest.ts`;
-  `lastSucceededWriterStart` in `packages/cli/src/session/checkpoint.ts` (the
-  walk only runs when a writer has succeeded).
-- Tests/evidence: `packages/cli/test/session/prune.test.ts`
-  "SessionPrune.fireCheckpoints after a process restart": "after a rebuild,
-  thresholds within one step of the rebuilt context do not fire", "after a
-  rebuild, the final threshold is never skipped", "after a restart, the baseline
-  is the first step after the rebuild, not the current one", "a rebuild in the
-  running process skips the thresholds near the rebuilt context", "after a
-  compaction, the summary's usage is not the baseline", "before the first step
-  after a compaction, the ladder waits instead of measuring the summary",
-  "without a rebuild, the first threshold of a new session still fires", and the
-  updated
-  "a rebuild after the last writer arms the whole ladder again". Disabling the
-  skip, measuring from the current size, letting the final threshold be
-  skipped, counting the compaction summary, or falling back to the passed-in
-  size before the first step each fails a case.
-- Retirement condition: upstream measures the ladder from the rebuilt context.
-
-## FC-047 — a no-fork checkpoint writer can run on its own configured model
-
-- Status: active
-- Canonical owner: fork `main` — `ownModel`/`writerModel` in
-  `tryStartCheckpointWriter` (`packages/cli/src/session/checkpoint.ts`); the
-  late-bound resolver in `packages/cli/src/session/agent-model-ref.ts`,
-  registered by `SessionPrompt.layer` (`resolveAgentModel` in
-  `packages/cli/src/session/prompt.ts`)
-- Observable contract:
-  - With `checkpoint.fork: false`, a model configured as
-    `agent."checkpoint-writer".model` (a literal `provider/model` or a
-    model-group name) is the writer's model: its system prompt and tools are
-    built for that model, and the actor is spawned on it. The log line is
-    `checkpoint writer runs on its configured model`.
-  - The FC-036 delta check uses that model's usable window. When the delta does
-    not fit, the writer forks the parent's view on the parent's model, as
-    before. A window of 0 (the model publishes no limit) bounds nothing, as in
-    `isOverflow`.
-  - With `checkpoint.fork: true`, without a configured writer model, or when it
-    does not resolve (logged as `agent model resolution failed`), the writer runs
-    on the parent's model as before.
-- Motivation: the writer always ran on the parent's model, because the parent
-  model passed to the spawn wins over the agent's configured one. A no-fork
-  writer reads no parent prefix, so it gains nothing from sharing the parent's
-  model and cache. On a session with an expensive coordinator model, writers
-  were about a third of the session's spend (58 writers in 12 hours). This lets
-  a cheaper model be measured and chosen for the writer alone.
-- Upstream relationship: upstream spawns the writer on the parent's model. Fork
-  addition; `dev/compat` inherits it.
-- Watch surfaces: `tryStartCheckpointWriter` and the no-fork `buildPrefix` call
-  in `checkpoint.ts`; `registerPrefixCapture`/`registerAgentModelResolver` in
-  `SessionPrompt.layer`; `Agent` config merge of `model`/`modelRef`;
-  `Provider.resolveModelRef`.
-- Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
-  "fork:false runs the writer on its configured model", "fork:false checks the
-  delta against the configured model's window and forks the parent view on the
-  parent's model", "fork:false treats a writer model with an unknown window as
-  unbounded", "fork:true keeps the parent's model even when the writer names
-  one" and "fork:false without a configured writer model keeps the parent's
-  model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
-  real resolver through `AppLayer` (literal model, model group, none,
-  unresolvable). Always using the parent's model, checking against the parent's
-  window, treating an unknown window as 0, dropping group resolution, or letting
-  a resolution failure escape each fails a case.
-- Retirement condition: upstream lets the writer run on its own configured
-  model.
 
 ## FC-048 — a step's summary costs the same on a long session as on a new one
 
@@ -3636,3 +3474,87 @@ logged`, and the peer `success`/`failure` variants of
   `build=<head>+dirty built_at=...` with uncommitted changes and
   `build=<head>` after commit.
 - Retirement condition: upstream embeds and logs the build commit.
+
+## FC-053 — a config provider on `@ai-sdk/xai` uses Responses, and an OpenAI-compatible reasoning model keeps its effort
+
+- Status: active
+- Canonical owner: fork `main` — the loader fallback in `Provider.getLanguage`
+  (`packages/cli/src/provider/provider.ts`), and `sdkKey` and
+  `providerOptions` in `packages/cli/src/provider/transform.ts`
+- Origin: compat DC-PROVIDER-001 (added 2026-10-12, corrected 2026-10-13),
+  promoted to shared `main` on 2026-11-07. DC-PROVIDER-001 retires when this
+  entry propagates into `dev/compat`.
+- Base: upstream keys custom model loaders by provider ID, and only the
+  built-in `xai` provider calls `sdk.responses()`. A provider defined in config
+  with `npm: "@ai-sdk/xai"` has no loader, so `getLanguage` falls back to
+  `sdk.languageModel()`, which `@ai-sdk/xai` maps to Chat. `sdkKey()` has no
+  `@ai-sdk/xai` entry either, so `providerOptions()` files that provider's
+  options (`reasoningEffort`, `store: false`, `promptCacheKey`) under its own
+  provider ID; the SDK reads only `xai` and silently drops them. Separately,
+  `@ai-sdk/openai` infers reasoning from OpenAI model names, so a compatible
+  endpoint's reasoning model such as Grok loses its effort and summary unless
+  `forceReasoning` is set.
+- Observable contract:
+  - A model without a provider-ID loader whose `api.npm` is `@ai-sdk/xai` gets
+    `sdk.responses()`. `sdkKey("@ai-sdk/xai")` returns `xai`, which also remaps
+    stored message `providerOptions` from the provider ID to `xai`, so replayed
+    reasoning items keep their `itemId` and encrypted content.
+  - `providerOptions()` defaults `forceReasoning: true` for `@ai-sdk/openai`
+    models declaring `capabilities.reasoning`, on ordinary and small-model
+    requests alike. Explicit options override the default, so
+    `forceReasoning: false` opts out. This enables the SDK's
+    encrypted-reasoning include with `store: false`. Non-reasoning models and
+    other SDKs keep their previous options. No model-name heuristic or
+    gateway-specific rule is involved.
+- Delta: for the built-in `xai` provider the key already equals its ID and its
+  loader already selects Responses, so nothing changes there. Every other
+  provider ID on `@ai-sdk/xai` moves from Chat to Responses, and its configured
+  options reach the SDK. The bundled `@ai-sdk/xai` (3.0.102) Responses option
+  schema accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
+  `xhigh` variant on such a provider fails SDK validation instead of being
+  dropped. That enum is an adapter limit, not a model one: Grok 4.7 and 4.6
+  support `xhigh` (<https://docs.x.ai/developers/model-capabilities/text/reasoning>),
+  which an OpenAI-compatible gateway can carry through `@ai-sdk/openai`.
+- Boundaries: providers with their own loader are unchanged. The reasoning
+  default is scoped to `@ai-sdk/openai` and reasoning-capable models.
+  Strict-tool defaults are unchanged; `@ai-sdk/xai` stays out of
+  `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
+  FC-025 matches Grok on its model id, so its `operation` flattening applies
+  on either SDK and is independent of this routing.
+- Upstream relationship: upstream `3a12665a` has neither the `@ai-sdk/xai`
+  fallback nor the `sdkKey` entry nor the reasoning default. Fork fix;
+  `dev/compat` inherits it.
+- Watch surfaces: `Provider.getLanguage` and its `modelLoaders`, `sdkKey`,
+  `providerOptions` and the `EXPLICIT_NON_STRICT_TOOL_SDKS` notes, and any
+  `@ai-sdk/xai` or `@ai-sdk/openai` version bump.
+- Tests/evidence: `packages/cli/test/provider/xai-config-provider.test.ts`
+  runs `Provider.Service` through the Effect harness against a local gateway
+  and captures the actual request: one POST to `<baseURL>/responses` with
+  `reasoning.effort`, `store: false` and the encrypted-reasoning include.
+  Removing the `getLanguage` fallback fails it on `xai.chat`; removing the
+  `xai` SDK key fails it on the missing reasoning options.
+  `packages/cli/test/provider/transform.test.ts` ("uses xai key for a config
+  provider on @ai-sdk/xai") and
+  `packages/cli/test/provider/openai-responses-reasoning.test.ts` serialize
+  real SDK requests for six Grok ids (including `xhigh` for 4.7 and 4.6),
+  small-model requests, the explicit opt-out and the SDK scope. On compat, eight
+  isolated CLI runs across six Grok ids through a local capture proxy verified
+  streamed `/v1/responses`, unchanged effort values, session cache keys,
+  `store: false` and exact encrypted-reasoning replay on tool loops; these
+  prove transport and replay, not an effect of effort on reasoning volume.
+  2026-11-07 port to `main` (local Bun 1.4.3, CI pins 1.3.14; every ambient
+  `MIMOCODE_*` variable removed): with only the tests ported, eight cases fail
+  against main's source (the wire test, the `xai` key, five reasoning-model
+  serializations and the SDK-scope case); with the source ported, the four
+  provider files pass 391 tests with 0 failures. Compat's Promise-style copy
+  of the wire test in `provider.test.ts` became the Effect-harness file above
+  and is removed from compat on propagation. `test/provider` (without the three
+  refresh suites CI runs in their own processes), the whole
+  `test/session/prompt-effect.test.ts` (221 pass, 2 skip) and eight other
+  `@ai-sdk/openai` consumer suites show no new failure. The only remaining
+  failures, two `provider-event-timeout` keep-alive cases, fail identically on
+  main's unchanged source on that host. Package typecheck passes.
+- Retirement condition: upstream routes config providers by SDK package,
+  through an equivalent fallback or a declared per-provider API choice, and
+  honors declared reasoning capabilities for compatible models without relying
+  solely on model names. The regression cases stay in either case.

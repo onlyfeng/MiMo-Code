@@ -3384,3 +3384,236 @@ Selected upstream `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`; main behavior `251
 | 2026-11-06 | `3a12665a9e27789b04dc7529d4ce0c10128e9ad8` | Documentation-only; runtime/test snapshots unchanged from starting main `9550108ac29870628a3a9c5c1d6b920259651eea` and compat `4ad2d84daa40c2e787becbdc081f06369cbaed78` | unchanged | unchanged | Incoming: one commit, `SECURITY.md`, +19/-7 | N=1 C01: document non-interactive trust and approvals; retain FC-012 private reporting and FD-001 invocation correlation. No runtime or DC change; final exact-SHA CI and publication in the [execution receipt](upstream-sync-2026-11-06.md). |
 
 2026-11-06 acceptance receipt: C01 published as main `28a37f58e4b665ab63173b7348c35efb201a15a2` and compat `6f85fdb7e70dd4f4953f016a3d6a5d809e2e96da`. Both passed exact-SHA lint/typecheck/test, including compat Windows. This receipt changes only documentation; final descendants require non-doc tree equality. See [the complete six-run record](upstream-sync-2026-11-06.md#successful-exact-sha-acceptance-2026-11-06).
+
+## 2026-11-07 registry normalization
+
+Moved verbatim from the live registries at main `1426cc09f63bccc5a4c52a8fdc4f5a845fc1328d`. This is a
+pure registry commit: it changes no decision, behavior reference, owner or
+retirement condition, and advances neither the `Upstream` nor the
+`Main behavior` reference.
+
+### Synchronization summaries (35)
+
+Both `upstream-deviations.md` and `fork-capabilities.md` carried these
+summaries in their review records. The text below is the FD registry's
+wording; the 3 summaries whose FC wording differed follow it.
+
+Previous synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
+
+Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 now owns the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+
+Previous synchronization: [2026-10-31 full sync through `7bc7dc3a`](upstream-sync-2026-10-31.md), C01–C03 (N=3). Restricted hosts (the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`) accept MCP, LSP and formatter configuration only from `MIMOCODE_CONFIG_DIR` files and host-injected content; rejected sections are dropped per source before merging, and Claude imports from rejected sources are skipped before FC-004's startup controls apply. Legacy TOML is reread on every load and migrates only inside the host boundary; `Config.update` persists the stored file. Ordinary Bun CLI behavior is unchanged. No FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-30 full sync through `ee0a93b5`](upstream-sync-2026-10-30.md), C01–C03 (N=3). Adopt failure/interruption cleanup and boundary-model selection for compaction inside the owned atomic summarize path; success requires a persisted projection even after cancellation. Remove the Xiaomi search sidecar and implicit provider search exposure; Exa is opt-in, while compat retains configured native/fallback routes. Adopt search MCP and DuckDuckGo fallback guidance. FD-005 retires only its sidecar clause; no FD/FC/DC owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-29 full sync through `3e92e0d8`](upstream-sync-2026-10-29-3e92e0d8.md), C01–C04 (N=4). Adopt caller-supplied session ids bounded to the engine's `ses_` shape, and Xiaomi API/token-plan credentials stored under their own providers with every family consumer (WebSearch sidecar and gate, in-house ordering, large-model defaults, header, logout, login/fallback model, voice credentials) resolving `xiaomi-*`. FD-005's resolved sidecar API id and FC-016 voice ownership are unchanged; compat adapts only the DC-WEBSEARCH-001 sidecar gate and key. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-28 quota sync through `ebd06ee2`](upstream-sync-2026-10-28-ebd06ee2.md), C01 (N=1). Exact provider quota exhaustion is terminal while ordinary429 keeps bounded request and persistent live-step budgets. Host precedence, scope isolation and compat native-search handling remain. No owner retires; validation/publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-28 full sync through `24546043`](upstream-sync-2026-10-28.md), C01 (N=1). Adopt config-driven always-direct MCP exposure and regenerate SDK. Retain GPT hidden direct calls, legacy frozen direct calls, request authorization and frozen schema gates. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-27 full sync through `d85f3553`](upstream-sync-2026-10-27.md), four capabilities. Adopt Windows system-tar extraction and its installation fixtures, explicit MiMo npm wire coverage, README downloads/screenshots and the lighter two-by-two global concurrency regression. Keep the existing workflow resume budget and compat overlays. Windows CI now runs the existing launcher suite so the new PATH-shadow regression executes on actual Windows. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating, drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids to `@ai-sdk/openai-compatible` (FD-005 text updated), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-10-22 full sync through `e37f2c2d`](upstream-sync-2026-10-22.md), five capabilities. Adopt persistent pure-empty retries and durable retry records with chronological cleanup, legacy normalization, receipt identity and bounded reasoning continuation. Append rebuild boundaries after the tail with explicit placement identity, preserve backdated chronological windows and receipt-aware writer/turn history, retain atomic recovery settlement, and adopt stable Compose Next anchors and upstream spec provenance. Validation and publication are tracked in the linked record. No owner retires.
+
+Previous synchronization: [2026-10-21 full sync through `8fd65328`](upstream-sync-2026-10-21-786151b3.md), seven capabilities. Adopt the per-context-window memory paths reminder in place of the per-message recall reminder. File tools still resolve the legacy `{current_session_id}` placeholder for system prompts already frozen in prefix snapshots (FC-002). Adopt the lossless session database: no turn-end prune, `stripNonEssential`, `SessionCompaction.prune`, rebuild microcompact, `compaction.prune` or pressure levels (FC-015). Adopt the empty-turn part reset into the fork's pure-empty branch (FC-009), the YAML-safe Compose Next source contract (FC-011) and the `mimo-v2.6-flash` voice control default (FC-016). Terminal HTTP403/HTTP402 refusals now stop before the capacity heuristic (FC-013); upstream added this while the sync was in progress. The merged and reverted session error settlement is tree-neutral. `hasActorTool` still fails closed (FC-001) and `auto_worktree` stays (FC-007). No FD/FC owner retires. Publication evidence is in the linked record.
+
+Previous synchronization: [2026-10-20/21 full sync through `cf8c09d5`](upstream-sync-2026-10-20-c1527b91.md), four capabilities. Contain non-interrupt prefix-capture defects around the complete frozen capture, count settled writer Deferreds from the drain snapshot, and retain the fork's scoped non-empty capture fixture. FD-009 still rejects empty captures before child creation; no shared owner retires. All four decisions are published on both branches; the live addition adopts Compose Next unavailable-input, spec source and finish guidance unchanged. Main `7e3b1ae7` and compat `6a02b3d3` each pass exact-SHA lint/typecheck/test, including compat Windows. The linked record contains all six runs; final docs-only descendant equivalence, refreshed tips/ancestry and scoped cleanup are checked in the execution receipt.
+
+Previous synchronization: [2026-10-20 full sync through `4e58a801`](upstream-sync-2026-10-20.md), thirteen capabilities. Adopt durable input receipts and lane scheduling in place of the old send/drain and async-only queue contracts; preserve atomic admission, task/provenance, recovery, approval and generation ownership. Adapt sticky MCP deferral through a fixed dispatcher and frozen prefix, queue-aware checkpoint/post/goal views, and pure-empty retry policy while retaining bounded reasoning-only continuation. No active FD/FC owner retires. All thirteen decisions have propagated into compat, preserving eleven DC owners and fifty-two production overlay paths. The linked record retains the failed compat OpenAPI CI and the successful corrected-source lint/typecheck/test runs on both branches, including compat Windows. Final docs-only descendant equivalence and scoped cleanup are checked in the execution receipt.
+
+Previous synchronization: [2026-10-16 sync through `bf0563dd`](upstream-sync-2026-10-16.md), one capability. Adopt verbatim media replay after overflow compaction into FC-001's atomic replay commit, extend FC-009's attachment envelope with file-URL local paths and stable `[Image: <name>]`/`[PDF: <name>]` marker identity, keep the caller `system` on attachment-only messages, and adopt unique `mimo-paste-*` paste names.
+
+Previous synchronization: [2026-10-15 sync through `496bb8cb`](upstream-sync-2026-10-15.md), one capability. Adapt upstream's inbox wake ownership into FC-001's single `Inbox.wake`: an `Instance.claim` taken before receiver preparation lasts until the wake fiber exits, so ordinary disposal cannot close the scope holding a scheduled wake. Upstream's abort-immediately-after-send case is not adopted; FC-001 records the pre-existing asynchronous-admission gap it exposes.
+
+Previous synchronization: [2026-10-14 sync through `6ba6a625`](upstream-sync-2026-10-14-6ba6a625.md), one capability. Adopt replay-safe history migrations and the replay-safe `migrate()` wrapper unchanged; the two edited shipped migrations are upstream-owned and journal-name selection keeps applied databases from rerunning them.
+
+Previous synchronization: [2026-10-14 full sync](upstream-sync-2026-10-14.md), twelve capabilities from two upstream commits through `e27e87de`. Adopt native Windows memory path parsing unchanged. Adopt the settled tool execution boundary (`ToolPart.execution`, `inputComplete`, transactional tool-part writes, `ToolSettlement` for plugin, registry, MCP and exec results), request-phase `session.status{retry}`, Deferred-backed `InstanceState` initialization and owned-run `awaitExit`. Adapt exact-target resume, pending-input refusal, the host execution attempt and empty-stop recovery into FC-001's settlement and continuation model without upstream's history trim; keep FD-006's exec close-abort-join and MCP harness-tag escaping (FD-005).
+
+Previous synchronization: [2026-10-13 full sync](upstream-sync-2026-10-13.md), fourteen capabilities through the user-frozen baseline `b258d28f`. Adopt MCP tool lazy loading (`MIMOCODE_MCP_TOOL_SEARCH`, deferral on by default) with FD-005's resolved harness identity and prefix-capture parity, background MCP startup with FC-004's pending imports preserved, retirement of the legacy compose agent and skills, the host-served plugin SDK (FC-006's dependency wait retires), CI tag releases with a required `GH_REPO` (FC-012), the npm FDS launcher, cron session affinity, cross-drive containment, the root script-test guard (FC-008), OpenCode Go session headers and the `history_fts.kind` index.
+
+Previous synchronization: [2026-10-10 full sync](upstream-sync-2026-10-10.md), two capabilities through `f98dcd1c`. Adopt upstream's opt-in startup import of Claude Code sessions: `MIMOCODE_ENABLE_CLAUDE_IMPORT` replaces `MIMOCODE_DISABLE_CLAUDE_IMPORT`, startup import is off by default and manual `session import-claude` is unchanged. Adopt the matching bundled `mimocode-docs` configuration entry and the closed `xlsx-official` library-choice table row. No fork owner adapts or moves.
+
+Previous synchronization: [2026-10-04 full sync](upstream-sync-2026-10-04.md), seven capabilities through `6babeb0b`. Adopt upstream's instance-preserving provider refresh: the `POST /global/provider/refresh` endpoint and v2 SDK method, the `Instance.updateIdle` admission barrier, models-only Config reload, execution claims for HTTP API operations and MCP sampling, and stale sampling-owner rejection. Adapt the refresh to keep FD-005 harness alias trust, keep FD-001's sampling approval isolation, and run the refresh suites in an FC-008 isolated job.
+
+Previous synchronization: [2026-10-02 full sync](upstream-sync-2026-10-02.md), ten capabilities through `698f0f29`. Adopt upstream's `packages/cli` and flattened `packages/sdk` layout, the removal of the private overlay, free channel, committed OpenAPI snapshot, husky and non-spec docs, the first-launch agreement and the leftover `MIMOCODE_*` renames. Keep the root test guard (FC-008), the `CLAUDE.md` link and a required release `GH_REPO` (FC-012), and FC-013's retry reference document.
+
+Previous synchronization: [2026-09-30 full sync](upstream-sync-2026-09-30.md), one capability through `336aee0e`. Adapt upstream's preparation-phase cancellation: an interrupt before stream cleanup owns the assistant persists `MessageAbortedError` and publishes the error before idle, with the fork's transactional assistant creation as the acquire step; FC-001 recovery candidacy is unchanged.
+
+Previous synchronization: [2026-09-29 full sync](upstream-sync-2026-09-29.md), seven capabilities through `87a27da5`. Adopt upstream's removal of the unmaintained web/desktop/cloud packages and the turbo-free typecheck toolchain; retire fork edits to the deleted files and FC-008's enterprise fixture; keep fork experiment scripts in the package typecheck project.
+
+Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared approval, Actor and workflow lifetime contracts.
+
+Previous synchronization: [2026-09-26 full sync](upstream-sync-2026-09-26.md), six capabilities through `849ca66c`. Remove unpublished duplicate-call cancellation and TaskGate re-entry, adopt interactive subagent asks and host error classification, and retain shared fork approval, Actor lifecycle and scoped retry contracts.
+
+Previous synchronization: [2026-09-24 full sync](upstream-sync-2026-09-24.md), three capabilities through `2b993ac9`. Retire Orchestrator and tool-specific shell invocation, preserve local image attachment paths, and keep the shared fork permission, Actor, frozen context and request-authority contracts. FC-018 retires with its parser; the remaining FD/FC owners stay active.
+
+Previous synchronization: [2026-09-23 full sync](upstream-sync-2026-09-23.md), three capabilities through `a273d345`. It removed PascalCase model-facing projection and tool-call flooding middleware, and introduced the now-retired same-step exact duplicate cancellation. Canonical tool IDs, FIFO and failure cascade, fork replay boundaries and hidden-MCP/native Actor snapshot identity remain active.
+
+Previous synchronization: [2026-09-22 full sync](upstream-sync-2026-09-22.md), ten capabilities through `1579e7d9`. It introduced the now-retired flooding and PascalCase projection alongside still-active failure cascade, runtime-local Actor status, inbox/TUI projections, automatic title tool choice, the 0.1.15 release, MCP confirmation elicitation and opt-in host model transport.
+
+Previous synchronization: [2026-09-21 full sync](upstream-sync-2026-09-21.md), eleven capabilities through `47920126`. Adopt concise prompts, explicit external skill roots, retired directory loaders, FIFO tool admission, generation-owned MCP connections and selected-session question cleanup. Adapt trailing-user recovery and cancellation to atomic admission, retained frozen Actor context, durable inbox progress and bounded retry scopes. No shared owner retires or moves.
+
+Previous synchronization: [2026-09-19 full sync](upstream-sync-2026-09-19.md), two capabilities through `50cd7139`. Adopt optional uncommitted-change hints and adapt main-resume subagent cascade to retained Actor ownership, preserving atomic message admission and compat boundaries.
+
+Previous synchronization: [2026-09-18 full sync](upstream-sync-2026-09-18.md), one capability through `2bda1794`. Adopt same-session Actor cancellation and durable quiet terminal notifications, preserving FC-001 generation ownership and all compat boundaries.
+
+Previous synchronization: [2026-09-17 full sync](upstream-sync-2026-09-17.md), eleven capabilities through `4cb859dd`. Retain FC-007 opt-in notices and FC-013 bounded scope budgets, adopt image routing, stable reminders and atomic empty-residue recovery.
+
+Previous synchronization: exact catalog tool names at `26aa00fc`; the [single-capability review](upstream-sync-2026-09-15-26aa00fc.md) records lookup, GitLab and nested MCP dispatch, retained parameter normalization, authoritative checkpoint guidance, and validation. Explicit advertised adapters and existing request/permission boundaries remain intact.
+
+Previous synchronization: gateway error aliases at `b4cc11cd`, accepted on main through PR #128; propagation and exact-SHA validation are recorded in the [follow-up record](audit-followups-2026-09-15.md). This classification affects error messages only; it grants no harness, tool or provider authorization.
+
+Previous synchronization: 2026-09-15, the specified upstream range
+`6fbb1732..5198ff54` (21 commits, 17 non-merge). The
+[capability inventory](upstream-sync-2026-09-15-5198ff54.md) records six incoming
+capabilities and the separately approved actor lifecycle follow-up. FC-003 is
+retired by an explicit behavior decision. FD-009 retains the system frozen-context
+contract; only compat exposes full-context model creation. History adopts uniform
+content and one-time resumable migration, with a bounded SQLite NUL projection
+correction. FD-004's previously accepted upstream behaviors remain unchanged.
+This is alignment to the selected SHA, not to newer upstream commits.
+Earlier per-owner behavior references remain historical where this range does
+not change their implementation. The preceding review is retained in the
+[shared history](fork-registry-history.md).
+
+### FC registry wording of 3 summaries
+
+Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
+
+Previous synchronization: [2026-10-26 full sync through `0fe2cbbc`](upstream-sync-2026-10-26.md), five capabilities. Adopt the `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` opt-in for the `claude-code`, `codex` and `grok-build` skills in place of PATH gating (FC-005, FC-011), drop the `claude` PATH probe from the environment prompt, take each model's declared npm instead of pinning MiMo-named ids (FD-005), and adopt the 0.1.16 release, the external FDS default and tag releases without a unit-test rerun (FC-012). The fork's PPTX guidance regression stays beside upstream's agent-CLI skill tests. No owner retires. Validation and publication are tracked in the linked record.
+
+Previous synchronization: [2026-09-27 full sync](upstream-sync-2026-09-27.md), four capabilities through `454521a8`. Adopt deferred instance refresh, workspace-bound cron storage, interactive Bash request ownership and UTC cron guidance; retain shared Actor, workflow and approval contracts.
+
+### Retired FC entries
+
+FC-003 retired on 2026-09-15 and FC-018 on 2026-09-24. Their identifiers stay
+unused in `fork-capabilities.md`.
+
+#### FC-003 — actor- and instance-scoped read-before-edit state (retired)
+
+- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1282` (scope read state by actor and instance, opened 2026-06-24) is closed as obsolete; upstream removed the read-before-edit gate it scoped, which is the retirement recorded below. Its head branch `codex/upstream-read-state-scope` is deleted from the fork.
+
+- Status: retired by the approved 2026-09-15 behavior change.
+- Scope: shared main and inherited dev/compat.
+- Decision: adopt upstream `99a5f9eb` through `5198ff54`, removing the
+  read-before-edit gate itself. Actor/instance-scoped evidence no longer has a
+  consumer. This supersedes the former requirement for equivalent upstream
+  scoping; it does not claim that upstream supplied that implementation.
+- Retired surfaces: `src/tool/read-state.ts`, Read's `markFileRead` calls,
+  Edit/NotebookEdit's prior-read checks, and scope-only read-state tests.
+- Retained behavior: permission and path checks, current-file edit matching,
+  stable current-session path resolution, finite media types, and attachment
+  refusal/compression. The latter assertions remain in `test/tool/read.test.ts`;
+  path, no-prior-read, and self-written-file edits remain in `test/tool/edit.test.ts`.
+- Historical isolation and attachment-gate reviews remain in the shared registry
+  history. Reintroducing a gate would require a new explicit behavior decision.
+
+#### FC-018 — explicit empty values in actor shell flags (retired)
+
+- Status: retired on 2026-09-24 by upstream `2b993ac9`: the tool shell invocation format, parser and flag mappings were removed. JSON Actor schema validation remains active under FD-006, but this shell-only hardening has no runtime surface. The former contract and evidence below are historical.
+- Former status: active
+- Canonical owner: fork `main` actor shell argument parsing
+- Observable contract: `extractNamedFlags` rejects an explicitly empty value in
+  both flag forms. `--flag=` already failed; `--flag ""` now fails the same way
+  with `actor: --<flag> requires a value`. A recognized flag is therefore either
+  absent or carries a non-empty value, so the verb mappings' truthiness spreads
+  cannot silently drop a value the caller supplied. Non-empty values, position-
+  independent flag scanning, heredoc prompts and unrelated tokens are unchanged.
+- Upstream relationship: upstream accepts the empty space-form value and then
+  drops the selector while mapping, so `actor run explore "d" "p" --model ""`
+  launches at the default model instead of reporting the empty value. This is
+  fork hardening of shared code, not a rejected upstream decision.
+- Watch surfaces: `packages/cli/src/tool/actor.ts` — `extractNamedFlags`
+  and the run/spawn/send flag mappings that consume its result.
+- Tests/evidence: `packages/cli/test/tool/actor.shell.test.ts`, "an
+  explicitly empty flag value fails like a missing one", covering `--model ""`,
+  `--model=""`, `--task ""` and `--command ""`. Reverting the guard to the
+  `undefined`-only check fails that case and nothing else.
+- Propagation note: propagated to `dev/compat` on 2026-09-16 through merge
+  `e3920adbbb91f44959a6110a48d6ca5cb1f5087d` with adaptation
+  `452123b7b4941ef0f605961fd9e8f8a23a079462`. That branch previously kept an
+  explicitly empty `--variant ""` for its strict schema; the shared parser now
+  rejects it at parse time, its shell test asserts that error, and DC-ACTOR-002
+  records the parse-time contract.
+- Retirement condition: upstream rejects empty values in both flag forms, or the
+  flag mappings stop depending on truthiness so an empty value reaches schema
+  validation with an equivalent error.
+
+### FC-008 historical bullets
+
+The three 2026-09-12 to 2026-09-14 actor quarantine snapshots were superseded
+by FC-008's 2026-09-15 quarantine closure, which still lives in the entry. The
+two model API bullets describe the implementation FD-004 retired on
+2026-09-14. The 2026-09-15 retired-fixture inventory was superseded the same
+day by FC-008's tooling-convergence bullet, which records the removal of those
+three no-caller fixtures; none of the three paths exists at main `1426cc09`.
+
+- 2026-09-14 TP-R14-12 unquarantined: `[TP-R14-12] undeliverable terminal
+notification is logged` runs again, and the rationale it was quarantined under
+  — upstream behaviour the fork's actor pipeline does not yet reproduce — was
+  wrong. The case asserts upstream's log wording, `actor terminal notification
+failed`; the fork's own inbox send in `spawn.ts` logged
+  `actor inbox notification failed`, a line upstream does not have. Aligning
+  that one message is the whole fix, mutation-checked: with the fork wording the
+  case fails its assertion, with upstream's it passes. #107 had passed it from
+  its first commit (CI run 34693434562, shard 4/4), which the 2026-09-13
+  follow-up below did not record. At that snapshot two cases stayed quarantined, both reducing to
+  the postStop publish-ordering product decision recorded there: `[TP-R14-07]
+postStop LLM failure preserves the successful result with a warning` and
+  `inbox waits for the entire spawn execution before starting a continuation`.
+
+- 2026-09-13 quarantine follow-up: the peer `success`/`failure` continuation
+  envelope-count cases are fixed and unskipped; see the FC-001 terminal-publisher
+  entry. At that snapshot three cases stayed quarantined, all `skip`ped in place with their
+  inline rationale:
+  `[TP-R14-07] postStop LLM failure preserves the successful result with a
+warning` (`test/plugin/actor-hooks.test.ts`) and `inbox waits for the entire
+spawn execution before starting a continuation`
+  (`test/actor/execution-integration.test.ts`) both reduce to one blocker — the
+  fork publishes an actor's outcome and leaves it idle _before_ postStop, where
+  upstream publishes after — and the second additionally needs a spawn-side
+  execution claim held across the whole spawn. What holds these open is a
+  product decision, not a test conflict: publishing after postStop means a
+  spawn's caller, and a blocking `actor run`, resolves only once postStop
+  finishes. Exactly one fork case reads on the early publish, `delivered no-op
+cancel preserves forkContext while postStop is still running`, and only in how
+  it sequences its awaits.
+  `[TP-R14-12] undeliverable terminal notification is logged`
+  (`test/actor/cancel-notification.test.ts`) is independent of that ordering and
+  is untouched by this PR.
+
+- 2026-09-12 quarantine: four upstream-new actor cases are skipped in place with
+  an inline rationale — `inbox waits for the entire spawn execution before
+starting a continuation`, `[TP-R14-12] undeliverable terminal notification is
+logged`, and the peer `success`/`failure` variants of
+  `[TP-R14-08] [TP-R14-09] ... continuation settles ... once`. They assert
+  upstream behavior the fork's actor pipeline does not yet reproduce after the
+  FC-001 wake-routing retirement. Each is `skip`ped rather than deleted so the
+  gap stays visible, and is tracked for a dedicated follow-up fork PR; no
+  upstream PR is opened. The peer `cancelled` variant and both subagent variants
+  run normally.
+
+- 2026-09-07 model API lifecycle review (historical; retired by FD-004 on
+  2026-09-14): token verification precedes body and
+  bootstrap; both optional API modes use bounded uploads and cancellation-aware
+  instance waiting. SSE retains admission and its instance lease until EOF or
+  producer cancellation acknowledgement, including cancellation at response
+  handoff. Bun cancellation uses an explicit SSE error and close; unrelated
+  shared bootstrap producers remain owned by their original callers. CLI stop
+  closes admission before instance disposal. Direct and native HTTP regressions
+  cover these seams without changing the ordinary actor/workflow lifecycle.
+
+- Selected model API evidence (historical tests of the retired implementation): CLI test children have a 20-second execution
+  bound, unconditional kill and a bounded two-second drain on cleanup; multi-child
+  cases declare their total 60-second budget. Image/SDK cancellation and Node
+  checks cover adjacent API resources, not a rerun of all workflow lifecycle tests.
+
+- 2026-09-15 retired-fixture inventory: `test/fixture/llm-server-cli-child.ts`,
+  `test/fixture/model-api-default-child.ts` and `test/llm-server/tokens-child.ts`
+  have no current callers in the tracked tree. They retain former model/audio
+  API or token-helper assumptions and do not count as executed validation of
+  today's capability API. Delete or deliberately reconnect them in a focused
+  cleanup; the current actor/quarantine result is unaffected.
