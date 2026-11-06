@@ -2152,7 +2152,11 @@ export type ProviderConfig = {
      * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.
      */
     chunkTimeout?: number
-    [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
+    /**
+     * Timeout in milliseconds between streamed SSE events for this provider. SSE comments such as gateway keep-alives do not count, so a stalled upstream held open by heartbeats is aborted. Off unless set.
+     */
+    eventTimeout?: number
+    [key: string]: unknown | string | boolean | number | false | number | false | number | number | undefined
   }
   /**
    * Provider-specific overrides for retry budgets

@@ -120,6 +120,10 @@ export class Info extends Schema.Class<Info>("ProviderConfig")({
           description:
             "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
         }),
+        eventTimeout: Schema.optional(PositiveInt).annotate({
+          description:
+            "Timeout in milliseconds between streamed SSE events for this provider. SSE comments such as gateway keep-alives do not count, so a stalled upstream held open by heartbeats is aborted. Off unless set.",
+        }),
       }),
       [Schema.Record(Schema.String, Schema.Any)],
     ),
