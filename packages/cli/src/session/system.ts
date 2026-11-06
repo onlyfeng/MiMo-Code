@@ -24,6 +24,7 @@ import { Skill } from "@/skill"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "@/util/text-truncate"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { type HarnessMode, resolveHarnessMode } from "@/tool/gpt"
+import { GitStatusPrompt } from "./git-status"
 
 function capAvailableSkills(text: string) {
   return capUtf8TextByBytes(text, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")
@@ -108,7 +109,7 @@ export const layer = Layer.effect(
               git.branch(instance.directory),
               git.defaultBranch(instance.directory),
               git.run(["config", "user.name"], { cwd: instance.directory }),
-              git.run(["status", "--short", "--untracked-files=all"], { cwd: instance.directory }),
+              git.run(GitStatusPrompt.ARGS, { cwd: instance.directory }),
               git.run(["log", "-2", "--oneline", "--decorate=no"], { cwd: instance.directory }),
             ],
             { concurrency: 5 },
@@ -132,7 +133,7 @@ export const layer = Layer.effect(
             `Git user: ${renderGitResult(user, "(unknown)")}`,
             ``,
             `Status:`,
-            renderGitResult(status, project.vcs === "git" ? "(clean)" : "(unavailable)"),
+            GitStatusPrompt.cap(renderGitResult(status, project.vcs === "git" ? "(clean)" : "(unavailable)")),
             ``,
             `Recent commits:`,
             renderGitResult(commits),

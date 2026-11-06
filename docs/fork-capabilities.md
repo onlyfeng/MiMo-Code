@@ -168,6 +168,7 @@ not change their implementation. The preceding review is retained in the
 | FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
 | FC-048 | Step-finish summaries: snapshot anchors from the part table, one summary per session, patch budgets      | Fork fix of upstream session summary                             | Keep a step's summary cost flat on long sessions and large worktrees                     |
 | FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
+| FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3470,6 +3471,12 @@ logged`, and the peer `success`/`failure` variants of
     event timeout`.
   - `chunkTimeout` keeps its meaning: any bytes, comments included, reset it.
     Without `eventTimeout` nothing changes.
+  - Every wrapped stream keeps a content-free tally (`SseStats` in
+    `packages/cli/src/provider/sse-stats.ts`). One that ends normally after
+    120 s, or times out, fails to read or is cancelled after 60 s, logs `SSE
+    stream summary` once with `outcome`, `durationMs`, `bytes`, `comments`, the
+    count per `event:` name, the count per `data:` `type` and
+    `sinceLastEventMs`. Payload text is never logged.
 - Motivation: a gateway sent `:` and `: keep-alive` comments while its upstream
   stalled. They reset the 45 s `chunkTimeout` on every comment, so one request
   waited 900 s until the gateway itself failed the stream
@@ -3477,10 +3484,14 @@ logged`, and the peer `success`/`failure` variants of
   still for 15 minutes.
 - Known limits: off unless configured, because a reasoning model may think for
   minutes behind heartbeats; choose a value above the longest silent reasoning
-  the provider shows.
+  the provider shows. A gateway that keeps a stalled stream alive with
+  non-comment lines (a named keepalive event, a typed `data:` line) also resets
+  the event timer; the stream summary is there to show which it sends. One such
+  900 s stall recurred with `eventTimeout` set, after the comment-only case was
+  verified against the shipped binary.
 - Upstream relationship: upstream has only the byte-level chunk timeout. Fork
   addition; `dev/compat` inherits it.
-- Watch surfaces: `wrapSSE`, the option parsing beside `chunkTimeout` and
+- Watch surfaces: `wrapSSE` and `SseStats`, the option parsing beside `chunkTimeout` and
   `headerTimeout` in `provider.ts`; the transient classification of `SSE read
   timed out` in `provider/error.ts` and `session/retry.ts`; the provider options
   schema and `packages/sdk/src/v2/gen/types.gen.ts`.
@@ -3490,8 +3501,52 @@ logged`, and the peer `success`/`failure` variants of
   "events keep resetting the event timeout across a longer stream" and "a
   keep-alive comment split across chunks is still not an event", through the
   real provider fetch wrapper and an `@ai-sdk/openai-compatible` stream from a
-  local `Bun.serve` gateway.
+  local `Bun.serve` gateway. `packages/cli/test/provider/sse-stats.test.ts`
+  covers the tally: comments split across chunks are not events, event names
+  and data types are counted over CRLF lines cut every 7 bytes without payload
+  text, and a multi-byte character split across chunks is decoded once.
   Counting comments as events, dropping the carried line state, ignoring
   `eventTimeout`, or never resetting the timer each fails a case.
 - Retirement condition: upstream bounds the time between SSE events apart from
   comments.
+
+## FC-050 — the Claude environment's git status stays small, and old oversized prefixes are rebuilt
+
+- Status: active
+- Canonical owner: fork `main` — `ARGS`, `cap` and `oversized` in
+  `packages/cli/src/session/git-status.ts`; their use in the Claude branch of
+  `SystemPrompt.environment` (`packages/cli/src/session/system.ts`) and in
+  `SessionPrefixSnapshot.get` (`packages/cli/src/session/prefix-snapshot.ts`)
+- Observable contract:
+  - The Claude environment runs `git status --short --untracked-files=normal`:
+    an untracked directory is one `?? dir/` line, not one line per file.
+  - The status is capped at `MAX_LINES` (200) lines and `MAX_CHARS` (10,000)
+    characters; when anything is left out, the last line gives the number of
+    entries omitted and points to `git status` for the full list.
+  - `SessionPrefixSnapshot.get` drops a frozen prefix whose environment status
+    section is longer than `MAX_CHARS` (one pinned before the cap) and returns
+    nothing, so the caller pins a freshly rendered prefix. The log line is
+    `dropped a frozen prefix with an oversized git status`. Prefixes without an
+    environment block are untouched.
+- Motivation: the environment listed every untracked file. One worktree put
+  86,424 lines (9.7M characters, a scratch `.tmp/`) into the fixed prefix, and
+  another 7,222 lines (1.0M characters, generated lab trees). The prefix is never
+  compacted, so every Claude request failed the local preflight with "the fixed
+  request prefix and active turn still do not fit"; three Opus subagents in one
+  afternoon failed on their first step. Retrying or a new session re-rendered the
+  same list, and a frozen prefix kept it after the worktree was cleaned.
+- Upstream relationship: upstream lists all untracked files without a limit in
+  the same prompt. Fork fix of shared code; the frozen-prefix rebuild is part of
+  the fork's prefix snapshot. `dev/compat` inherits it.
+- Watch surfaces: the Claude branch of `SystemPrompt.environment` and
+  `renderGitResult`; `SessionPrefixSnapshot.get`/`pin`/`rotate` and their callers
+  in `prompt.ts` and `compaction.ts`; the `Status:`/`Recent commits:` labels
+  `oversized` locates.
+- Tests/evidence: `packages/cli/test/session/git-status-prompt.test.ts` "an
+  untracked directory is listed once, not file by file" and "a long status is
+  capped and says how much it left out" render the environment on real git; "is
+  dropped on read so the caller pins a fresh one, and a capped one is kept"
+  reads a legacy row. Listing all untracked files, removing the cap, or never
+  treating a prefix as oversized each fails a case.
+- Retirement condition: upstream bounds the environment status and the fork no
+  longer freezes prefixes rendered before that.
