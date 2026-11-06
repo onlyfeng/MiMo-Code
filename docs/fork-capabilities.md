@@ -168,6 +168,7 @@ not change their implementation. The preceding review is retained in the
 | FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
 | FC-048 | Step-finish summaries: snapshot anchors from the part table, one summary per session, patch budgets      | Fork fix of upstream session summary                             | Keep a step's summary cost flat on long sessions and large worktrees                     |
 | FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
+| FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3495,3 +3496,44 @@ logged`, and the peer `success`/`failure` variants of
   `eventTimeout`, or never resetting the timer each fails a case.
 - Retirement condition: upstream bounds the time between SSE events apart from
   comments.
+
+## FC-050 — the Claude environment's git status stays small, and old oversized prefixes are rebuilt
+
+- Status: active
+- Canonical owner: fork `main` — `ARGS`, `cap` and `oversized` in
+  `packages/cli/src/session/git-status.ts`; their use in the Claude branch of
+  `SystemPrompt.environment` (`packages/cli/src/session/system.ts`) and in
+  `SessionPrefixSnapshot.get` (`packages/cli/src/session/prefix-snapshot.ts`)
+- Observable contract:
+  - The Claude environment runs `git status --short --untracked-files=normal`:
+    an untracked directory is one `?? dir/` line, not one line per file.
+  - The status is capped at `MAX_LINES` (200) lines and `MAX_CHARS` (10,000)
+    characters; when anything is left out, the last line gives the number of
+    entries omitted and points to `git status` for the full list.
+  - `SessionPrefixSnapshot.get` drops a frozen prefix whose environment status
+    section is longer than `MAX_CHARS` (one pinned before the cap) and returns
+    nothing, so the caller pins a freshly rendered prefix. The log line is
+    `dropped a frozen prefix with an oversized git status`. Prefixes without an
+    environment block are untouched.
+- Motivation: the environment listed every untracked file. One worktree put
+  86,424 lines (9.7M characters, a scratch `.tmp/`) into the fixed prefix, and
+  another 7,222 lines (1.0M characters, generated lab trees). The prefix is never
+  compacted, so every Claude request failed the local preflight with "the fixed
+  request prefix and active turn still do not fit"; three Opus subagents in one
+  afternoon failed on their first step. Retrying or a new session re-rendered the
+  same list, and a frozen prefix kept it after the worktree was cleaned.
+- Upstream relationship: upstream lists all untracked files without a limit in
+  the same prompt. Fork fix of shared code; the frozen-prefix rebuild is part of
+  the fork's prefix snapshot. `dev/compat` inherits it.
+- Watch surfaces: the Claude branch of `SystemPrompt.environment` and
+  `renderGitResult`; `SessionPrefixSnapshot.get`/`pin`/`rotate` and their callers
+  in `prompt.ts` and `compaction.ts`; the `Status:`/`Recent commits:` labels
+  `oversized` locates.
+- Tests/evidence: `packages/cli/test/session/git-status-prompt.test.ts` "an
+  untracked directory is listed once, not file by file" and "a long status is
+  capped and says how much it left out" render the environment on real git; "is
+  dropped on read so the caller pins a fresh one, and a capped one is kept"
+  reads a legacy row. Listing all untracked files, removing the cap, or never
+  treating a prefix as oversized each fails a case.
+- Retirement condition: upstream bounds the environment status and the fork no
+  longer freezes prefixes rendered before that.
