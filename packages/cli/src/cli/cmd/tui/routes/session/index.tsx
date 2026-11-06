@@ -714,15 +714,19 @@ export function Session() {
         dialog.clear()
         // Put the message back for editing only once the revert has landed, so
         // it cannot be resent while the revert is still restoring files (FC-051).
+        const sessionID = route.sessionID
+        const draft = JSON.stringify(prompt?.current ?? null)
         const reverted = await sdk.client.session
           .revert({
-            sessionID: route.sessionID,
+            sessionID,
             messageID: message.id,
           })
           .then((res) => !res.error)
           .catch(() => false)
-        if (!reverted) return
+        if (!reverted || route.sessionID !== sessionID) return
         toBottom()
+        // A draft typed while the revert ran wins over the reverted message.
+        if (JSON.stringify(prompt?.current ?? null) !== draft) return
         const parts = sync.data.part[message.id]
         prompt?.set(
           parts.reduce(

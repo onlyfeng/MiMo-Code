@@ -3569,7 +3569,9 @@ logged`, and the peer `success`/`failure` variants of
   - A revert asked for while an admission runs waits for it, then applies (or
     fails busy if the turn has started).
   - TUI undo puts the reverted message back into the prompt only after the
-    revert returns without an error.
+    revert returns without an error, and only if the prompt and the open
+    session are unchanged since undo started: a draft typed while the revert
+    ran is kept.
 - Motivation: undo's revert ran fire-and-forget while the TUI put the message
   straight back into the prompt. On a long session the revert took 11.85 s; the
   message was resent meanwhile, its admission saw no revert to commit, and its
