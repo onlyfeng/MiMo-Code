@@ -170,6 +170,7 @@ not change their implementation. The preceding review is retained in the
 | FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
 | FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
 | FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
+| FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3593,3 +3594,45 @@ logged`, and the peer `success`/`failure` variants of
   Removing the gate from `preparePrompt` or from `revert` each fails a case.
 - Retirement condition: upstream orders reverts and prompt admissions per
   session.
+
+## FC-052 — a running process logs the commit it was built from
+
+- Status: active
+- Canonical owner: fork `main` — `readBuildProvenance` in
+  `script/build-provenance.ts`; the `MIMOCODE_BUILD` define in
+  `packages/cli/script/build.ts` and `build-node.ts`; `InstallationBuild` and
+  `describeBuild` in `packages/cli/src/installation/version.ts`; the `mimocode`
+  startup log line in `packages/cli/src/index.ts`
+- Observable contract:
+  - Each build records the full commit SHA (`MIMOCODE_COMMIT_SHA` when git is
+    unavailable), whether the build had local changes, and when it started.
+    Local changes are a changed tracked file anywhere (staged or not) or an
+    untracked, non-ignored file under `packages/`; they are read before
+    `generate.ts` writes its ignored snapshot.
+  - The startup line in `dev-main-<pid>-*.log` (or the non-dev log) carries
+    `build=<sha>`, `<sha>+dirty`, `<sha>+dirty-unknown` when git could not
+    tell, or `source` when running unbuilt, and `built_at=<ISO time>`.
+  - `--version`, `MIMOCODE_VERSION`, the user agent and session `version` are
+    unchanged; the provenance is not added to environment info or telemetry.
+- Motivation: a set of long-running sessions was restarted on a local build
+  and the binary was rebuilt within the hour. `--version` printed `local` for
+  both, so which commit each process ran, and whether a fix had reached it,
+  could only be inferred from reflog times and the inode `lsof` showed.
+- Known limits: `+dirty` does not say what changed, and untracked files
+  outside `packages/` are not counted.
+- Upstream relationship: upstream defines only the version and channel. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: the `define` blocks of both build scripts and the order of
+  `generate.ts` in them; `Script.version` in `script/meta.ts`; the startup log
+  call in `index.ts` middleware.
+- Tests/evidence: `script/build-provenance.test.ts` builds real git fixtures:
+  "a clean checkout reports its full commit and is not dirty", "a changed
+  tracked file anywhere makes the build dirty, staged or not", "an untracked
+  file under packages/ makes the build dirty; one elsewhere or ignored does
+  not" and "outside git, the commit falls back to MIMOCODE_COMMIT_SHA and
+  dirtiness is unknown". `packages/cli/test/installation/build-provenance.test.ts`
+  covers the log token and that a source run has no build. A `build:local`
+  binary started under a temporary HOME logged
+  `build=<head>+dirty built_at=...` with uncommitted changes and
+  `build=<head>` after commit.
+- Retirement condition: upstream embeds and logs the build commit.
