@@ -1531,6 +1531,8 @@ own source list remains the complete watch surface.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
+
 - 2026-11-04 CI correction: the main-lane and subagent hanging-retry steer fixtures now release their deliberately pending HTTP reply only during cleanup, before awaiting the scripted server stop. Client abort does not cancel a JavaScript fetch-handler Promise. Production lifecycle behavior, all steer assertions and original test timeouts are unchanged; see the [sync evidence](upstream-sync-2026-11-04.md).
 
 - 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
@@ -1755,11 +1757,10 @@ own source list remains the complete watch surface.
   cites the successful exact-SHA runs of an ancestor whose tree outside `docs/`
   is identical. The `test` workflow retains `.test.tsx`
   discovery, assigns all ordinary inputs by a stable path hash, runs enabled
-  worktree cases in normal shards, and runs the real stdio observer and HTTP
-  actor recovery suites in separate processes. The former requires the real
-  transport despite process-global mocks; the latter requires the live
-  AppRuntime prefix captor despite scoped unit-test prompt layers. No case is
-  skipped by this isolation. Each shard and dedicated job removes its prior report and
+  worktree cases and the HTTP actor recovery and subagent-resume suites in
+  normal shards, and runs the real stdio observer suite in a separate process,
+  because it requires the real transport despite process-global mocks. No case
+  is skipped by this isolation. Each shard and dedicated job removes its prior report and
   then requires strict XML/count consistency, at least one executed case, a
   non-empty suite for every reported file, and exact expected-file coverage.
   The explicit Linux zero-case inputs are still loaded by Bun and excluded only
