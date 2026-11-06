@@ -33,6 +33,16 @@ export type FileDiff = z.infer<typeof FileDiff>
 const log = Log.create({ service: "snapshot" })
 const prune = "7.days"
 const limit = 2 * 1024 * 1024
+/**
+ * Patch budgets for `diffFull`. A row whose before and after blobs together
+ * exceed the per-file budget, or that no longer fits the total, keeps its
+ * status and counts but carries an empty patch, as a binary row does. Patches
+ * are full-context, so their size follows the files' size, not the change's:
+ * one session diff over generated trees reached 7,000 files and 278 MB, and a
+ * summary rebuilds it on every step.
+ */
+export const PATCH_FILE_BYTES = 1024 * 1024
+export const PATCH_TOTAL_BYTES = 8 * 1024 * 1024
 const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
 const cfg = ["-c", "core.autocrlf=false", ...core]
 const quote = [...cfg, "-c", "core.quotepath=false"]
@@ -648,6 +658,34 @@ export const layer: Layer.Layer<
                 ),
               )
 
+              // `git cat-file --batch-check` sizes for `<tree>:<path>` refs; undefined
+              // when the batch fails, which leaves every row patched as before.
+              const blobSizes = Effect.fnUntraced(
+                function* (refs: string[]) {
+                  const sizes = new Map<string, number>()
+                  if (!refs.length) return sizes
+                  const proc = ChildProcess.make("git", [...cfg, ...args(["cat-file", "--batch-check"])], {
+                    cwd: state.directory,
+                    extendEnv: true,
+                    stdin: Stream.make(new TextEncoder().encode(refs.join("\n") + "\n")),
+                  })
+                  const handle = yield* spawner.spawn(proc)
+                  const [out] = yield* Effect.all(
+                    [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
+                    { concurrency: 2 },
+                  )
+                  if ((yield* handle.exitCode) !== 0) return undefined
+                  const lines = out.split("\n")
+                  for (const [index, ref] of refs.entries()) {
+                    const match = lines[index]?.match(/^[0-9a-f]+ blob (\d+)$/)
+                    if (match) sizes.set(ref, Number(match[1]))
+                  }
+                  return sizes
+                },
+                Effect.scoped,
+                Effect.catch(() => Effect.succeed<Map<string, number> | undefined>(undefined)),
+              )
+
               const result: FileDiff[] = []
               const status = new Map<string, "added" | "deleted" | "modified">()
 
@@ -699,15 +737,48 @@ export const layer: Layer.Layer<
                 rows.push(...filtered)
               }
 
+              // Blob sizes decide which rows get a patch before any content is read.
+              const sized = rows.filter((row) => !row.binary)
+              const sizes = yield* blobSizes(
+                sized.flatMap((row) => [
+                  ...(row.status === "added" ? [] : [`${from}:${row.file}`]),
+                  ...(row.status === "deleted" ? [] : [`${to}:${row.file}`]),
+                ]),
+              )
+              const patched = new Set<string>()
+              let budget = PATCH_TOTAL_BYTES
+              for (const row of sized) {
+                const bytes = (sizes?.get(`${from}:${row.file}`) ?? 0) + (sizes?.get(`${to}:${row.file}`) ?? 0)
+                if (sizes && (bytes > PATCH_FILE_BYTES || bytes > budget)) continue
+                budget -= bytes
+                patched.add(row.file)
+              }
+              if (patched.size < sized.length) {
+                log.info("snapshot diff past its patch budget; rows without patches keep their counts", {
+                  rows: rows.length,
+                  patched: patched.size,
+                })
+              }
+
               const step = 100
               const patch = (file: string, before: string, after: string) =>
                 formatPatch(structuredPatch(file, file, before, after, "", "", { context: Number.MAX_SAFE_INTEGER }))
 
               for (let i = 0; i < rows.length; i += step) {
                 const run = rows.slice(i, i + step)
-                const text = yield* load(run)
+                const text = yield* load(run.filter((row) => patched.has(row.file)))
 
                 for (const row of run) {
+                  if (!row.binary && !patched.has(row.file)) {
+                    result.push({
+                      file: row.file,
+                      patch: "",
+                      additions: row.additions,
+                      deletions: row.deletions,
+                      status: row.status,
+                    })
+                    continue
+                  }
                   const hit = text?.get(row.file) ?? { before: "", after: "" }
                   const [before, after] = row.binary ? ["", ""] : text ? [hit.before, hit.after] : yield* show(row)
                   result.push({

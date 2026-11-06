@@ -1,6 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { evalScript } from "../../src/workflow/sandbox"
 
+// Timers and listeners the sandbox itself creates. The spies see every
+// setTimeout in the process, and an earlier test's background loop (an inbox
+// poller, a retry schedule) can schedule one while a case runs; only a timer
+// whose creation stack passes through the sandbox module counts.
+const fromSandbox = () => /src[\\/]workflow[\\/]sandbox\.ts/.test(new Error().stack ?? "")
+
 function sandboxResources() {
   const controller = new AbortController()
   const timers = new Set<unknown>()
@@ -15,7 +21,7 @@ function sandboxResources() {
         timers.delete(timer)
         fn(...args)
       }, ms)
-      timers.add(timer)
+      if (fromSandbox()) timers.add(timer)
       return timer
     }) as typeof setTimeout),
     spyOn(globalThis, "clearTimeout").mockImplementation((timer) => {
@@ -51,10 +57,16 @@ describe("Sandbox active cancellation", () => {
       deadlineMs: 5_000,
     })
     await entered.promise
+    // The parked guest holds the sandbox's pump and deadline timers.
+    expect(resources.timers.size).toBeGreaterThan(0)
+    // A timer from outside the sandbox, as another test's background loop
+    // would schedule, is not the sandbox's to release.
+    const foreign = setTimeout(() => {}, 5_000)
     resources.controller.abort(reason)
     await expect(result).rejects.toBe(reason)
     expect(resources.timers.size).toBe(0)
     expect(resources.listeners.size).toBe(0)
+    clearTimeout(foreign)
     expect(await evalScript("return 'after abort'", {})).toBe("after abort")
   }, 10_000)
 
