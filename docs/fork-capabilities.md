@@ -164,6 +164,7 @@ not change their implementation. The preceding review is retained in the
 | FC-045 | Checkpoint extraction prompt targets 85% of each budget                                                   | Fork addition to upstream writer retry                           | Trim once, with room, instead of a hundred tokens per re-prompt                          |
 | FC-046 | Checkpoint ladder after a rebuild: thresholds within one step of the rebuilt context                      | Fork fix of upstream threshold state                             | Start the first writer after the context has grown; never skip the final threshold      |
 | FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
+| FC-048 | Step-finish summaries: snapshot anchors from the part table, one summary per session, patch budgets      | Fork fix of upstream session summary                             | Keep a step's summary cost flat on long sessions and large worktrees                     |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3390,3 +3391,58 @@ logged`, and the peer `success`/`failure` variants of
   a resolution failure escape each fails a case.
 - Retirement condition: upstream lets the writer run on its own configured
   model.
+
+## FC-048 — a step's summary costs the same on a long session as on a new one
+
+- Status: active
+- Canonical owner: fork `main` — `anchor`, `summarizeSession`, `summarizeTurn`
+  and the per-session queue in `summarize`
+  (`packages/cli/src/session/summary.ts`); `PATCH_FILE_BYTES`,
+  `PATCH_TOTAL_BYTES` and the blob-size pass in `diffFull`
+  (`packages/cli/src/snapshot/index.ts`)
+- Observable contract:
+  - `SessionSummary.summarize` reads the snapshots that bound its diffs from the
+    part table: the session diff runs from the first step-start to the last
+    step-finish carrying a snapshot in the main slice, and a turn's diff from the
+    first to the last of the assistants answering that user message. These are
+    the snapshots the hydrated slice yields, without hydrating it.
+  - One summary runs per session at a time. A request that arrives while one
+    runs is queued; the running summary makes one more pass for every queued
+    message and then frees the slot. The call that only queued returns at once.
+  - In `diffFull`, a row whose before and after blobs together exceed
+    `PATCH_FILE_BYTES` (1 MiB), or that no longer fits `PATCH_TOTAL_BYTES`
+    (8 MiB) after earlier rows, keeps its file, status and counts but carries
+    an empty patch, as a binary row does. The log line is `snapshot diff past
+    its patch budget; rows without patches keep their counts`. When the size
+    pass fails, every row is patched as before.
+- Motivation: every step finish forks a summary. Each one hydrated the session's
+  whole main slice to find two snapshot hashes (13,433 messages, about 0.5 GB on
+  a coordinator session), and rebuilt a full-context diff from the session's
+  first snapshot. With untracked lab outputs in the worktree that diff reached
+  7,164 files and 278 MB per write, summaries overlapped, and `diffFull` held
+  the snapshot lock that the next step's snapshot waited on (26–56 s). Four
+  agents in one worktree grew to 2–12 GB each and the machine swapped.
+- Known limits: rows past the budgets show counts without patch text in the
+  session and message diff views. Revert does not read patch text; it uses patch
+  parts and snapshots.
+- Upstream relationship: upstream hydrates the slice and patches every row on
+  every step finish. Fork fix of shared code; `dev/compat` inherits it.
+- Watch surfaces: `summarize`, `computeDiff` and `diff` in `summary.ts`; the
+  `summarize` callers in `processor.ts` (step finish) and `prompt.ts` (turn
+  start); `diffFull` and `load` in `snapshot/index.ts`; the order
+  `Session.messages`/`MessageV2.page` use, which `anchor` mirrors; the
+  `message_session_time_created_id_idx` and `part_message_id_id_idx` indexes
+  the anchor queries walk.
+- Tests/evidence: `packages/cli/test/session/summary-anchors.test.ts` "the
+  session diff spans the main slice and the turn diff spans that turn's
+  answers", "a turn without a snapshot on both ends gets an empty diff" and
+  "summaries of one session run one at a time and a request made meanwhile
+  still lands"; `summary-main-slice.test.ts` keeps lanes out of both anchors;
+  `packages/cli/test/snapshot/snapshot.test.ts` "diffFull leaves out the patch
+  of a file past the per-file budget and keeps its counts", "diffFull stops
+  patching once the total budget is spent and keeps every row" and "diffFull
+  still patches a modified file whose blobs fit the budget". Taking the last
+  step-start, dropping the turn or main-slice filter, removing the queue, or
+  removing either budget each fails a case.
+- Retirement condition: upstream stops hydrating the session per step and bounds
+  its summary diffs.

@@ -2,9 +2,10 @@ import z from "zod"
 import { Effect, Layer, Context } from "effect"
 import { Bus } from "@/bus"
 import { Snapshot } from "@/snapshot"
-import { Storage } from "@/storage"
+import { Database, Storage, and, asc, desc, eq, gte, sql } from "@/storage"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
+import { MessageTable, PartTable } from "./session.sql"
 import { SessionID, MessageID } from "./schema"
 
 function unquoteGitPath(input: string) {
@@ -71,6 +72,46 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionSummary") {}
 
+/**
+ * A snapshot that bounds a summary diff, read from the part table: the first
+ * step-start or the last step-finish carrying a snapshot in the main slice,
+ * optionally narrowed to the assistants answering one user message. Rows are
+ * ordered as `Session.messages` orders them — (time_created, id), then part id —
+ * so this picks the same snapshot `computeDiff` picks from the hydrated slice,
+ * without hydrating it.
+ */
+function anchor(input: {
+  sessionID: SessionID
+  type: "step-start" | "step-finish"
+  order: "first" | "last"
+  turn?: { userID: MessageID; created: number }
+}): string | undefined {
+  const dir = input.order === "first" ? asc : desc
+  const row = Database.use((db) =>
+    db
+      .select({ snapshot: sql<string | null>`json_extract(${PartTable.data}, '$.snapshot')` })
+      .from(PartTable)
+      .innerJoin(MessageTable, eq(MessageTable.id, PartTable.message_id))
+      .where(
+        and(
+          eq(MessageTable.session_id, input.sessionID),
+          eq(MessageTable.agent_id, "main"),
+          // An answer is created after the message it answers; the bound keeps
+          // the scan on the turn instead of the session's whole history.
+          input.turn ? gte(MessageTable.time_created, input.turn.created) : undefined,
+          input.turn ? sql`json_extract(${MessageTable.data}, '$.parentID') = ${input.turn.userID}` : undefined,
+          sql`json_extract(${PartTable.data}, '$.type') = ${input.type}`,
+          sql`coalesce(json_extract(${PartTable.data}, '$.snapshot'), '') <> ''`,
+        ),
+      )
+      .orderBy(dir(MessageTable.time_created), dir(MessageTable.id), dir(PartTable.id))
+      .limit(1)
+      .get(),
+  )
+  const snapshot: string | undefined = row?.snapshot ?? undefined
+  return snapshot
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -99,36 +140,99 @@ export const layer = Layer.effect(
       return []
     })
 
-    const summarize = Effect.fn("SessionSummary.summarize")(function* (input: {
-      sessionID: SessionID
-      messageID: MessageID
-    }) {
-      const all = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
-      if (!all.length) return
+    const rangeDiff = (from: string | undefined, to: string | undefined) =>
+      from && to ? snapshot.diffFull(from, to) : Effect.succeed<Snapshot.FileDiff[]>([])
 
-      const diffs = yield* computeDiff({ messages: all })
+    // Every step finish summarizes, and used to hydrate the session's whole main
+    // slice to find two snapshot hashes. On a long-lived session that was ~0.5 GB
+    // of messages per step; the anchors now come from the part table.
+    const summarizeSession = Effect.fnUntraced(function* (sessionID: SessionID) {
+      const any = yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .select({ id: MessageTable.id })
+            .from(MessageTable)
+            .where(and(eq(MessageTable.session_id, sessionID), eq(MessageTable.agent_id, "main")))
+            .limit(1)
+            .get(),
+        ),
+      )
+      if (!any) return false
+
+      const diffs = yield* rangeDiff(
+        anchor({ sessionID, type: "step-start", order: "first" }),
+        anchor({ sessionID, type: "step-finish", order: "last" }),
+      )
       yield* sessions.setSummary({
-        sessionID: input.sessionID,
+        sessionID,
         summary: {
           additions: diffs.reduce((sum, x) => sum + x.additions, 0),
           deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
           files: diffs.length,
         },
       })
-      yield* storage.write(["session_diff", input.sessionID], diffs).pipe(Effect.ignore)
-      yield* bus.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs })
+      yield* storage.write(["session_diff", sessionID], diffs).pipe(Effect.ignore)
+      yield* bus.publish(Session.Event.Diff, { sessionID, diff: diffs })
+      return true
+    })
 
-      const messages = all.filter(
-        (m) => m.info.id === input.messageID || (m.info.role === "assistant" && m.info.parentID === input.messageID),
+    const summarizeTurn = Effect.fnUntraced(function* (sessionID: SessionID, messageID: MessageID) {
+      const target = yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .select({
+              created: MessageTable.time_created,
+              role: sql<string>`json_extract(${MessageTable.data}, '$.role')`,
+            })
+            .from(MessageTable)
+            .where(
+              and(
+                eq(MessageTable.id, messageID),
+                eq(MessageTable.session_id, sessionID),
+                eq(MessageTable.agent_id, "main"),
+              ),
+            )
+            .get(),
+        ),
       )
-      const target = messages.find((m) => m.info.id === input.messageID)
-      if (!target || target.info.role !== "user") return
-      const msgDiffs = yield* computeDiff({ messages })
+      if (!target || target.role !== "user") return
+      const turn = { userID: messageID, created: target.created }
+      const msgDiffs = yield* rangeDiff(
+        anchor({ sessionID, type: "step-start", order: "first", turn }),
+        anchor({ sessionID, type: "step-finish", order: "last", turn }),
+      )
       yield* sessions.patchMessageMetadata({
-        sessionID: input.sessionID,
-        messageID: input.messageID,
+        sessionID,
+        messageID,
         summaryDiffs: msgDiffs,
       })
+    })
+
+    // One summary per session at a time. A step finish forks a summary while the
+    // previous one may still be diffing under the snapshot lock, which the next
+    // step's snapshot waits on. A request that arrives meanwhile joins one more
+    // pass after the running one instead of running beside it.
+    const queued = new Map<SessionID, Set<MessageID>>()
+
+    const summarize = Effect.fn("SessionSummary.summarize")(function* (input: {
+      sessionID: SessionID
+      messageID: MessageID
+    }) {
+      const waiting = queued.get(input.sessionID)
+      if (waiting) {
+        waiting.add(input.messageID)
+        return
+      }
+      const pending = new Set([input.messageID])
+      queued.set(input.sessionID, pending)
+      yield* Effect.gen(function* () {
+        while (pending.size > 0) {
+          const messageIDs = [...pending]
+          pending.clear()
+          if (!(yield* summarizeSession(input.sessionID))) return
+          for (const messageID of messageIDs) yield* summarizeTurn(input.sessionID, messageID)
+        }
+      }).pipe(Effect.ensuring(Effect.sync(() => queued.delete(input.sessionID))))
     })
 
     const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
