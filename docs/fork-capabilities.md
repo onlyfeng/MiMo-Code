@@ -18,7 +18,7 @@ authority.
 - Last reviewed: 2026-11-06
 - Upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
 - Prior reviewed upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
-- Review completion: complete capability/content review (N=1); publication and exact-final-SHA CI are verified in the execution receipt. This selection changes documentation only and does not advance the historical runtime/test or bundled-guidance snapshots below.
+- Review completion: complete capability/content review (N=1); both published acceptance commits passed exact-SHA lint/typecheck/test (including compat Windows), recorded in the linked synchronization report. Final docs-only descendants require the non-doc tree-equivalence and remote/ancestry checks in the execution receipt. This content-only selection does not advance the historical runtime/test or bundled-guidance snapshots below.
 - Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
 - Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
 - Bundled guidance content: `5d728151e06bfc187e90b244a9fbd91fe4126fe6` (FC-043 adds bounded Actor cancel guidance; skill guidance from `fd04de73ced82599baac249e9cf96dfb55b9d778` remains unchanged)
