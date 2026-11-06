@@ -10,6 +10,16 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
+- Last reviewed: 2026-11-06; selected upstream `10b03cf04fe43aae89638e90570779c1e1216c5a..3a12665a9e27789b04dc7529d4ce0c10128e9ad8`.
+- Scope: C01 (N=1), non-interactive workspace trust and approval documentation, in [the shared synchronization record](upstream-sync-2026-11-06.md).
+- Starting main: `9550108ac29870628a3a9c5c1d6b920259651eea`; starting compat: `4ad2d84daa40c2e787becbdc081f06369cbaed78`; inherited main content: `28a37f58e4b665ab63173b7348c35efb201a15a2`.
+- Result: inherit SECURITY.md and shared FD/FC/history/report unchanged; preserve fork-specific private vulnerability reporting. Main owns C01 under FC-012; FD-001’s invocation-scoped approval remains intact. No runtime, test, schema, generated artifact, dependency or migration changes.
+- Override review: all twelve DC owners remain compat-owned. DC-SESSION-001 process/session ownership does not add a workspace-trust gate; DC-NET-001/002, DC-PLATFORM-001, DC-CONTEXT-001, DC-MODEL-001, DC-ACTOR-001/002, DC-TUI-001, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 retain their implementations and exit conditions. No override adapts, retires or moves.
+- Validation: whitespace, local Markdown links, identical shared documents, preserved reporting section and complete tree equality outside SECURITY.md/docs against starting compat. Content-only selection; no local runtime test pass is claimed. Historical runtime/test references remain historical.
+- Publication: final-tip lint/typecheck/test and configured Windows acceptance remain pending until confirmed in the execution receipt, together with refreshed upstream/main/compat ancestry and remote equality.
+
+## Previous review record: 10b03cf0 synchronization
+
 - Status: active; all twelve DC owners remain compat-owned. No override retires or moves. Runtime/test integration and complete exact-SHA CI are verified; final documentation-tip publication and cleanup are tracked in the shared record.
 - Last reviewed: 2026-11-04; selected upstream `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f..10b03cf04fe43aae89638e90570779c1e1216c5a`.
 - Starting main: `07ac991f73dfa73216938571660a17c54f3be916`; starting compat: `12bc737c9542ef944dbf3b62540c367fbd30d04b`.
