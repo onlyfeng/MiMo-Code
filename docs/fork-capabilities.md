@@ -3571,7 +3571,8 @@ logged`, and the peer `success`/`failure` variants of
   - TUI undo puts the reverted message back into the prompt only after the
     revert returns without an error, and only if the prompt and the open
     session are unchanged since undo started: a draft typed while the revert
-    ran is kept.
+    ran is kept. The message is read before the revert; if another prompt
+    committed the revert away meanwhile, it is not brought back.
 - Motivation: undo's revert ran fire-and-forget while the TUI put the message
   straight back into the prompt. On a long session the revert took 11.85 s; the
   message was resent meanwhile, its admission saw no revert to commit, and its
