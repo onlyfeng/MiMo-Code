@@ -3526,10 +3526,12 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Watch surfaces: `Provider.getLanguage` and its `modelLoaders`, `sdkKey`,
   `providerOptions` and the `EXPLICIT_NON_STRICT_TOOL_SDKS` notes, and any
   `@ai-sdk/xai` or `@ai-sdk/openai` version bump.
-- Tests/evidence: `packages/cli/test/provider/provider.test.ts` ("config
-  provider on @ai-sdk/xai sends Responses requests with its provider options")
-  captures the actual request: one POST to `<baseURL>/responses` with
+- Tests/evidence: `packages/cli/test/provider/xai-config-provider.test.ts`
+  runs `Provider.Service` through the Effect harness against a local gateway
+  and captures the actual request: one POST to `<baseURL>/responses` with
   `reasoning.effort`, `store: false` and the encrypted-reasoning include.
+  Removing the `getLanguage` fallback fails it on `xai.chat`; removing the
+  `xai` SDK key fails it on the missing reasoning options.
   `packages/cli/test/provider/transform.test.ts` ("uses xai key for a config
   provider on @ai-sdk/xai") and
   `packages/cli/test/provider/openai-responses-reasoning.test.ts` serialize
@@ -3542,8 +3544,10 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   2026-11-07 port to `main` (local Bun 1.4.3, CI pins 1.3.14; every ambient
   `MIMOCODE_*` variable removed): with only the tests ported, eight cases fail
   against main's source (the wire test, the `xai` key, five reasoning-model
-  serializations and the SDK-scope case); with the source ported, the three
-  files pass 391 tests with 0 failures. `test/provider` (without the three
+  serializations and the SDK-scope case); with the source ported, the four
+  provider files pass 391 tests with 0 failures. Compat's Promise-style copy
+  of the wire test in `provider.test.ts` became the Effect-harness file above
+  and is removed from compat on propagation. `test/provider` (without the three
   refresh suites CI runs in their own processes), the whole
   `test/session/prompt-effect.test.ts` (221 pass, 2 skip) and eight other
   `@ai-sdk/openai` consumer suites show no new failure. The only remaining
