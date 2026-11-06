@@ -48,11 +48,38 @@ installation are needed for this content-only change; no local runtime test pass
 is claimed. Historical behavior snapshots in registries remain historical.
 
 `SECURITY.md` is outside `docs/`, so this push triggers lint, typecheck and test;
-the docs-only ancestor exception does not apply. Required final-tip workflow
-results, refreshed remote SHAs and upstream/main/compat ancestry remain pending
-until obtained in the execution receipt. A previous SHA’s CI is not final-tip CI.
+the docs-only ancestor exception does not apply. Exact-SHA workflow results are recorded below. The final review-record push changes only `docs/`; its source acceptance is reused only after proving tree equality outside `docs/`.
 
 Sync completion requires all three workflows to succeed for each exact branch
 tip (compat includes its configured Windows runtime acceptance), remote equality,
 a final live upstream refresh and operation-scoped cleanup. The final execution
 receipt reports these outcomes separately from the content review above.
+
+## Successful exact-SHA acceptance (2026-11-06)
+
+| Branch | Validated commit | lint | typecheck | test |
+| --- | --- | --- | --- | --- |
+| main | `28a37f58e4b665ab63173b7348c35efb201a15a2` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163105364) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163105525) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163105411) |
+| dev/compat | `6f85fdb7e70dd4f4953f016a3d6a5d809e2e96da` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147168) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147229) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163146988) |
+
+All six runs completed successfully. Main test has nine successful jobs and its
+configured Windows skip. Compat test has ten successful jobs, including actual
+Windows runtime and launcher extraction. No same-SHA rerun was needed. Local
+checks prove private-reporting content preservation, valid local documentation
+links, whitespace correctness, identical shared documents and no changes outside
+SECURITY.md/docs against each starting branch. Active owner review: ten FD,
+forty-seven FC and twelve DC records; no owner retires.
+
+A fresh branch-only origin/upstream fetch after main acceptance still selected
+upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`, main `28a37f58` and
+compat `6f85fdb7`. Selected upstream is an ancestor of main, and main an ancestor
+of compat. Final documentation-only descendants inherit these successes only
+with `git diff --quiet <validated-commit> <final-tip> -- . ':(exclude)docs'`;
+final refresh, exact remote/local equality, ancestry and cleanup are checked in
+the execution receipt. Pure receipt commits advance no runtime/test snapshot.
+
+The original local main and compat branches were safely fast-forwarded; the
+protected `.omo/` file hashes matched before/after. The unrelated pre-existing
+worktree remains outside cleanup scope. Operation-created resources comprise one
+isolated managed checkout and two temporary sync branches; cleanup follows only
+after final publication and reachability verification.
