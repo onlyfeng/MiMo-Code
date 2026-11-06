@@ -60,9 +60,9 @@ jobs:
       # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
       # process-wide, so sharing a bun test process with it always breaks
       # these tests. It runs in the dedicated job below.
-      # HTTP recovery and subagent-resume tests also need a dedicated process: they
-      # exercises the real AppRuntime prefix captor, while focused prompt
-      # layers in unit tests replace and dispose that process-wide reference.
+      # HTTP recovery and subagent-resume tests share their shard's process: a
+      # disposed prompt layer hands the prefix captor back to the most recent
+      # live one (registerPrefixCapture), so AppRuntime keeps its captor.
       # Provider refresh suites check process-wide instance idleness, so each runs
       # in its own process away from session fixtures that leave detached
       # notification/wake work alive.
@@ -106,7 +106,6 @@ jobs:
           has_tsx=0
           has_runtime=0
           has_stdio=0
-          has_actor_recovery=0
           has_mcp_mocks=0
           has_provider_refresh=0
           files=()
@@ -142,13 +141,6 @@ jobs:
                 has_mcp_mocks=$((has_mcp_mocks + 1))
                 continue
                 ;;
-              test/server/session-actor-recovery.test.ts | \
-              test/actor/subagent-resume-cascade.test.ts | \
-              test/actor/subagent-resume-negatives.test.ts | \
-              test/actor/subagent-resume-route.integration.test.ts)
-                has_actor_recovery=$((has_actor_recovery + 1))
-                continue
-                ;;
               test/provider/refresh.test.ts | \
               test/provider/refresh-boundaries.test.ts | \
               test/provider/refresh-harness.test.ts)
@@ -169,8 +161,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || has_actor_recovery != 4 || has_mcp_mocks != 4 || has_provider_refresh != 3 )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio actor_recovery=$has_actor_recovery mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh"
+          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh"
             exit 1
           fi
 
@@ -307,45 +299,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-stdio-exit-observe
-          path: packages/cli/.artifacts/unit/junit.xml
-          if-no-files-found: error
-
-  session-actor-recovery:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
-
-      - name: Run HTTP actor recovery tests with the real application runtime
-        shell: bash
-        working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/unit
-          report=.artifacts/unit/junit.xml
-          rm -f -- "$report"
-          files=(
-            test/server/session-actor-recovery.test.ts
-            test/actor/subagent-resume-cascade.test.ts
-            test/actor/subagent-resume-negatives.test.ts
-            test/actor/subagent-resume-route.integration.test.ts
-          )
-          bun test "${files[@]}" --timeout 120000 \
-            --reporter=junit --reporter-outfile="$report"
-          test -s "$report"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
-            "$report" "${files[@]}"
-
-      - name: Upload JUnit
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: junit-session-actor-recovery
           path: packages/cli/.artifacts/unit/junit.xml
           if-no-files-found: error
 
