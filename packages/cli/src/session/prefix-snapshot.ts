@@ -9,6 +9,10 @@ import type { Permission } from "@/permission"
 import type { MessageID, SessionID } from "./schema"
 import type { SkillCatalogSnapshot } from "./skill-catalog"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
+import { GitStatusPrompt } from "./git-status"
+import { Log } from "@/util"
+
+const log = Log.create({ service: "session.prefix-snapshot" })
 
 export type NativeTool = AITool & { nativeInputSchema?: JSONSchema7 }
 
@@ -109,17 +113,16 @@ export function restoreTools(items: SessionPrefixToolSnapshot[]) {
 }
 
 export const get = Effect.fn("SessionPrefixSnapshot.get")(function* (sessionID: SessionID, key: string) {
-  return yield* Effect.sync(() =>
-    Database.use((db) =>
-      db
-        .select()
-        .from(SessionPrefixSnapshotTable)
-        .where(
-          and(eq(SessionPrefixSnapshotTable.session_id, sessionID), eq(SessionPrefixSnapshotTable.profile_key, key)),
-        )
-        .get(),
-    ),
+  const where = and(eq(SessionPrefixSnapshotTable.session_id, sessionID), eq(SessionPrefixSnapshotTable.profile_key, key))
+  const row = yield* Effect.sync(() =>
+    Database.use((db) => db.select().from(SessionPrefixSnapshotTable).where(where).get()),
   )
+  if (!row || !GitStatusPrompt.oversized(row.system)) return row
+  // Pinned before the environment status was capped: reusing it keeps every
+  // request over the window, so drop it and let the caller pin a fresh prefix.
+  yield* Effect.sync(() => Database.use((db) => db.delete(SessionPrefixSnapshotTable).where(where).run()))
+  log.warn("dropped a frozen prefix with an oversized git status", { sessionID })
+  return undefined
 })
 
 export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
