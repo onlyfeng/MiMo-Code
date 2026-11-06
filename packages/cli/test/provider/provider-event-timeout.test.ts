@@ -108,13 +108,15 @@ const stream = (script: Script, options: Record<string, number>) =>
 describe("provider SSE event timeout", () => {
   it.live("a stream that only sends keep-alive comments ends at the event timeout", () =>
     Effect.gen(function* () {
-      const result = yield* stream([{ at: 0, text: ":\n\n" }, ...keepAlives(20, 5_000, 20)], {
-        chunkTimeout: 150,
-        eventTimeout: 400,
+      // The chunk timeout is longer than the event timeout, so only the event
+      // timer can end this stream before the script runs out.
+      const result = yield* stream([{ at: 0, text: ":\n\n" }, ...keepAlives(20, 6_000, 20)], {
+        chunkTimeout: 3_000,
+        eventTimeout: 1_000,
       })
       expect(result.errors.some((message) => message.includes("SSE read timed out"))).toBe(true)
-      expect(result.elapsed).toBeGreaterThanOrEqual(350)
-      expect(result.elapsed).toBeLessThan(2_000)
+      expect(result.elapsed).toBeGreaterThanOrEqual(900)
+      expect(result.elapsed).toBeLessThan(2_900)
     }),
   )
 
@@ -122,11 +124,11 @@ describe("provider SSE event timeout", () => {
     Effect.gen(function* () {
       const result = yield* stream(
         [
-          ...keepAlives(0, 600, 20),
-          { at: 600, text: chunk("late") },
-          { at: 620, text: chunk("", "stop") + "data: [DONE]\n\n" },
+          ...keepAlives(0, 2_500, 50),
+          { at: 2_500, text: chunk("late") },
+          { at: 2_550, text: chunk("", "stop") + "data: [DONE]\n\n" },
         ],
-        { chunkTimeout: 150 },
+        { chunkTimeout: 1_000 },
       )
       expect(result.errors).toEqual([])
       expect(result.text).toBe("late")
@@ -137,10 +139,10 @@ describe("provider SSE event timeout", () => {
     Effect.gen(function* () {
       const result = yield* stream(
         [
-          ...Array.from({ length: 12 }, (_, i) => ({ at: i * 100, text: `: keep-alive\n\n${chunk(String(i % 10))}` })),
-          { at: 1_250, text: chunk("", "stop") + "data: [DONE]\n\n" },
+          ...Array.from({ length: 12 }, (_, i) => ({ at: i * 300, text: `: keep-alive\n\n${chunk(String(i % 10))}` })),
+          { at: 3_400, text: chunk("", "stop") + "data: [DONE]\n\n" },
         ],
-        { chunkTimeout: 150, eventTimeout: 400 },
+        { chunkTimeout: 3_000, eventTimeout: 1_000 },
       )
       expect(result.errors).toEqual([])
       expect(result.text).toBe("012345678901")
@@ -152,11 +154,11 @@ describe("provider SSE event timeout", () => {
       // The second half starts a chunk but not a line; only carried line state
       // tells it apart from a `data:` line.
       const result = yield* stream(
-        Array.from({ length: 250 }, (_, i) => ({ at: i * 20, text: i % 2 === 0 ? ": keep-" : "alive\n\n" })),
-        { chunkTimeout: 150, eventTimeout: 400 },
+        Array.from({ length: 300 }, (_, i) => ({ at: i * 20, text: i % 2 === 0 ? ": keep-" : "alive\n\n" })),
+        { chunkTimeout: 3_000, eventTimeout: 1_000 },
       )
       expect(result.errors.some((message) => message.includes("SSE read timed out"))).toBe(true)
-      expect(result.elapsed).toBeLessThan(2_000)
+      expect(result.elapsed).toBeLessThan(2_900)
     }),
   )
 })
