@@ -28,9 +28,13 @@ if (pinned && Bun.version !== pinned) {
   process.exit(1)
 }
 
+// Read before generate.ts runs, so its output cannot count as a local change.
+const provenance = await readBuildProvenance(path.resolve(dir, "../.."))
+
 await import("./generate.ts")
 
 import { Script } from "../../../script/meta.ts"
+import { readBuildProvenance } from "../../../script/build-provenance.ts"
 import pkg from "../package.json"
 
 const BINARY_PREFIX = "mimocode"
@@ -242,6 +246,7 @@ for (const item of targets) {
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       MIMOCODE_WORKER_PATH: workerPath,
       MIMOCODE_CHANNEL: `'${Script.channel}'`,
+      MIMOCODE_BUILD: JSON.stringify(provenance),
       MIMOCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
     },
   })

@@ -455,11 +455,11 @@ jobs:
           mkdir -p .artifacts/release-script
           report=.artifacts/release-script/junit.xml
           rm -f -- "$report"
-          bun test script/release.test.ts --timeout 120000 \
+          bun test script/release.test.ts script/build-provenance.test.ts --timeout 120000 \
             --reporter=junit --reporter-outfile="$report"
           test -s "$report"
           python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
-            "$report" script/release.test.ts
+            "$report" script/release.test.ts script/build-provenance.test.ts
 
       - name: Upload JUnit
         if: always()
