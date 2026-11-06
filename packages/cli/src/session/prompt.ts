@@ -4182,7 +4182,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     }).pipe(Effect.uninterruptible)
 
-    const preparePrompt = Effect.fn("SessionPrompt.preparePrompt")(
+    const preparePromptUnlocked = Effect.fn("SessionPrompt.preparePrompt")(
       function* (input: PromptInput, idleAtAdmission?: boolean) {
         const cancellation = yield* state.sessionExecutionSnapshot(input.sessionID, input.agentID ?? "main")
         const actorExecution = input.source === "spawn" || input.source === "hook"
@@ -4272,6 +4272,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         return { message, receiptId: promptReceiptId, receiptEpoch: promptReceiptEpoch, executionGuard }
       },
     )
+    // FC-051: an admission waits out a revert in progress, so it reads the
+    // session's revert and commits it before the new user message exists.
+    const preparePrompt = (input: PromptInput, idleAtAdmission?: boolean) =>
+      SessionRevert.admission(input.sessionID)(preparePromptUnlocked(input, idleAtAdmission))
 
     const executePrompt = (input: PromptInput, prepared: { message: MessageV2.WithParts; receiptId?: string; receiptEpoch?: number; executionGuard: Effect.Effect<void> }) =>
       Effect.gen(function* () {

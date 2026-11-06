@@ -711,14 +711,18 @@ export function Session() {
         if (status?.type !== "idle") await sdk.client.session.abort({ sessionID: route.sessionID }).catch(() => {})
         const message = activeRevertView().before.findLast((item) => item.role === "user")
         if (!message) return
-        void sdk.client.session
+        dialog.clear()
+        // Put the message back for editing only once the revert has landed, so
+        // it cannot be resent while the revert is still restoring files (FC-051).
+        const reverted = await sdk.client.session
           .revert({
             sessionID: route.sessionID,
             messageID: message.id,
           })
-          .then(() => {
-            toBottom()
-          })
+          .then((res) => !res.error)
+          .catch(() => false)
+        if (!reverted) return
+        toBottom()
         const parts = sync.data.part[message.id]
         prompt?.set(
           parts.reduce(
@@ -732,7 +736,6 @@ export function Session() {
             { input: "", parts: [] as PromptInfo["parts"] },
           ),
         )
-        dialog.clear()
       },
     },
     {
