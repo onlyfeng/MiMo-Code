@@ -3438,10 +3438,10 @@ logged`, and the peer `success`/`failure` variants of
   answers", "a turn without a snapshot on both ends gets an empty diff" and
   "summaries of one session run one at a time and a request made meanwhile
   still lands"; `summary-main-slice.test.ts` keeps lanes out of both anchors;
-  `packages/cli/test/snapshot/snapshot.test.ts` "diffFull leaves out the patch
-  of a file past the per-file budget and keeps its counts", "diffFull stops
-  patching once the total budget is spent and keeps every row" and "diffFull
-  still patches a modified file whose blobs fit the budget". Taking the last
+  `packages/cli/test/snapshot/diff-budget.test.ts` "a file past the per-file
+  budget keeps its counts without a patch", "patching stops once the total
+  budget is spent and every row is kept" and "a modified file whose blobs fit
+  the budget is still patched", on real git. Taking the last
   step-start, dropping the turn or main-slice filter, removing the queue, or
   removing either budget each fails a case.
 - Retirement condition: upstream stops hydrating the session per step and bounds
