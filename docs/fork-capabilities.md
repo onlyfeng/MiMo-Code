@@ -169,6 +169,7 @@ not change their implementation. The preceding review is retained in the
 | FC-048 | Step-finish summaries: snapshot anchors from the part table, one summary per session, patch budgets      | Fork fix of upstream session summary                             | Keep a step's summary cost flat on long sessions and large worktrees                     |
 | FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
 | FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
+| FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3550,3 +3551,45 @@ logged`, and the peer `success`/`failure` variants of
   treating a prefix as oversized each fails a case.
 - Retirement condition: upstream bounds the environment status and the fork no
   longer freezes prefixes rendered before that.
+
+## FC-051 — a prompt admitted during a revert is not hidden and later deleted
+
+- Status: active
+- Canonical owner: fork `main` — `admission`, `exclusive` and the per-session
+  gate in `packages/cli/src/session/revert.ts`; `preparePrompt` in
+  `packages/cli/src/session/prompt.ts`; the `session.undo` command in
+  `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`
+- Observable contract:
+  - Per session, prompt admissions (`preparePrompt`: read the session, commit
+    a pending revert, create the user message, accept the receipt) run
+    alongside each other but never during `SessionRevert.revert` or
+    `unrevert`, which hold the session to themselves.
+  - A prompt sent while a revert runs therefore waits for it, sees the revert
+    and commits it before its own message exists, as when it is sent after.
+  - A revert asked for while an admission runs waits for it, then applies (or
+    fails busy if the turn has started).
+  - TUI undo puts the reverted message back into the prompt only after the
+    revert returns without an error, and only if the prompt and the open
+    session are unchanged since undo started: a draft typed while the revert
+    ran is kept. The message is read before the revert; if another prompt
+    committed the revert away meanwhile, it is not brought back.
+- Motivation: undo's revert ran fire-and-forget while the TUI put the message
+  straight back into the prompt. On a long session the revert took 11.85 s; the
+  message was resent meanwhile, its admission saw no revert to commit, and its
+  turn started. The revert then marked the session reverted to a point before
+  that turn, so the TUI hid 40 minutes of the turn's work, including a pending
+  question, and the next prompt's cleanup deleted 43 messages.
+- Known limits: the gate is per process; with DC-SESSION-001 only the owning
+  process admits a session's prompts. Shell and summarize entry points commit a
+  pending revert outside the gate, as before.
+- Upstream relationship: upstream checks only that the session is idle when a
+  revert starts. Fork fix of shared code; `dev/compat` inherits it.
+- Watch surfaces: `SessionRevert.revert`/`unrevert`/`cleanup`; `preparePrompt`
+  and its callers; the TUI `session.undo` and `session.redo` commands.
+- Tests/evidence: `packages/cli/test/session/revert-admission.test.ts` "a
+  prompt sent while the session is held for a revert waits, then lands" and "a
+  revert waits for a prompt admission in progress, then applies" (which also
+  checks that the next prompt commits the revert first), through `AppLayer`.
+  Removing the gate from `preparePrompt` or from `revert` each fails a case.
+- Retirement condition: upstream orders reverts and prompt admissions per
+  session.
