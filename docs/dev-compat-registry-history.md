@@ -5527,3 +5527,100 @@ shared history; this complete run passes with explicit fixture budgets. Earlier 
 historical, overlapping evidence. Package typecheck and repository lint pass;
 this internal helper changes no public schema or generated SDK. Shared registry
 files remain byte-identical to the accepted main correction.
+
+## 2026-11-07 inherit FC-053 and the FC-008 CI alignment
+
+- Starting compat: `db5579e9d391d4db054d022d9247d628ca113d2c`; merged main: `118bfd5463d052a14abc04e19f9d0742985d37ce`.
+- FC-053 (main PR #254) is DC-PROVIDER-001 promoted unchanged: the `@ai-sdk/xai` loader fallback, the `xai` SDK key, the `forceReasoning` default for declared `@ai-sdk/openai` reasoning models and their tests already matched compat line for line, so the merge brought no change to those hunks. Main moved the wire case from `provider.test.ts` into `xai-config-provider.test.ts` on the Effect harness; compat drops its old `provider.test.ts` copy, so that file now equals main. DC-PROVIDER-001 retires and its identifier is not reused; eleven DC owners remain. DC-WEBSEARCH-001 keeps the provider-executed tool-call ordering in `normalizeMessages` and its two `transform.test.ts` cases, now the only compat-vs-main difference in those provider files.
+- FC-008 (main PR #253) runs the HTTP actor recovery and subagent-resume suites in their hash shards instead of a dedicated job. Compat's Windows runtime job is unchanged.
+- No other DC owner's surface changes.
+
+### DC-PROVIDER-001 — last compat entry (retired 2026-11-07)
+
+#### DC-PROVIDER-001 — Responses routing and declared reasoning capability
+
+- 2026-11-02 FC-025 propagation (`main` PRs #192, #195): Grok now receives a flat `operation` envelope for `cron`, `task` and `actor`. Grok is matched on its model id, so a Grok gateway routed through `@ai-sdk/openai` Responses, which this owner forces to reasoning, matches as well; the routing, `forceReasoning` and provider-executed tool-call ordering hunks in `transform.ts` are untouched. Compat's actor `spawn` branch fixes `lifecycle` with a `const` (DC-ACTOR-001); #195 lets a constant present in only some branches through, so the compat `actor` envelope flattens for Grok too (`test/tool/actor.test.ts` grok case).
+- 2026-10-13 full sync: upstream `597e7103` adds `Provider.effectiveBaseURL` and an OpenCode Go session header in `session/llm.ts`. Compat's loader fallback and reasoning mapping are untouched; `test/provider/provider.test.ts` passes 95.
+
+- Status: active
+- Canonical owner: `dev/compat` provider model loading
+- Added: 2026-10-12. Adds a ninth DC owner after the 2026-10-10 review record,
+  which counts eight.
+- 2026-10-13 correction: Responses is an OpenAI-defined protocol also
+  implemented by xAI. Grok 4.7 and 4.6 support `xhigh`, as documented at
+  <https://docs.x.ai/developers/model-capabilities/text/reasoning>. The bundled
+  `@ai-sdk/xai` version's narrower effort enum is an adapter limitation, not a
+  model capability limit. An OpenAI-compatible gateway can instead use
+  `@ai-sdk/openai`, whose `languageModel()` already selects Responses.
+  However, that SDK infers reasoning from OpenAI model names and drops Grok's
+  effort/summary unless `forceReasoning` is set. `providerOptions()` now
+  defaults it to `true` for `@ai-sdk/openai` models declaring
+  `capabilities.reasoning`. Explicit options override this default. This
+  common mapping covers both main-model and small-model calls, enabling the
+  SDK's encrypted-reasoning include with `store: false`. Non-reasoning models
+  and other SDKs retain their previous options. No model-name heuristic or
+  gateway-specific rule is added; the original xAI routing remains supported.
+- Base: inherited main behavior
+  `c2ca53fdcb5a96032ac2a40148712574fc7c7b43` keys custom model loaders by
+  provider ID. Only the built-in `xai` provider calls `sdk.responses()`. A
+  provider defined in config with `npm: "@ai-sdk/xai"` has no loader, so
+  `getLanguage` falls back to `sdk.languageModel()`, which `@ai-sdk/xai` maps to
+  Chat. `sdkKey()` has no `@ai-sdk/xai` entry either, so `providerOptions()`
+  files that provider's options (`reasoningEffort`, `store: false`,
+  `promptCacheKey`) under its own provider ID. The SDK reads only `xai` and
+  silently drops them.
+- Overrides: a model without a provider-ID loader whose `api.npm` is
+  `@ai-sdk/xai` gets `sdk.responses()`. `sdkKey("@ai-sdk/xai")` returns `xai`,
+  which also remaps stored message `providerOptions` from the provider ID to
+  `xai`, so replayed reasoning items keep their `itemId` and encrypted content.
+- Delta: for the built-in `xai` provider the key already equals its ID and its
+  loader already selects Responses, so nothing changes. Every other provider
+  ID on `@ai-sdk/xai` moves from Chat to Responses. Its configured options now
+  reach the SDK, including `store: false` and the implied
+  `include: ["reasoning.encrypted_content"]`. The xAI Responses option schema
+  accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
+  `xhigh` variant on such a provider now fails SDK validation instead of being
+  dropped.
+- Boundaries: the original loader fallback does not change providers with their
+  own loader. The reasoning-option default is scoped to `@ai-sdk/openai` and
+  reasoning-capable models; `forceReasoning: false` remains an explicit opt-out.
+  Strict-tool defaults are unchanged. `@ai-sdk/xai` stays out of
+  `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
+- Source surfaces: `packages/cli/src/provider/provider.ts` (`getLanguage`)
+  and `packages/cli/src/provider/transform.ts` (`sdkKey`, `providerOptions`).
+- Test surfaces: `packages/cli/test/provider/provider.test.ts`
+  (`config provider on @ai-sdk/xai sends Responses requests with its provider
+  options`) and `packages/cli/test/provider/transform.test.ts` (`uses xai key
+  for a config provider on @ai-sdk/xai`), plus
+  `packages/cli/test/provider/openai-responses-reasoning.test.ts`.
+- Original evidence: the wire test captures the actual request a config provider sends:
+  one POST to `<baseURL>/responses`, with `reasoning.effort`, `store: false`
+  and the encrypted-reasoning include. Restoring either source file alone
+  fails it, with `xai.chat` for the first and missing options for the second.
+  Package typecheck passes. `provider.test.ts` (96), `transform.test.ts`
+  (264), `strict-schema-wire.test.ts` and `empty-content-wire.test.ts` pass.
+  A real `mimo run` against an xAI-compatible gateway completed a read-tool
+  round trip with `low` and `high` variants. The stored reasoning parts carry
+  `xai.itemId` (`rs_…`) and `reasoningEncryptedContent`, and the second step
+  reused them with `store: false`.
+- Correction evidence: eight real-SDK serialization tests cover six Grok IDs
+  (including `xhigh` for 4.7/4.6), ordinary and small-model requests, explicit
+  opt-out and SDK scoping. Removing the reasoning default fails the five
+  reasoning-model cases. Provider/strict-schema/empty-content suites pass,
+  and the transform suite passes with a 15-second test timeout; its unrelated
+  image recompression case exceeds the default five seconds on this host.
+  Package typecheck and root lint pass. Eight isolated CLI runs across all six
+  configured Grok IDs through a local capture proxy verify streamed
+  `/v1/responses`, unchanged effort values, session cache
+  keys, `store: false`, and exact encrypted-reasoning replay on tool loops.
+  Grok 4.7 is exercised with `low`, `medium` and `xhigh`, and 4.6 with `xhigh`.
+  Each primary session completes a read-tool round trip and answers the file's
+  secret. Auxiliary title/checkpoint requests are identified separately by
+  session cache key; they do not inherit the primary variant. These checks
+  prove transport and replay, not a statistical effect of effort
+  on reasoning-token volume.
+- Exit condition: retire when shared `main` routes config providers by SDK
+  package, either through an equivalent fallback or a declared per-provider
+  API choice, and honors declared reasoning capabilities for compatible
+  models without relying solely on model names. If propagated to `main`, move
+  the contract to the shared registry.

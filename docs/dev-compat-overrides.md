@@ -14,6 +14,7 @@ registry/history commit does not advance either behavior reference below.
 - Scope: C01 (N=1), non-interactive workspace trust and approval documentation, in [the shared synchronization record](upstream-sync-2026-11-06.md).
 - Starting main: `9550108ac29870628a3a9c5c1d6b920259651eea`; starting compat: `4ad2d84daa40c2e787becbdc081f06369cbaed78`; inherited main content: `28a37f58e4b665ab63173b7348c35efb201a15a2`.
 - Result: inherit SECURITY.md and shared FD/FC/history/report unchanged; preserve fork-specific private vulnerability reporting. Main owns C01 under FC-012; FD-001’s invocation-scoped approval remains intact. No runtime, test, schema, generated artifact, dependency or migration changes.
+- 2026-11-07 propagation: main FC-053 now owns the former DC-PROVIDER-001 routing and reasoning default, so eleven DC owners remain; the line below records the 2026-11-06 review as it stood.
 - Override review: all twelve DC owners remain compat-owned. DC-SESSION-001 process/session ownership does not add a workspace-trust gate; DC-NET-001/002, DC-PLATFORM-001, DC-CONTEXT-001, DC-MODEL-001, DC-ACTOR-001/002, DC-TUI-001, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 retain their implementations and exit conditions. No override adapts, retires or moves.
 - Validation: whitespace, local Markdown links, identical shared documents, preserved reporting section and complete tree equality outside SECURITY.md/docs against starting compat. Content-only selection; no local runtime test pass is claimed. Historical runtime/test references remain historical.
 - Publication: acceptance commit `6f85fdb7e70dd4f4953f016a3d6a5d809e2e96da` passed [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147168), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147229), and [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163146988): all ten test jobs succeeded, including Windows runtime and launcher extraction. Main acceptance `28a37f58` also passed all three workflows. This receipt changes only docs; final docs-only descendants require tree equality outside docs, live upstream/main/compat ancestry and remote equality in the execution receipt.
@@ -32,10 +33,11 @@ Earlier review records and dated propagation notes (75 sections, dated 2026-09-0
 | DC-ACTOR-001    | Actor context, default-fork checkpoint, replace-agent, static-prefix overflow                                                              | Full-context extension beyond shared capture and actor identity scope        | Preserve frozen membership/system/cwd and fail unrecoverable prefixes                                                     |
 | DC-ACTOR-002    | Actor run/spawn JSON `variant`, `actor models` listing, spawn-to-prompt propagation                       | Model-facing extension over inherited actor model selection                  | Preserve pre-admission validation, explicit/configured precedence, parent fallback, and actor-lifetime persistence                   |
 | DC-TUI-001      | Prompt/footer model metadata and title locale                                                                                              | Request-metadata display override alongside shared locale propagation        | Preserve provider/model/variant truth, locale submission, and known-limit disclosure                                      |
-| DC-PROVIDER-001 | `Provider.getLanguage` loader fallback and `ProviderTransform` SDK-key/options mapping                                                     | Config-provider routing and declared reasoning capability                    | Preserve xAI Responses routing and declared reasoning for OpenAI-compatible models                                      |
 | DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
 | DC-WEBFETCH-001 | `webfetch` config, WebFetch route chain, destination classification, hosted fetch models | Compat-only extension; main has no hosted fetch and no `webfetch` config | Preserve direct-first default, private targets direct-only, result-block proof, digest labelling and chained failure reasons |
 | DC-SESSION-001 | `ExecutionOwnership`, `SessionRunState` entries, `preparePrompt`, inbox `maybeKick`/wake poller/`reconcileOnBoot`, `actor send`, `sweepAbandonedZombies`, TUI `claimSession` | Compat-only extension; main assumes one process per database | Keep one live driver per session; never adopt across sessions; gate any new lane start, run entry or boot-time recovery of other processes' state |
+
+Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is not reused; its last compat entry is kept verbatim in [the compat history](dev-compat-registry-history.md#2026-11-07-inherit-fc-053-and-the-fc-008-ci-alignment).
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -1091,94 +1093,6 @@ Earlier review records and dated propagation notes (75 sections, dated 2026-09-0
 - Exit condition: the client inference portion is removed by the server
   resolver correction. Retire the remaining compat presentation/API overlay
   when shared `main` exposes the equivalent preview and metadata display.
-
-## DC-PROVIDER-001 — Responses routing and declared reasoning capability
-
-- 2026-11-02 FC-025 propagation (`main` PRs #192, #195): Grok now receives a flat `operation` envelope for `cron`, `task` and `actor`. Grok is matched on its model id, so a Grok gateway routed through `@ai-sdk/openai` Responses, which this owner forces to reasoning, matches as well; the routing, `forceReasoning` and provider-executed tool-call ordering hunks in `transform.ts` are untouched. Compat's actor `spawn` branch fixes `lifecycle` with a `const` (DC-ACTOR-001); #195 lets a constant present in only some branches through, so the compat `actor` envelope flattens for Grok too (`test/tool/actor.test.ts` grok case).
-- 2026-10-13 full sync: upstream `597e7103` adds `Provider.effectiveBaseURL` and an OpenCode Go session header in `session/llm.ts`. Compat's loader fallback and reasoning mapping are untouched; `test/provider/provider.test.ts` passes 95.
-
-- Status: active
-- Canonical owner: `dev/compat` provider model loading
-- Added: 2026-10-12. Adds a ninth DC owner after the 2026-10-10 review record,
-  which counts eight.
-- 2026-10-13 correction: Responses is an OpenAI-defined protocol also
-  implemented by xAI. Grok 4.7 and 4.6 support `xhigh`, as documented at
-  <https://docs.x.ai/developers/model-capabilities/text/reasoning>. The bundled
-  `@ai-sdk/xai` version's narrower effort enum is an adapter limitation, not a
-  model capability limit. An OpenAI-compatible gateway can instead use
-  `@ai-sdk/openai`, whose `languageModel()` already selects Responses.
-  However, that SDK infers reasoning from OpenAI model names and drops Grok's
-  effort/summary unless `forceReasoning` is set. `providerOptions()` now
-  defaults it to `true` for `@ai-sdk/openai` models declaring
-  `capabilities.reasoning`. Explicit options override this default. This
-  common mapping covers both main-model and small-model calls, enabling the
-  SDK's encrypted-reasoning include with `store: false`. Non-reasoning models
-  and other SDKs retain their previous options. No model-name heuristic or
-  gateway-specific rule is added; the original xAI routing remains supported.
-- Base: inherited main behavior
-  `c2ca53fdcb5a96032ac2a40148712574fc7c7b43` keys custom model loaders by
-  provider ID. Only the built-in `xai` provider calls `sdk.responses()`. A
-  provider defined in config with `npm: "@ai-sdk/xai"` has no loader, so
-  `getLanguage` falls back to `sdk.languageModel()`, which `@ai-sdk/xai` maps to
-  Chat. `sdkKey()` has no `@ai-sdk/xai` entry either, so `providerOptions()`
-  files that provider's options (`reasoningEffort`, `store: false`,
-  `promptCacheKey`) under its own provider ID. The SDK reads only `xai` and
-  silently drops them.
-- Overrides: a model without a provider-ID loader whose `api.npm` is
-  `@ai-sdk/xai` gets `sdk.responses()`. `sdkKey("@ai-sdk/xai")` returns `xai`,
-  which also remaps stored message `providerOptions` from the provider ID to
-  `xai`, so replayed reasoning items keep their `itemId` and encrypted content.
-- Delta: for the built-in `xai` provider the key already equals its ID and its
-  loader already selects Responses, so nothing changes. Every other provider
-  ID on `@ai-sdk/xai` moves from Chat to Responses. Its configured options now
-  reach the SDK, including `store: false` and the implied
-  `include: ["reasoning.encrypted_content"]`. The xAI Responses option schema
-  accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
-  `xhigh` variant on such a provider now fails SDK validation instead of being
-  dropped.
-- Boundaries: the original loader fallback does not change providers with their
-  own loader. The reasoning-option default is scoped to `@ai-sdk/openai` and
-  reasoning-capable models; `forceReasoning: false` remains an explicit opt-out.
-  Strict-tool defaults are unchanged. `@ai-sdk/xai` stays out of
-  `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
-- Source surfaces: `packages/cli/src/provider/provider.ts` (`getLanguage`)
-  and `packages/cli/src/provider/transform.ts` (`sdkKey`, `providerOptions`).
-- Test surfaces: `packages/cli/test/provider/provider.test.ts`
-  (`config provider on @ai-sdk/xai sends Responses requests with its provider
-  options`) and `packages/cli/test/provider/transform.test.ts` (`uses xai key
-  for a config provider on @ai-sdk/xai`), plus
-  `packages/cli/test/provider/openai-responses-reasoning.test.ts`.
-- Original evidence: the wire test captures the actual request a config provider sends:
-  one POST to `<baseURL>/responses`, with `reasoning.effort`, `store: false`
-  and the encrypted-reasoning include. Restoring either source file alone
-  fails it, with `xai.chat` for the first and missing options for the second.
-  Package typecheck passes. `provider.test.ts` (96), `transform.test.ts`
-  (264), `strict-schema-wire.test.ts` and `empty-content-wire.test.ts` pass.
-  A real `mimo run` against an xAI-compatible gateway completed a read-tool
-  round trip with `low` and `high` variants. The stored reasoning parts carry
-  `xai.itemId` (`rs_…`) and `reasoningEncryptedContent`, and the second step
-  reused them with `store: false`.
-- Correction evidence: eight real-SDK serialization tests cover six Grok IDs
-  (including `xhigh` for 4.7/4.6), ordinary and small-model requests, explicit
-  opt-out and SDK scoping. Removing the reasoning default fails the five
-  reasoning-model cases. Provider/strict-schema/empty-content suites pass,
-  and the transform suite passes with a 15-second test timeout; its unrelated
-  image recompression case exceeds the default five seconds on this host.
-  Package typecheck and root lint pass. Eight isolated CLI runs across all six
-  configured Grok IDs through a local capture proxy verify streamed
-  `/v1/responses`, unchanged effort values, session cache
-  keys, `store: false`, and exact encrypted-reasoning replay on tool loops.
-  Grok 4.7 is exercised with `low`, `medium` and `xhigh`, and 4.6 with `xhigh`.
-  Each primary session completes a read-tool round trip and answers the file's
-  secret. Auxiliary title/checkpoint requests are identified separately by
-  session cache key; they do not inherit the primary variant. These checks
-  prove transport and replay, not a statistical effect of effort
-  on reasoning-token volume.
-- Exit condition: retire when shared `main` routes config providers by SDK
-  package, either through an equivalent fallback or a declared per-provider
-  API choice, and honors declared reasoning capabilities for compatible
-  models without relying solely on model names. If propagated to `main`, move
-  the contract to the shared registry.
 
 ## DC-WEBSEARCH-001 — provider-native web search and layered fallback
 
