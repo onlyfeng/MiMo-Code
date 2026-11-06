@@ -59,6 +59,8 @@ function sdkKey(npm: string): string | undefined {
       return "google"
     case "@ai-sdk/gateway":
       return "gateway"
+    case "@ai-sdk/xai":
+      return "xai"
     case "@openrouter/ai-sdk-provider":
       return "openrouter"
   }
@@ -1111,6 +1113,8 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
 //                    xAI would reject every tool call the SDK makes. It therefore
 //                    cannot be strict by default, and forcing the field here would
 //                    assert a constraint xAI has not been shown to honour.
+//   provider.ts getLanguage fallback  any config provider on @ai-sdk/xai → NOT
+//                    listed, for the same reason as the `xai` loader above.
 //
 // Everything else is left alone on purpose: `@ai-sdk/anthropic` warns ("strict mode
 // is not supported by this provider") for any non-null `strict`, so a blanket
@@ -1972,6 +1976,12 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
   // "azure" first. Pass both so model options work on either code path.
   if (model.api.npm === "@ai-sdk/azure") {
     return { openai: options, azure: options }
+  }
+  // OpenAI's SDK infers reasoning from OpenAI model names. Compatible endpoints
+  // also expose reasoning models such as Grok; honor their declared capability
+  // on both ordinary and small-model requests, unless explicitly overridden.
+  if (model.api.npm === "@ai-sdk/openai" && model.capabilities.reasoning) {
+    return { [key]: { forceReasoning: true, ...options } }
   }
   return { [key]: options }
 }

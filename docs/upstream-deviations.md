@@ -30,7 +30,7 @@ renumbered to close gaps.
 the runtime/test tree the last upstream review covered; bundled guidance has a
 separate content snapshot. Pure registry/history commits advance neither
 reference, and neither do fork pull requests merged between synchronizations
-(FC-044 through FC-052 and later corrections to existing entries): each such
+(FC-044 through FC-053 and later corrections to existing entries): each such
 entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).

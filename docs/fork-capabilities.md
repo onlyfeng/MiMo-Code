@@ -31,7 +31,7 @@ authority.
 the runtime/test tree the last upstream review covered; bundled guidance has a
 separate content snapshot. Pure registry/history commits advance neither
 reference, and neither do fork pull requests merged between synchronizations
-(FC-044 through FC-052 and later corrections to existing entries): each such
+(FC-044 through FC-053 and later corrections to existing entries): each such
 entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
@@ -96,6 +96,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
 | FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
 | FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
+| FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
 
 Grouped sections: [Actor and inbox](#actor-and-inbox) holds FC-001, FC-024, FC-031, FC-037, FC-038 and FC-043; [Checkpoint writer and ladder](#checkpoint-writer-and-ladder) holds FC-002, FC-021, FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047. Every other entry keeps its own section in numeric order. Retired identifiers FC-003 (2026-09-15) and FC-018 (2026-09-24) are not reused; their entries moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization).
 
@@ -3472,3 +3473,83 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   `build=<head>+dirty built_at=...` with uncommitted changes and
   `build=<head>` after commit.
 - Retirement condition: upstream embeds and logs the build commit.
+
+## FC-053 — a config provider on `@ai-sdk/xai` uses Responses, and an OpenAI-compatible reasoning model keeps its effort
+
+- Status: active
+- Canonical owner: fork `main` — the loader fallback in `Provider.getLanguage`
+  (`packages/cli/src/provider/provider.ts`), and `sdkKey` and
+  `providerOptions` in `packages/cli/src/provider/transform.ts`
+- Origin: compat DC-PROVIDER-001 (added 2026-10-12, corrected 2026-10-13),
+  promoted to shared `main` on 2026-11-07. DC-PROVIDER-001 retires when this
+  entry propagates into `dev/compat`.
+- Base: upstream keys custom model loaders by provider ID, and only the
+  built-in `xai` provider calls `sdk.responses()`. A provider defined in config
+  with `npm: "@ai-sdk/xai"` has no loader, so `getLanguage` falls back to
+  `sdk.languageModel()`, which `@ai-sdk/xai` maps to Chat. `sdkKey()` has no
+  `@ai-sdk/xai` entry either, so `providerOptions()` files that provider's
+  options (`reasoningEffort`, `store: false`, `promptCacheKey`) under its own
+  provider ID; the SDK reads only `xai` and silently drops them. Separately,
+  `@ai-sdk/openai` infers reasoning from OpenAI model names, so a compatible
+  endpoint's reasoning model such as Grok loses its effort and summary unless
+  `forceReasoning` is set.
+- Observable contract:
+  - A model without a provider-ID loader whose `api.npm` is `@ai-sdk/xai` gets
+    `sdk.responses()`. `sdkKey("@ai-sdk/xai")` returns `xai`, which also remaps
+    stored message `providerOptions` from the provider ID to `xai`, so replayed
+    reasoning items keep their `itemId` and encrypted content.
+  - `providerOptions()` defaults `forceReasoning: true` for `@ai-sdk/openai`
+    models declaring `capabilities.reasoning`, on ordinary and small-model
+    requests alike. Explicit options override the default, so
+    `forceReasoning: false` opts out. This enables the SDK's
+    encrypted-reasoning include with `store: false`. Non-reasoning models and
+    other SDKs keep their previous options. No model-name heuristic or
+    gateway-specific rule is involved.
+- Delta: for the built-in `xai` provider the key already equals its ID and its
+  loader already selects Responses, so nothing changes there. Every other
+  provider ID on `@ai-sdk/xai` moves from Chat to Responses, and its configured
+  options reach the SDK. The bundled `@ai-sdk/xai` (3.0.102) Responses option
+  schema accepts only `none`/`low`/`medium`/`high` for `reasoningEffort`, so an
+  `xhigh` variant on such a provider fails SDK validation instead of being
+  dropped. That enum is an adapter limit, not a model one: Grok 4.7 and 4.6
+  support `xhigh` (<https://docs.x.ai/developers/model-capabilities/text/reasoning>),
+  which an OpenAI-compatible gateway can carry through `@ai-sdk/openai`.
+- Boundaries: providers with their own loader are unchanged. The reasoning
+  default is scoped to `@ai-sdk/openai` and reasoning-capable models.
+  Strict-tool defaults are unchanged; `@ai-sdk/xai` stays out of
+  `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
+  FC-025 matches Grok on its model id, so its `operation` flattening applies
+  on either SDK and is independent of this routing.
+- Upstream relationship: upstream `3a12665a` has neither the `@ai-sdk/xai`
+  fallback nor the `sdkKey` entry nor the reasoning default. Fork fix;
+  `dev/compat` inherits it.
+- Watch surfaces: `Provider.getLanguage` and its `modelLoaders`, `sdkKey`,
+  `providerOptions` and the `EXPLICIT_NON_STRICT_TOOL_SDKS` notes, and any
+  `@ai-sdk/xai` or `@ai-sdk/openai` version bump.
+- Tests/evidence: `packages/cli/test/provider/provider.test.ts` ("config
+  provider on @ai-sdk/xai sends Responses requests with its provider options")
+  captures the actual request: one POST to `<baseURL>/responses` with
+  `reasoning.effort`, `store: false` and the encrypted-reasoning include.
+  `packages/cli/test/provider/transform.test.ts` ("uses xai key for a config
+  provider on @ai-sdk/xai") and
+  `packages/cli/test/provider/openai-responses-reasoning.test.ts` serialize
+  real SDK requests for six Grok ids (including `xhigh` for 4.7 and 4.6),
+  small-model requests, the explicit opt-out and the SDK scope. On compat, eight
+  isolated CLI runs across six Grok ids through a local capture proxy verified
+  streamed `/v1/responses`, unchanged effort values, session cache keys,
+  `store: false` and exact encrypted-reasoning replay on tool loops; these
+  prove transport and replay, not an effect of effort on reasoning volume.
+  2026-11-07 port to `main` (local Bun 1.4.3, CI pins 1.3.14; every ambient
+  `MIMOCODE_*` variable removed): with only the tests ported, eight cases fail
+  against main's source (the wire test, the `xai` key, five reasoning-model
+  serializations and the SDK-scope case); with the source ported, the three
+  files pass 391 tests with 0 failures. `test/provider` (without the three
+  refresh suites CI runs in their own processes), the whole
+  `test/session/prompt-effect.test.ts` (221 pass, 2 skip) and eight other
+  `@ai-sdk/openai` consumer suites show no new failure. The only remaining
+  failures, two `provider-event-timeout` keep-alive cases, fail identically on
+  main's unchanged source on that host. Package typecheck passes.
+- Retirement condition: upstream routes config providers by SDK package,
+  through an equivalent fallback or a declared per-provider API choice, and
+  honors declared reasoning capabilities for compatible models without relying
+  solely on model names. The regression cases stay in either case.

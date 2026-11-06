@@ -8,6 +8,7 @@ import { Plugin } from "../../src/plugin/index"
 import { ModelsDev } from "../../src/provider"
 import { validateCatalog } from "../../src/provider/models-schema"
 import { Provider } from "../../src/provider"
+import { ProviderTransform } from "../../src/provider"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Auth } from "../../src/auth"
 import { Env } from "../../src/env"
@@ -1990,6 +1991,75 @@ test("explicit provider npm is respected for mimo-named model ids", async () => 
       expect(all[ProviderID.make("responses-gateway")].models["xiaomi/mimo-v2.6-flash"].api.npm).toBe("@ai-sdk/openai")
     },
   })
+})
+
+test("config provider on @ai-sdk/xai sends Responses requests with its provider options", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "mimocode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          provider: {
+            "example-gateway": {
+              name: "Example Gateway",
+              npm: "@ai-sdk/xai",
+              env: [],
+              models: {
+                "grok-4": { reasoning: true, tool_call: true, limit: { context: 8192, output: 2048 } },
+              },
+              options: { apiKey: "test-key", baseURL: "https://example.test/v1" },
+            },
+          },
+        }),
+      )
+    },
+  })
+  const requests: { url: string; body: any }[] = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(url), body: JSON.parse(String(init?.body)) })
+    return Response.json({
+      id: "resp_1",
+      object: "response",
+      model: "grok-4",
+      status: "completed",
+      output: [
+        {
+          type: "message",
+          id: "msg_1",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "ok" }],
+        },
+      ],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    })
+  }) as unknown as typeof fetch
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const model = await getModel(ProviderID.make("example-gateway"), ModelID.make("grok-4"))
+        const language = await getLanguage(model)
+        expect(language.provider).toBe("xai.responses")
+        const result = await language.doGenerate({
+          prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+          providerOptions: ProviderTransform.providerOptions(model, { reasoningEffort: "high", store: false }),
+        })
+        expect(result.content).toEqual([expect.objectContaining({ type: "text", text: "ok" })])
+        expect(requests.map((request) => request.url)).toEqual(["https://example.test/v1/responses"])
+        expect(requests[0].body).toMatchObject({
+          model: "grok-4",
+          reasoning: { effort: "high" },
+          store: false,
+          include: ["reasoning.encrypted_content"],
+        })
+      },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("models.dev npm is used as declared, including for mimo-named ids", () => {
