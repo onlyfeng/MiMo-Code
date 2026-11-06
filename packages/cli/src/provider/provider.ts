@@ -57,21 +57,58 @@ function shouldUseCopilotResponsesApi(modelID: string): boolean {
   return Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")
 }
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
-  if (typeof ms !== "number" || ms <= 0) return res
+/**
+ * True once `bytes` start a line that is not an SSE comment (`:`), i.e. an
+ * `event:`/`data:`/`id:`/`retry:` field. Line state carries across chunks.
+ */
+function sseEventScanner() {
+  let lineStart = true
+  return (bytes: Uint8Array) => {
+    let event = false
+    for (const byte of bytes) {
+      if (byte === 10 || byte === 13) {
+        lineStart = true
+        continue
+      }
+      if (!lineStart) continue
+      lineStart = false
+      if (byte !== 58) event = true
+    }
+    return event
+  }
+}
+
+/**
+ * Bounds an SSE body. `chunkMs` bounds the wait for any bytes, `eventMs` the
+ * wait for a non-comment line: a gateway that holds a stalled upstream open
+ * with `: keep-alive` comments resets the chunk timer forever, and only the
+ * event timer ends it. Either firing aborts with "SSE read timed out", the
+ * error retry already classifies as transient.
+ */
+function wrapSSE(res: Response, chunkMs: number, eventMs: number, ctl: AbortController) {
+  if (!(chunkMs > 0) && !(eventMs > 0)) return res
   if (!res.body) return res
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
+  const scan = sseEventScanner()
+  let lastEvent = Date.now()
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
+        const waits = [
+          ...(chunkMs > 0 ? [chunkMs] : []),
+          ...(eventMs > 0 ? [Math.max(0, lastEvent + eventMs - Date.now())] : []),
+        ]
         const id = setTimeout(() => {
+          if (eventMs > 0 && Date.now() - lastEvent >= eventMs) {
+            log.warn("SSE stream sent no event within the event timeout", { eventTimeout: eventMs })
+          }
           const err = new Error("SSE read timed out")
           ctl.abort(err)
           void reader.cancel(err)
           reject(err)
-        }, ms)
+        }, Math.min(...waits))
 
         reader.read().then(
           (part) => {
@@ -90,6 +127,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
         return
       }
 
+      if (scan(part.value)) lastEvent = Date.now()
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
@@ -1722,14 +1760,20 @@ const layer: Layer.Layer<
           typeof userChunkTimeout === "number"
             ? userChunkTimeout  // user-set value (incl. 0 / negative to disable)
             : DEFAULT_CHUNK_TIMEOUT
+        // Off unless configured: reasoning models may think silently for minutes
+        // behind gateway heartbeats, which `chunkTimeout` counts as liveness.
+        const userEventTimeout = options["eventTimeout"]
+        const eventTimeout = typeof userEventTimeout === "number" && userEventTimeout > 0 ? userEventTimeout : 0
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
+        delete options["eventTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const callerSignal = requestSignal(input, opts)
-          const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
+          const chunkAbortCtl =
+            (typeof chunkTimeout === "number" && chunkTimeout > 0) || eventTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
           const requestTimeoutCtl =
@@ -1765,7 +1809,7 @@ const layer: Layer.Layer<
             ? wrapRequestTimeout(res, callerSignal, requestTimeoutCtl.signal, requestTimeoutCtl.clear)
             : res
           if (!chunkAbortCtl) return bounded
-          return wrapSSE(bounded, chunkTimeout, chunkAbortCtl)
+          return wrapSSE(bounded, typeof chunkTimeout === "number" ? chunkTimeout : 0, eventTimeout, chunkAbortCtl)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]

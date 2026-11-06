@@ -164,6 +164,7 @@ not change their implementation. The preceding review is retained in the
 | FC-045 | Checkpoint extraction prompt targets 85% of each budget                                                   | Fork addition to upstream writer retry                           | Trim once, with room, instead of a hundred tokens per re-prompt                          |
 | FC-046 | Checkpoint ladder after a rebuild: thresholds within one step of the rebuilt context                      | Fork fix of upstream threshold state                             | Start the first writer after the context has grown; never skip the final threshold      |
 | FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
+| FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
 
 ## FC-001 — linearized actor generations and persistent-peer lifecycle
 
@@ -3390,3 +3391,46 @@ logged`, and the peer `success`/`failure` variants of
   a resolution failure escape each fails a case.
 - Retirement condition: upstream lets the writer run on its own configured
   model.
+
+## FC-049 — a stream held open by keep-alive comments still times out
+
+- Status: active
+- Canonical owner: fork `main` — `sseEventScanner` and the event timer in
+  `wrapSSE`, and the `eventTimeout` option read in the provider fetch wrapper
+  (`packages/cli/src/provider/provider.ts`); `eventTimeout` in the provider
+  options schema (`packages/cli/src/config/provider.ts`) and the generated SDK
+  type
+- Observable contract:
+  - `provider.<id>.options.eventTimeout` (milliseconds) bounds the wait for an
+    SSE line that is not a comment (`event:`, `data:`, `id:`, `retry:`). Comment
+    lines (`:` and `: keep-alive`) do not reset it; line state carries across
+    chunks, so a comment split between chunks is still a comment.
+  - When it expires the stream aborts with `SSE read timed out`, the error retry
+    already treats as transient, and logs `SSE stream sent no event within the
+    event timeout`.
+  - `chunkTimeout` keeps its meaning: any bytes, comments included, reset it.
+    Without `eventTimeout` nothing changes.
+- Motivation: a gateway sent `:` and `: keep-alive` comments while its upstream
+  stalled. They reset the 45 s `chunkTimeout` on every comment, so one request
+  waited 900 s until the gateway itself failed the stream
+  (`upstream_http2_stream_error`, `sequence_number` 0), and the agent stood
+  still for 15 minutes.
+- Known limits: off unless configured, because a reasoning model may think for
+  minutes behind heartbeats; choose a value above the longest silent reasoning
+  the provider shows.
+- Upstream relationship: upstream has only the byte-level chunk timeout. Fork
+  addition; `dev/compat` inherits it.
+- Watch surfaces: `wrapSSE`, the option parsing beside `chunkTimeout` and
+  `headerTimeout` in `provider.ts`; the transient classification of `SSE read
+  timed out` in `provider/error.ts` and `session/retry.ts`; the provider options
+  schema and `packages/sdk/src/v2/gen/types.gen.ts`.
+- Tests/evidence: `packages/cli/test/provider/provider-event-timeout.test.ts`
+  "a stream that only sends keep-alive comments ends at the event timeout",
+  "without an event timeout, keep-alive comments keep the chunk timer alive",
+  "events keep resetting the event timeout across a longer stream" and "a
+  keep-alive comment split across chunks is still not an event", through the
+  real provider fetch wrapper and an `@ai-sdk/openai-compatible` stream.
+  Counting comments as events, dropping the carried line state, ignoring
+  `eventTimeout`, or never resetting the timer each fails a case.
+- Retirement condition: upstream bounds the time between SSE events apart from
+  comments.
