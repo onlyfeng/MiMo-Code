@@ -15,10 +15,10 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-04
-- Upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
-- Prior reviewed upstream: `6b66e8ce4aa89962b95a4dcb4119ee399cc9262f`
-- Review completion: complete — capability review, focused validation, propagation and successful exact-SHA lint/typecheck/test on both source snapshots; docs-only descendants use the equivalence proof in the execution receipt
+- Last reviewed: 2026-11-06
+- Upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
+- Prior reviewed upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
+- Review completion: complete capability/content review (N=1); publication and exact-final-SHA CI are verified in the execution receipt. This selection changes documentation only and does not advance the historical runtime/test or bundled-guidance snapshots below.
 - Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
 - Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
 - Bundled guidance content: `5d728151e06bfc187e90b244a9fbd91fe4126fe6` (FC-043 adds bounded Actor cancel guidance; skill guidance from `fd04de73ced82599baac249e9cf96dfb55b9d778` remains unchanged)
@@ -32,7 +32,9 @@ the reviewed runtime/test tree; bundled guidance has a separate content snapshot
 Pure registry/history commits advance neither reference. The selected released
 capability audit is recorded in [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
+Latest reviewed synchronization: [2026-11-06 non-interactive trust documentation](upstream-sync-2026-11-06.md), C01 (N=1). Adopt upstream’s workspace-trust and headless permission description, retaining FC-012’s fork-specific private reporting routes and FD-001’s invocation-scoped approval. Starting main `9550108ac29870628a3a9c5c1d6b920259651eea` and compat `4ad2d84daa40c2e787becbdc081f06369cbaed78` already share the reviewed entry-point behavior. No runtime, tests, SDK, dependency or DC policy changes; no owner retires. Final publication and CI evidence is recorded in the execution receipt.
+
+Previous synchronization: [2026-11-04 full sync through `10b03cf0`](upstream-sync-2026-11-04-10b03cf0.md), C01–C04 (N=4: three upstream capabilities plus concurrent fork FC-043). Adopt keyed synthetic reminders, a per-context-window session environment reminder, and the acceptable shell in the Claude environment block. Retain MCP announcement metadata and authorization, frozen prefixes, receipt order, strict usage-recovery evidence and bounded-agent usage behavior. The upstream delta adds or retires no owner. Concurrently accepted fork PR #224 adds FC-043, whose bounded Actor cancel behavior and tool guidance are inherited through this sync. Source snapshots, validation, propagation and publication are recorded in the linked report.
 
 Previous synchronization: [2026-11-04 full sync through `6b66e8ce`](upstream-sync-2026-11-04.md), C01–C07 (N=7). Adopt the project execution-source filter reversal while retaining fresh legacy reads and literal stored-config persistence; adopt declared reasoning levels and parent variant inheritance with selected-model group correction, Chinese memory indexing, bounded history search rows, applyable file diffs and cloud-sharing removal. Preserve the concurrently accepted FC-042 bounded-agent usage fix. Compat keeps its validated explicit/configured variant precedence and twelve DC owners. Only the FC-004 host execution-source clause reverses; FD-013 records the retained persistence deviation; no owner retires. Validation/publication are recorded in the linked report.
 
@@ -1617,6 +1619,8 @@ logged`, and the peer `success`/`failure` variants of
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-012 — fork publication, contribution, and security routing
+
+- 2026-11-06 synchronization: adopt upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`’s non-interactive workspace-trust warning, headless approval description and trust-bypass scope row. Keep fork-only vulnerability handling separate from upstream’s reporting channels. FD-001 still owns invocation-scoped approval; no permission implementation changes. See [the C01 record](upstream-sync-2026-11-06.md).
 
 - 2026-10-27 synchronization: launcher extraction adopts upstream `tarCommand()`: on Windows prefer the existing absolute system tar, then fall back to PATH; other platforms still use PATH tar. Release URL/checksum/cache and staged-run behavior are retained. Adopt the README download links and desktop screenshots while preserving fork routing. See [the four-capability record](upstream-sync-2026-10-27.md).
 
