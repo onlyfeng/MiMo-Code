@@ -1,4 +1,5 @@
 import { HostModelTransport } from "./host-transport"
+import { SseStats } from "./sse-stats"
 import z from "zod"
 import os from "os"
 import fuzzysort from "fuzzysort"
@@ -44,6 +45,10 @@ const warnedContextDefaults = new Set<string>()
 const warnedStaleDefaultModels = new Set<string>()
 
 export const DEFAULT_OPENAI_HEADER_TIMEOUT = 300_000
+// `wrapSSE` logs a stream summary for a normal end after this long, and for a
+// timeout, read error or cancel after the shorter span.
+const SSE_SUMMARY_END_MS = 120_000
+const SSE_SUMMARY_ABORT_MS = 60_000
 export const DEFAULT_CHUNK_TIMEOUT = 480_000 // 8 minutes — bounds single-attempt SSE stall.
 // Tuned for mimo-v2.5-pro on MiMo Router whose cold-path TTFT after context
 // rebuild can dip to ~5 minutes silent. Reasoning models with multi-minute
@@ -55,27 +60,6 @@ function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
   if (!match) return false
   return Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")
-}
-
-/**
- * True once `bytes` start a line that is not an SSE comment (`:`), i.e. an
- * `event:`/`data:`/`id:`/`retry:` field. Line state carries across chunks.
- */
-function sseEventScanner() {
-  let lineStart = true
-  return (bytes: Uint8Array) => {
-    let event = false
-    for (const byte of bytes) {
-      if (byte === 10 || byte === 13) {
-        lineStart = true
-        continue
-      }
-      if (!lineStart) continue
-      lineStart = false
-      if (byte !== 58) event = true
-    }
-    return event
-  }
 }
 
 /**
@@ -91,19 +75,29 @@ function wrapSSE(res: Response, chunkMs: number, eventMs: number, ctl: AbortCont
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
-  const scan = sseEventScanner()
-  let lastEvent = Date.now()
+  const stats = SseStats.track()
+  // A long or broken stream logs what it carried once, so a stall shows whether
+  // the gateway sent comments, named events or typed `data:` lines meanwhile.
+  let reported = false
+  const report = (outcome: "end" | "timeout" | "error" | "cancel") => {
+    if (reported) return
+    const summary = stats.summary()
+    if (summary.durationMs < (outcome === "end" ? SSE_SUMMARY_END_MS : SSE_SUMMARY_ABORT_MS)) return
+    reported = true
+    log.warn("SSE stream summary", { outcome, ...summary })
+  }
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
         const waits = [
           ...(chunkMs > 0 ? [chunkMs] : []),
-          ...(eventMs > 0 ? [Math.max(0, lastEvent + eventMs - Date.now())] : []),
+          ...(eventMs > 0 ? [Math.max(0, stats.lastEvent() + eventMs - Date.now())] : []),
         ]
         const id = setTimeout(() => {
-          if (eventMs > 0 && Date.now() - lastEvent >= eventMs) {
+          if (eventMs > 0 && Date.now() - stats.lastEvent() >= eventMs) {
             log.warn("SSE stream sent no event within the event timeout", { eventTimeout: eventMs })
           }
+          report("timeout")
           const err = new Error("SSE read timed out")
           ctl.abort(err)
           void reader.cancel(err)
@@ -117,20 +111,23 @@ function wrapSSE(res: Response, chunkMs: number, eventMs: number, ctl: AbortCont
           },
           (err) => {
             clearTimeout(id)
+            report("error")
             reject(err)
           },
         )
       })
 
       if (part.done) {
+        report("end")
         ctrl.close()
         return
       }
 
-      if (scan(part.value)) lastEvent = Date.now()
+      stats.push(part.value)
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
+      report("cancel")
       ctl.abort(reason)
       await reader.cancel(reason)
     },

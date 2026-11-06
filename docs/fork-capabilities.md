@@ -3471,6 +3471,12 @@ logged`, and the peer `success`/`failure` variants of
     event timeout`.
   - `chunkTimeout` keeps its meaning: any bytes, comments included, reset it.
     Without `eventTimeout` nothing changes.
+  - Every wrapped stream keeps a content-free tally (`SseStats` in
+    `packages/cli/src/provider/sse-stats.ts`). One that ends normally after
+    120 s, or times out, fails to read or is cancelled after 60 s, logs `SSE
+    stream summary` once with `outcome`, `durationMs`, `bytes`, `comments`, the
+    count per `event:` name, the count per `data:` `type` and
+    `sinceLastEventMs`. Payload text is never logged.
 - Motivation: a gateway sent `:` and `: keep-alive` comments while its upstream
   stalled. They reset the 45 s `chunkTimeout` on every comment, so one request
   waited 900 s until the gateway itself failed the stream
@@ -3478,10 +3484,14 @@ logged`, and the peer `success`/`failure` variants of
   still for 15 minutes.
 - Known limits: off unless configured, because a reasoning model may think for
   minutes behind heartbeats; choose a value above the longest silent reasoning
-  the provider shows.
+  the provider shows. A gateway that keeps a stalled stream alive with
+  non-comment lines (a named keepalive event, a typed `data:` line) also resets
+  the event timer; the stream summary is there to show which it sends. One such
+  900 s stall recurred with `eventTimeout` set, after the comment-only case was
+  verified against the shipped binary.
 - Upstream relationship: upstream has only the byte-level chunk timeout. Fork
   addition; `dev/compat` inherits it.
-- Watch surfaces: `wrapSSE`, the option parsing beside `chunkTimeout` and
+- Watch surfaces: `wrapSSE` and `SseStats`, the option parsing beside `chunkTimeout` and
   `headerTimeout` in `provider.ts`; the transient classification of `SSE read
   timed out` in `provider/error.ts` and `session/retry.ts`; the provider options
   schema and `packages/sdk/src/v2/gen/types.gen.ts`.
@@ -3491,7 +3501,10 @@ logged`, and the peer `success`/`failure` variants of
   "events keep resetting the event timeout across a longer stream" and "a
   keep-alive comment split across chunks is still not an event", through the
   real provider fetch wrapper and an `@ai-sdk/openai-compatible` stream from a
-  local `Bun.serve` gateway.
+  local `Bun.serve` gateway. `packages/cli/test/provider/sse-stats.test.ts`
+  covers the tally: comments split across chunks are not events, event names
+  and data types are counted over CRLF lines cut every 7 bytes without payload
+  text, and a multi-byte character split across chunks is decoded once.
   Counting comments as events, dropping the carried line state, ignoring
   `eventTimeout`, or never resetting the timer each fails a case.
 - Retirement condition: upstream bounds the time between SSE events apart from
