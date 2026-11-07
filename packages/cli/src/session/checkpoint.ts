@@ -273,16 +273,29 @@ function estimateMessageTokens(m: { parts: Array<{ type: string; [k: string]: un
 // keeps its own estimator because computeBoundary's tail sizing depends on it.
 function estimateViewTokens(msgs: ReadonlyArray<{ parts: unknown[] }>): number {
   let sum = 0
-  for (const m of msgs)
-    for (const p of m.parts) {
-      try {
-        const json = JSON.stringify(p)
-        sum += Math.max(Token.estimate(json), Math.round(Buffer.byteLength(json, "utf8") / 3))
-      } catch {
-        sum += 1000
-      }
-    }
+  for (const m of msgs) for (const p of m.parts) sum += estimateSerializedTokens(p)
   return sum
+}
+
+// Sizes the request a no-fork writer is sent: its system prompt and the delta
+// rendered as model messages. The writer's own tool list is small and fixed.
+function estimateWriterRequestTokens(prefix: {
+  readonly system: readonly string[]
+  readonly inheritedMessages: readonly unknown[]
+}): number {
+  let sum = 0
+  for (const text of prefix.system) sum += estimateSerializedTokens(text)
+  for (const message of prefix.inheritedMessages) sum += estimateSerializedTokens(message)
+  return sum
+}
+
+function estimateSerializedTokens(value: unknown): number {
+  try {
+    const json = typeof value === "string" ? value : JSON.stringify(value)
+    return Math.max(Token.estimate(json), Math.round(Buffer.byteLength(json, "utf8") / 3))
+  } catch {
+    return 1000
+  }
 }
 
 function hasTextBlocks(m: { parts: Array<{ type: string }> }): boolean {
@@ -1115,23 +1128,8 @@ export const layer: Layer.Layer<
       // A usable window of 0 means the model publishes no limit; as in
       // `isOverflow`, an unknown window bounds nothing.
       const writerWindow = ownModel ? ownModel.usable : input.context?.usable
-      const deltaTooLarge =
-        !configuredFork && writerWindow != null && writerWindow > 0 && estimateViewTokens(pending) > writerWindow
-      if (deltaTooLarge)
-        log.info("writer delta exceeds the usable window, forking the parent view", {
-          sessionID: input.sessionID,
-          usable: writerWindow,
-        })
-      const forkMode = configuredFork || deltaTooLarge
-      const writerModel = !forkMode && ownModel ? { providerID: ownModel.providerID, modelID: ownModel.modelID } : input.model
-      if (writerModel !== input.model)
-        log.info("checkpoint writer runs on its configured model", {
-          sessionID: input.sessionID,
-          providerID: writerModel.providerID,
-          modelID: writerModel.modelID,
-        })
-      const delta = forkMode ? [] : pending
-      if (!forkMode && delta.length === 0) {
+      const noForkModel = ownModel ? { providerID: ownModel.providerID, modelID: ownModel.modelID } : input.model
+      if (!configuredFork && pending.length === 0) {
         // Empty delta under fork:false signals either (a) a degenerate
         // session, or (b) a bug elsewhere advanced last_checkpoint_message_id
         // past the watermark. Either way, spawning a writer would be a
@@ -1157,88 +1155,116 @@ export const layer: Layer.Layer<
         })
         return "skipped" as const
       }
-      const forkCtx: ForkContext | undefined = yield* (buildPrefix
-        ? Effect.gen(function* () {
-            const watermarkMsg = msgs[watermarkIdx]
-            const parentAgentName = (watermarkMsg.info as { agent?: string }).agent
-            // NOTE: parentAgentName guard is scoped to the forkMode:true branch only —
-            // fork:false is agent-name-independent (always passes "checkpoint-writer"
-            // to buildPrefix), so a missing parent agent field must not gate it.
 
-            if (forkMode) {
-              if (!parentAgentName) {
-                log.warn(
-                  "tryStartCheckpointWriter: watermark has no agent, fork:true requires parent agent — skipping",
-                  { sessionID: input.sessionID, endMessageID },
-                )
-                return undefined as ForkContext | undefined
-              }
-              // fork:true — preserve existing prefix-cache parent-fork behavior.
-              // Build system + tools + inheritedMessages snapshot via capture ref
-              // using the parent agent's identity and the full slice up to watermark.
-              // The closure inside SessionPrompt.layer resolves Agent.Info and Provider.Model.
-              const msgsAtWatermark = msgs.slice(0, watermarkIdx + 1)
-              const prefix = yield* buildPrefix({
-                sessionID: input.sessionID,
-                agentName: parentAgentName,
-                providerID: input.model.providerID,
-                modelID: input.model.modelID,
-                msgs: msgsAtWatermark,
-              })
-              return {
-                modelIdentity: prefix.modelIdentity,
-                system: prefix.system,
-                turnContext: prefix.turnContext,
-                tools: prefix.tools,
-                activeTools: prefix.activeTools,
-                loadedMcpTools: prefix.loadedMcpTools,
-                inheritedMessages: prefix.inheritedMessages,
-                parentPermission: prefix.parentPermission,
-                watermarkMsgID: endMessageID as MessageID,
-                model: {
-                  providerID: input.model.providerID as ProviderID,
-                  modelID: input.model.modelID as ModelID,
-                },
-              } satisfies ForkContext
-            }
-
-            // fork:false — cold-start: use the writer's own system + tools and
-            // a delta slice since the last checkpoint. capture() resolves the
-            // checkpoint-writer agent's own definition when agentName is
-            // "checkpoint-writer", so a single call returns:
-            //   - system + tools = writer's (because agentName === "checkpoint-writer"),
-            //   - inheritedMessages = the delta we pass in, converted to ModelMessage[],
-            //   - parentPermission = writer's own permission (used for tool-availability filter).
-            // Earlier draft considered two buildPrefix calls (one with msgs:[] for
-            // system+tools, one with msgs:delta for messages); rejected because
-            // buildLLMRequestPrefix `Effect.die`s if msgs has no user message.
-            // Delta is precomputed (and the empty-delta case is short-circuited)
-            // above, before session.create.
-            const writerPrefix = yield* buildPrefix({
-              sessionID: input.sessionID,
-              agentName: "checkpoint-writer",
-              providerID: writerModel.providerID,
-              modelID: writerModel.modelID,
-              msgs: delta,
-            })
-
-            return {
-              modelIdentity: writerPrefix.modelIdentity,
-              system: writerPrefix.system,
-              turnContext: writerPrefix.turnContext,
-              tools: writerPrefix.tools,
-              activeTools: writerPrefix.activeTools,
-              loadedMcpTools: writerPrefix.loadedMcpTools,
-              inheritedMessages: writerPrefix.inheritedMessages,
-              parentPermission: writerPrefix.parentPermission,
-              watermarkMsgID: endMessageID as MessageID,
-              model: {
-                providerID: writerModel.providerID as ProviderID,
-                modelID: writerModel.modelID as ModelID,
-              },
-            } satisfies ForkContext
+      // fork:false — cold-start: use the writer's own system + tools and
+      // a delta slice since the last checkpoint. capture() resolves the
+      // checkpoint-writer agent's own definition when agentName is
+      // "checkpoint-writer", so a single call returns:
+      //   - system + tools = writer's (because agentName === "checkpoint-writer"),
+      //   - inheritedMessages = the delta we pass in, converted to ModelMessage[],
+      //   - parentPermission = writer's own permission (used for tool-availability filter).
+      // Earlier draft considered two buildPrefix calls (one with msgs:[] for
+      // system+tools, one with msgs:delta for messages); rejected because
+      // buildLLMRequestPrefix `Effect.die`s if msgs has no user message.
+      // The empty-delta case is short-circuited above, before session.create.
+      const writerPrefix = configuredFork
+        ? undefined
+        : yield* buildPrefix({
+            sessionID: input.sessionID,
+            agentName: "checkpoint-writer",
+            providerID: noForkModel.providerID,
+            modelID: noForkModel.modelID,
+            msgs: pending,
           })
-        : Effect.succeed(undefined as ForkContext | undefined))
+      // FC-036: a delta that outgrows the window (no checkpoint yet, or writers
+      // kept failing while it grew) would overflow every writer, and the
+      // watermark would never advance. Fork the parent's view instead: it is the
+      // context the parent is running with, so it fits.
+      //
+      // FC-047: a no-fork writer reads no parent prefix, so it can run on the
+      // model configured as `agent."checkpoint-writer".model`. The delta then has
+      // to fit that model's window. Forking the parent view always runs on the
+      // parent's model: that view only fits the window it came from.
+      //
+      // The check sizes the request the writer is sent, not the stored parts:
+      // a tool's metadata (a code-mode tool's nested trace) and a reasoning
+      // part's provider metadata are stored but never reach a writer on another
+      // model, and counting them overstated deltas about threefold.
+      const writerRequest = writerPrefix ? estimateWriterRequestTokens(writerPrefix) : 0
+      const deltaTooLarge =
+        writerPrefix !== undefined && writerWindow != null && writerWindow > 0 && writerRequest > writerWindow
+      if (deltaTooLarge)
+        log.info("writer delta exceeds the usable window, forking the parent view", {
+          sessionID: input.sessionID,
+          usable: writerWindow,
+          estimated: writerRequest,
+        })
+      const forkMode = configuredFork || deltaTooLarge
+      const writerModel = forkMode ? input.model : noForkModel
+      if (writerModel !== input.model)
+        log.info("checkpoint writer runs on its configured model", {
+          sessionID: input.sessionID,
+          providerID: writerModel.providerID,
+          modelID: writerModel.modelID,
+        })
+      const forkCtx: ForkContext | undefined = yield* Effect.gen(function* () {
+        if (writerPrefix && !forkMode)
+          return {
+            modelIdentity: writerPrefix.modelIdentity,
+            system: writerPrefix.system,
+            turnContext: writerPrefix.turnContext,
+            tools: writerPrefix.tools,
+            activeTools: writerPrefix.activeTools,
+            loadedMcpTools: writerPrefix.loadedMcpTools,
+            inheritedMessages: writerPrefix.inheritedMessages,
+            parentPermission: writerPrefix.parentPermission,
+            watermarkMsgID: endMessageID as MessageID,
+            model: {
+              providerID: writerModel.providerID as ProviderID,
+              modelID: writerModel.modelID as ModelID,
+            },
+          } satisfies ForkContext
+
+        const watermarkMsg = msgs[watermarkIdx]
+        const parentAgentName = (watermarkMsg.info as { agent?: string }).agent
+        // NOTE: parentAgentName guard is scoped to the fork branch only —
+        // fork:false is agent-name-independent (always passes "checkpoint-writer"
+        // to buildPrefix), so a missing parent agent field must not gate it.
+        if (!parentAgentName) {
+          log.warn(
+            "tryStartCheckpointWriter: watermark has no agent, fork:true requires parent agent — skipping",
+            { sessionID: input.sessionID, endMessageID },
+          )
+          return undefined as ForkContext | undefined
+        }
+        // fork:true — preserve existing prefix-cache parent-fork behavior.
+        // Build system + tools + inheritedMessages snapshot via capture ref
+        // using the parent agent's identity and the full slice up to watermark.
+        // The closure inside SessionPrompt.layer resolves Agent.Info and Provider.Model.
+        const msgsAtWatermark = msgs.slice(0, watermarkIdx + 1)
+        const prefix = yield* buildPrefix({
+          sessionID: input.sessionID,
+          agentName: parentAgentName,
+          providerID: input.model.providerID,
+          modelID: input.model.modelID,
+          msgs: msgsAtWatermark,
+        })
+        return {
+          modelIdentity: prefix.modelIdentity,
+          system: prefix.system,
+          turnContext: prefix.turnContext,
+          tools: prefix.tools,
+          activeTools: prefix.activeTools,
+          loadedMcpTools: prefix.loadedMcpTools,
+          inheritedMessages: prefix.inheritedMessages,
+          parentPermission: prefix.parentPermission,
+          watermarkMsgID: endMessageID as MessageID,
+          model: {
+            providerID: input.model.providerID as ProviderID,
+            modelID: input.model.modelID as ModelID,
+          },
+        } satisfies ForkContext
+      })
 
       if (!forkCtx) return "skipped" as const
       if (forkCtx.inheritedMessages.length === 0) {
