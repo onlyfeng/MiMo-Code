@@ -15,6 +15,7 @@ import { InboxTable } from "../../src/inbox/inbox.sql"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { Database } from "../../src/storage"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
+import { MessageV2 } from "../../src/session/message-v2"
 import { Log } from "../../src/util"
 import { Plugin } from "../../src/plugin"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -99,13 +100,15 @@ const recordingActor = Layer.effect(
   }),
 )
 
-// Custom prefix-capture closure — records its args and returns canned values.
-// Used to assert what tryStartCheckpointWriter passes to the prefix-capture
-// helper for each (forkMode, lastCheckpointMessageID) combination. Returns
-// non-empty system/tools so the resulting forkCtx is non-undefined.
+// Custom prefix-capture closure — records its args and returns a canned
+// system/tools. Used to assert what tryStartCheckpointWriter passes to the
+// prefix-capture helper for each (forkMode, lastCheckpointMessageID)
+// combination. The inherited messages are rendered by the real model-message
+// converter, as the production capture does, so a writer request is sized from
+// what a provider would receive.
 function installRecordingCapture() {
   const fn: PrefixCaptureFn = (input) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const first = (input.msgs[0] as { info?: { role?: string; id?: string } } | undefined)?.info
       captureLog.calls.push({
         sessionID: input.sessionID,
@@ -116,15 +119,19 @@ function installRecordingCapture() {
         firstMsgID: first?.id,
         messageIDs: input.msgs.map((message) => (message as { info: { id: string } }).info.id),
       })
+      const inheritedMessages = yield* MessageV2.toModelMessagesEffect(
+        input.msgs as MessageV2.WithParts[],
+        ProviderTest.model({ providerID: ProviderID.make(input.providerID), id: ModelID.make(input.modelID) }),
+      )
       return {
         modelIdentity: "recorded-model-identity",
         system: ["sys-canned"],
         tools: {},
         activeTools: [],
-        inheritedMessages: [{ role: "user" as const, content: "canned" } as never],
+        inheritedMessages,
         parentPermission: [],
       }
-    })
+    }).pipe(Effect.orDie)
   prefixCaptureRef.current = fn
 }
 
@@ -167,7 +174,12 @@ const reset = Effect.sync(() => {
 // natural tail above TAIL_MAX_TOKENS, so the boundary stays at u2 (idx 2).
 // Only the legacy alignment test replaces u2's persisted part with tool_result.
 const PAD = "x ".repeat(25_000) // ~50K chars → ~12.5K tokens
-const seedFourMessages = Effect.fn("seedFourMessages")(function* (missingWatermarkAgent = false) {
+// `toolMetadata` is stored on a1's tool part but never rendered into a model
+// message, like a code-mode tool's nested trace.
+const seedFourMessages = Effect.fn("seedFourMessages")(function* (
+  missingWatermarkAgent = false,
+  toolMetadata: Record<string, unknown> = {},
+) {
   const ssn = yield* SessionNs.Service
   const info = yield* ssn.create({})
   const t0 = Date.now()
@@ -215,7 +227,7 @@ const seedFourMessages = Effect.fn("seedFourMessages")(function* (missingWaterma
       input: {},
       output: "ok",
       title: "",
-      metadata: {},
+      metadata: toolMetadata,
       time: { start: t0 + 1, end: t0 + 2 },
     },
   })
@@ -602,8 +614,11 @@ describe("checkpoint writer forkContext shape per mode", () => {
               context: { usable, used: 500 },
             })
             expect(outcome).toBe("started")
-            expect(captureLog.calls).toHaveLength(1)
-            expect(captureLog.calls[0].agentName).toBe(usable < 10_000 ? "build" : "checkpoint-writer")
+            // The writer's own request is built and sized first; only when it
+            // does not fit is the parent's view captured for the fork.
+            expect(captureLog.calls.map((c) => c.agentName)).toEqual(
+              usable < 10_000 ? ["checkpoint-writer", "build"] : ["checkpoint-writer"],
+            )
           }),
         { config: { checkpoint: { fork: false } } },
       ),
@@ -658,9 +673,32 @@ describe("checkpoint writer forkContext shape per mode", () => {
           yield* writerModel(1_000)
           const { info } = yield* seedFourMessages()
           expect(yield* startWriter(info, 1_000_000)).toBe("started")
-          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["build", "test-model"]])
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([
+            ["checkpoint-writer", "writer-model"],
+            ["build", "test-model"],
+          ])
           expect(spawnLog.lastInput?.model?.modelID).toBe("test-model")
           expect(forkModel()).toBe("test-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:false sizes the delta by the writer's rendered request, not the stored parts",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          // Stored, the delta carries a ~100K-token tool trace; rendered, the
+          // writer receives only u2's ~17K-token padding, which fits 60K.
+          yield* writerModel(60_000)
+          const { info } = yield* seedFourMessages(false, { trace: "y".repeat(300_000) })
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "writer-model"]])
+          expect(spawnLog.lastInput?.model?.modelID).toBe("writer-model")
+          expect(forkModel()).toBe("writer-model")
         }),
       { config: { checkpoint: { fork: false } } },
     ),
