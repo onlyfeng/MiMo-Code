@@ -1019,11 +1019,17 @@ own source list remains the complete watch surface.
 - Observable contract:
   - With `checkpoint.fork: false` the writer is sent its own system prompt and
     the messages since the last checkpoint. When the caller reports the
-    parent's usable window (`context`) and that delta's estimate exceeds it,
+    parent's usable window (`context`) and that request's estimate exceeds it,
     the writer forks the parent's view instead, exactly as under
     `fork: true` (including FC-021's choice between the full and the parent's
     own view). The log line is `writer delta exceeds the usable window,
-    forking the parent view`.
+    forking the parent view`, with the `estimated` request size.
+  - The estimate covers what the writer is sent: its system prompt and the
+    delta rendered as model messages. Tool metadata (such as a code-mode
+    tool's nested trace) and reasoning provider metadata stay in the stored
+    parts but never reach the writer, so they are not counted. The writer's
+    request is therefore built before the decision; when it does not fit, the
+    parent's view is captured as well.
   - Without `context`, or with a delta that fits, `fork: false` is unchanged.
   - When the writer runs on its own configured model (FC-047), the delta is
     checked against that model's usable window instead; the fork still runs on
@@ -1038,12 +1044,22 @@ own source list remains the complete watch surface.
 - Upstream relationship: upstream has no fallback for either mode. Fork fix of
   shared code; `dev/compat` inherits it unchanged.
 - Watch surfaces: the file above; FC-021's view projection in the same
-  function; `estimateViewTokens`; the `context` passed by
+  function; `estimateWriterRequestTokens`; `MessageV2.toModelMessagesEffect`,
+  which decides what a stored part renders to; the `context` passed by
   `packages/cli/src/session/prune.ts`.
 - Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
   "fork:false forks the parent view only when the delta exceeds the usable
   window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
-  writer's own). Dropping the fallback fails the first case.
+  writer's own). Dropping the fallback fails the first case. The test's prefix
+  capture renders messages with the real `MessageV2.toModelMessagesEffect`.
+- 2026-11-07 sizing change: on a coordinator session whose code-mode tool
+  stores nested traces, stored parts were about three times the rendered
+  request (3 hours: 12.9 MB stored, 6.3 MB of it tool metadata and 2 MB
+  reasoning metadata). Sizing the stored parts sent 9 of 54 writers a day to a
+  parent-model fork at about eight times the configured writer's cost, while
+  the rendered parent view was about 600 KB. "fork:false sizes the delta by the
+  writer's rendered request, not the stored parts" fails when the check goes
+  back to the stored parts.
 - Retirement condition: upstream bounds the no-fork writer's delta.
 ### FC-044 — the checkpoint writer returns only `.output` from exec calls
 
@@ -1173,9 +1189,9 @@ own source list remains the complete watch surface.
     model-group name) is the writer's model: its system prompt and tools are
     built for that model, and the actor is spawned on it. The log line is
     `checkpoint writer runs on its configured model`.
-  - The FC-036 delta check uses that model's usable window. When the delta does
-    not fit, the writer forks the parent's view on the parent's model, as
-    before. A window of 0 (the model publishes no limit) bounds nothing, as in
+  - The FC-036 delta check sizes the writer's rendered request against that
+    model's usable window. When it does not fit, the writer forks the parent's
+    view on the parent's model, as before. A window of 0 (the model publishes no limit) bounds nothing, as in
     `isOverflow`.
   - With `checkpoint.fork: true`, without a configured writer model, or when it
     does not resolve (logged as `agent model resolution failed`), the writer runs
@@ -1195,7 +1211,8 @@ own source list remains the complete watch surface.
 - Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
   "fork:false runs the writer on its configured model", "fork:false checks the
   delta against the configured model's window and forks the parent view on the
-  parent's model", "fork:false treats a writer model with an unknown window as
+  parent's model", "fork:false sizes the delta by the writer's rendered request,
+  not the stored parts", "fork:false treats a writer model with an unknown window as
   unbounded", "fork:true keeps the parent's model even when the writer names
   one" and "fork:false without a configured writer model keeps the parent's
   model"; `packages/cli/test/session/agent-model-ref.test.ts` runs the
