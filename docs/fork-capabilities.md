@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-06
-- Upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
-- Prior reviewed upstream: `10b03cf04fe43aae89638e90570779c1e1216c5a`
-- Review completion: complete capability/content review (N=1); both published acceptance commits passed exact-SHA lint/typecheck/test (including compat Windows), recorded in the linked synchronization report. Final docs-only descendants require the non-doc tree-equivalence and remote/ancestry checks in the execution receipt. This content-only selection does not advance the historical runtime/test or bundled-guidance snapshots below.
+- Last reviewed: 2026-11-09
+- Upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
+- Prior reviewed upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
+- Review completion: complete content review (N=1), FC-011 Compose Next empty states; exact-SHA publication acceptance pending in [the synchronization record](upstream-sync-2026-11-09.md). Historical runtime/test snapshots below are not advanced by this guidance-only selection.
 - Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
 - Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
-- Bundled guidance content: `5d728151e06bfc187e90b244a9fbd91fe4126fe6` (FC-043 adds bounded Actor cancel guidance; skill guidance from `fd04de73ced82599baac249e9cf96dfb55b9d778` remains unchanged)
-- Prior fork `main` tip: `07ac991f73dfa73216938571660a17c54f3be916`; prior fork `dev/compat` tip: `12bc737c9542ef944dbf3b62540c367fbd30d04b`
+- Bundled guidance content: `e7805cfb3903a8f7a0aafd6fd024b5e74bf49b3d` (FC-011 Compose Next empty states; existing FC-043 guidance retained).
+- Prior fork `main` tip: `dee7b1b84b7853bf47b43aea3d490e1b42dc7792`; prior fork `dev/compat` tip: `c9aac17e023b5d7d4d28d11071077a79f3a4101f`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-06 non-interactive trust documentation](upstream-sync-2026-11-06.md), C01 (N=1). Adopt upstream’s workspace-trust and headless permission description, retaining FC-012’s fork-specific private reporting routes and FD-001’s invocation-scoped approval. Starting main `9550108ac29870628a3a9c5c1d6b920259651eea` and compat `4ad2d84daa40c2e787becbdc081f06369cbaed78` already share the reviewed entry-point behavior. No runtime, tests, SDK, dependency or DC policy changes; no owner retires. Final publication and CI evidence is recorded in the execution receipt.
+Latest reviewed synchronization: [2026-11-09 Compose Next empty states](upstream-sync-2026-11-09.md), C01 (N=1). Adopt explicit Report and Journey log empty-state markers and the three accompanying spec examples. FC-011 owns the shared guidance; no runtime/test, schema, dependency or DC implementation changes. All active FD/FC/DC contracts are retained; publication acceptance is recorded in the linked report.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -2029,6 +2029,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   behavior-focused tests.
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
+
+- 2026-11-09 synchronization: adopt upstream `26d1f3a6` unchanged. Compose Next keeps Report as `[Not finalized yet]` until finalized and Journey log as `None` until a useful entry replaces it; three upstream specs illustrate those markers. Explicit workflow invocation, workspace ownership, discovery/permission and Finish authorization boundaries remain unchanged. Content evidence only; no new runtime behavior is claimed.
 
 - 2026-10-30 registry correction: upstream `2b993ac9` removed the actor shell invocation format on 2026-09-24, including `actor.shell.txt`, its tokenizer/help, heredoc flag-placement errors and the `actor.shell` tests; FC-018 retired with them. Those references leave the observable contract, watch surfaces and Tests/evidence. JSON Actor guidance in `actor.txt` remains. No behavior or content changes.
 

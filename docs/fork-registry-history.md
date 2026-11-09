@@ -3617,3 +3617,7 @@ logged`, and the peer `success`/`failure` variants of
   API or token-helper assumptions and do not count as executed validation of
   today's capability API. Delete or deliberately reconnect them in a focused
   cleanup; the current actor/quarantine result is unaffected.
+
+## 2026-11-09 Compose Next empty states
+
+Selected upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8..26d1f3a601ab29533a2eaf787895236b92c9aed7`; starting main `dee7b1b84b7853bf47b43aea3d490e1b42dc7792` and compat `c9aac17e023b5d7d4d28d11071077a79f3a4101f`. C01 (N=1) adopts FC-011 explicit Report/Journey log markers and three spec examples without adaptation. Guidance snapshot `e7805cfb3903a8f7a0aafd6fd024b5e74bf49b3d`; runtime/test snapshots remain historical. All active shared and eleven compat owners retain their contracts. See [the synchronization record](upstream-sync-2026-11-09.md) for validation and publication.
