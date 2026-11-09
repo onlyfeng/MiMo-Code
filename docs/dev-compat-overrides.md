@@ -14,8 +14,8 @@ registry/history commit does not advance either behavior reference below.
 - Scope: C01 (N=1), Compose Next Report/Journey log empty states, in [the shared synchronization record](upstream-sync-2026-11-09.md).
 - Starting main: `dee7b1b84b7853bf47b43aea3d490e1b42dc7792`; starting compat: `c9aac17e023b5d7d4d28d11071077a79f3a4101f`; inherited main acceptance: `b3f6bfd6`.
 - Result: inherit all four upstream files and shared FD/FC/history/report unchanged. Canonical owner FC-011; FC-005 discovery and DC-CONTEXT-001 content caps retain their contracts. All eleven active DC owners retain their implementations and exit conditions; no owner moves or retires.
-- Validation: whitespace, local Markdown links, identical shared documents, exact upstream content adoption, and whole-tree equality outside docs and the one bundled Compose Next skill file against starting compat. Content-only selection; no local runtime test pass is claimed. Historical runtime/test references remain historical.
-- Publication: exact-SHA lint/typecheck/test (including Windows) pending in the shared report.
+- Validation: whitespace, local Markdown links, identical shared documents, exact upstream content adoption, and whole-tree equality outside docs and the one bundled Compose Next skill file against starting compat. Content-only selection; focused skill regressions pass 16/16 on pinned Bun 1.3.14. Historical runtime/test references remain historical.
+- Publication: published acceptance `80217fac92e4cf4d134a724369369aa3b69df74a`; GitHub reports Actions disabled (HTTP 422), so exact-SHA lint/typecheck/test including Windows remain blocked. See the shared report for local checks and recovery conditions.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
