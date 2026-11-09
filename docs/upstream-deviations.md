@@ -17,7 +17,7 @@ renumbered to close gaps.
 - Last reviewed: 2026-11-09
 - Upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
 - Prior reviewed upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
-- Review completion: complete content review (N=1), FC-011 Compose Next empty states; exact-SHA publication acceptance pending in [the synchronization record](upstream-sync-2026-11-09.md). Historical runtime/test snapshots below are not advanced by this guidance-only selection.
+- Review completion: complete content review (N=1), FC-011 Compose Next empty states; publication succeeded; focused local regressions pass 16/16 per branch, but exact-SHA CI is blocked by GitHub Actions being disabled, recorded in [the synchronization record](upstream-sync-2026-11-09.md). Historical runtime/test snapshots below are not advanced by this guidance-only selection.
 - Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
 - Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
 - Bundled guidance content: `e7805cfb3903a8f7a0aafd6fd024b5e74bf49b3d` (FC-011 Compose Next empty states; existing FC-043 guidance retained).
