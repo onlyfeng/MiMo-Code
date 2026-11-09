@@ -10,14 +10,12 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-06; selected upstream `10b03cf04fe43aae89638e90570779c1e1216c5a..3a12665a9e27789b04dc7529d4ce0c10128e9ad8`.
-- Scope: C01 (N=1), non-interactive workspace trust and approval documentation, in [the shared synchronization record](upstream-sync-2026-11-06.md).
-- Starting main: `9550108ac29870628a3a9c5c1d6b920259651eea`; starting compat: `4ad2d84daa40c2e787becbdc081f06369cbaed78`; inherited main content: `28a37f58e4b665ab63173b7348c35efb201a15a2`.
-- Result: inherit SECURITY.md and shared FD/FC/history/report unchanged; preserve fork-specific private vulnerability reporting. Main owns C01 under FC-012; FD-001’s invocation-scoped approval remains intact. No runtime, test, schema, generated artifact, dependency or migration changes.
-- 2026-11-07 propagation: main FC-053 now owns the former DC-PROVIDER-001 routing and reasoning default, so eleven DC owners remain; the line below records the 2026-11-06 review as it stood.
-- Override review: all twelve DC owners remain compat-owned. DC-SESSION-001 process/session ownership does not add a workspace-trust gate; DC-NET-001/002, DC-PLATFORM-001, DC-CONTEXT-001, DC-MODEL-001, DC-ACTOR-001/002, DC-TUI-001, DC-PROVIDER-001, DC-WEBSEARCH-001 and DC-WEBFETCH-001 retain their implementations and exit conditions. No override adapts, retires or moves.
-- Validation: whitespace, local Markdown links, identical shared documents, preserved reporting section and complete tree equality outside SECURITY.md/docs against starting compat. Content-only selection; no local runtime test pass is claimed. Historical runtime/test references remain historical.
-- Publication: acceptance commit `6f85fdb7e70dd4f4953f016a3d6a5d809e2e96da` passed [lint](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147168), [typecheck](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163147229), and [test](https://github.com/onlyfeng/MiMo-Code/actions/runs/42163146988): all ten test jobs succeeded, including Windows runtime and launcher extraction. Main acceptance `28a37f58` also passed all three workflows. This receipt changes only docs; final docs-only descendants require tree equality outside docs, live upstream/main/compat ancestry and remote equality in the execution receipt.
+- Last reviewed: 2026-11-09; selected upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8..26d1f3a601ab29533a2eaf787895236b92c9aed7`.
+- Scope: C01 (N=1), Compose Next Report/Journey log empty states, in [the shared synchronization record](upstream-sync-2026-11-09.md).
+- Starting main: `dee7b1b84b7853bf47b43aea3d490e1b42dc7792`; starting compat: `c9aac17e023b5d7d4d28d11071077a79f3a4101f`; inherited main acceptance: `b3f6bfd6`.
+- Result: inherit all four upstream files and shared FD/FC/history/report unchanged. Canonical owner FC-011; FC-005 discovery and DC-CONTEXT-001 content caps retain their contracts. All eleven active DC owners retain their implementations and exit conditions; no owner moves or retires.
+- Validation: whitespace, local Markdown links, identical shared documents, exact upstream content adoption, and whole-tree equality outside docs and the one bundled Compose Next skill file against starting compat. Content-only selection; no local runtime test pass is claimed. Historical runtime/test references remain historical.
+- Publication: exact-SHA lint/typecheck/test (including Windows) pending in the shared report.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 

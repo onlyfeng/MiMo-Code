@@ -5624,3 +5624,7 @@ files remain byte-identical to the accepted main correction.
   API choice, and honors declared reasoning capabilities for compatible
   models without relying solely on model names. If propagated to `main`, move
   the contract to the shared registry.
+
+## 2026-11-09 Compose Next empty states
+
+C01 (N=1), FC-011 shared guidance, inherited unchanged from main `b3f6bfd6`. All eleven active DC contracts retained; no runtime/test changes. Previous 2026-11-06 acceptance remains in [its synchronization report](upstream-sync-2026-11-06.md); current evidence is in [the new report](upstream-sync-2026-11-09.md).
