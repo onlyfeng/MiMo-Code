@@ -24,7 +24,9 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRetry } from "../../src/session/retry"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util"
-import { tmpdir } from "../fixture/fixture"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 import {
   startScriptedLLMServer,
   textStopResponse,
@@ -60,6 +62,10 @@ function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Servi
     fx.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer, Bus.defaultLayer))),
   )
 }
+
+const it = testEffect(
+  Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer, Bus.defaultLayer, CrossSpawnSpawner.defaultLayer),
+)
 
 function writeConfig(dir: string, origin: string, retry?: Record<string, unknown>) {
   return Bun.write(
@@ -713,21 +719,19 @@ describe("invalid-output continuation — integration", () => {
     }
   })
 
-  test("endless empty output stops at the default bound even under a persistent server budget", async () => {
-    await using tmp = await tmpdir({ git: true })
-    // A late answer exists: an unbounded retry would reach it and succeed.
-    const stub = startScriptedLLMServer([
-      ...Array.from({ length: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 3 }, () => ({ lines: emptyStopResponse() })),
-      { lines: textStopResponse("too late") },
-    ])
-    try {
-      await writeConfig(tmp.path, stub.origin, {
-        server: { mode: "persistent", noDeadline: true, initialDelayMs: 1, maxDelayMs: 1 },
-      })
-      await Instance.provide({
-        directory: tmp.path,
-        fn: () =>
-          run(
+  // Nine real round trips; without the bound, twelve and the late answer.
+  it.live(
+    "endless empty output stops at the default bound even under a persistent server budget",
+    () =>
+      Effect.gen(function* () {
+        // A late answer exists: an unbounded retry would reach it and succeed.
+        const stub = startScriptedLLMServer([
+          ...Array.from({ length: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 3 }, () => ({ lines: emptyStopResponse() })),
+          { lines: textStopResponse("too late") },
+        ])
+        yield* Effect.addFinalizer(() => Effect.promise(() => stub.stop()))
+        yield* provideTmpdirInstance(
+          () =>
             Effect.gen(function* () {
               const sessions = yield* Session.Service
               const prompt = yield* SessionPrompt.Service
@@ -749,13 +753,22 @@ describe("invalid-output continuation — integration", () => {
                 message: "empty output",
               })
             }),
-          ),
-      })
-    } finally {
-      await stub.stop()
-    }
-    // Nine real round trips; without the bound, twelve and the late answer.
-  }, 30_000)
+          {
+            git: true,
+            config: {
+              enabled_providers: ["alibaba"],
+              provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
+              agent: { build: { model: "alibaba/qwen-plus" } },
+              retry: {
+                server: { mode: "persistent", noDeadline: true, initialDelayMs: 1, maxDelayMs: 1 },
+                emptyOutput: { initialDelayMs: 1, maxDelayMs: 1 },
+              },
+            },
+          },
+        )
+      }),
+    30_000,
+  )
 
   test("a prompt queued while the recovered attempt streams waits for it and clears the record once both succeed", async () => {
     await using tmp = await tmpdir({ git: true })
