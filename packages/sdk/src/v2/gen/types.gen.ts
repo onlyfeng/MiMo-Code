@@ -2152,7 +2152,7 @@ export type ProviderConfig = {
      * Timeout in milliseconds between streamed SSE events for this provider. SSE comments such as gateway keep-alives do not count, so a stalled upstream held open by heartbeats is aborted. Off unless set.
      */
     eventTimeout?: number
-    [key: string]: unknown | string | boolean | number | false | number | false | number | number | undefined
+    [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
   }
   /**
    * Provider-specific overrides for retry budgets
@@ -2267,6 +2267,30 @@ export type ProviderConfig = {
       jitterRatio?: number
     }
     server?: {
+      /**
+       * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline
+       */
+      mode?: "bounded" | "persistent"
+      /**
+       * Retries after the initial attempt; 0 disables retries and the maximum is 100
+       */
+      maxRetries?: number
+      /**
+       * Wall-clock retry deadline in milliseconds; use noDeadline for an explicit unlimited deadline
+       */
+      deadlineMs?: number
+      /**
+       * Disable the wall-clock retry deadline explicitly; maxRetries still applies to bounded budgets
+       */
+      noDeadline?: boolean
+      initialDelayMs?: number
+      maxDelayMs?: number
+      jitterRatio?: number
+    }
+    /**
+     * Live-step retries after a model returns no usable output to an accepted request. Each attempt is billed, so the default is bounded and independent of server.
+     */
+    emptyOutput?: {
       /**
        * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline
        */
@@ -2744,6 +2768,30 @@ export type Config = {
       jitterRatio?: number
     }
     server?: {
+      /**
+       * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline
+       */
+      mode?: "bounded" | "persistent"
+      /**
+       * Retries after the initial attempt; 0 disables retries and the maximum is 100
+       */
+      maxRetries?: number
+      /**
+       * Wall-clock retry deadline in milliseconds; use noDeadline for an explicit unlimited deadline
+       */
+      deadlineMs?: number
+      /**
+       * Disable the wall-clock retry deadline explicitly; maxRetries still applies to bounded budgets
+       */
+      noDeadline?: boolean
+      initialDelayMs?: number
+      maxDelayMs?: number
+      jitterRatio?: number
+    }
+    /**
+     * Live-step retries after a model returns no usable output to an accepted request. Each attempt is billed, so the default is bounded and independent of server.
+     */
+    emptyOutput?: {
       /**
        * bounded stops after maxRetries; persistent ignores the retry count and waits until cancellation or deadline
        */

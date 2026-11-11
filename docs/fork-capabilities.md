@@ -57,7 +57,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-010 | WebFetch and SSRF destination classification                                                              | Adapted contract plus fork hardening                             | Preserve complete `fe80::/10` classification, per-hop authorization, and resource bounds |
 | FC-011 | model prompts, path guidance, and bundled skills                                                          | Fork-facing guidance                                             | Preserve factual shared guidance                                                         |
 | FC-012 | publication, contribution, security                                                                       | Fork-specific process                                            | Preserve fork routing                                                                    |
-| FC-013 | Retry configuration, request/candidate/judge scopes and MaxMode final step                                | Shared retry plus fork policy corrections                        | Preserve scope budgets, persistent live-step recovery (bounded for background system agents), tool-free final step and status isolation |
+| FC-013 | Retry configuration, request/candidate/judge scopes and MaxMode final step                                | Shared retry plus fork policy corrections                        | Preserve scope budgets, persistent live-step recovery (bounded for background system agents and for pure-empty output), tool-free final step and status isolation |
 | FC-014 | `.cursor/environment.json` Cloud Agent dev environment                                                    | Fork-only infra absent from upstream                             | Preserve Bun bootstrap and read-only `upstream` remote; never send to upstream           |
 | FC-015 | compaction context budget, projection, frozen prefix, and trigger ratio                                   | Upstream trigger plus bounded fork projection                    | Preserve ratio parity, no-tool summaries, and config precedence                          |
 | FC-016 | TUI voice Prompt ownership and grapheme-safe editor offsets                                               | Upstream voice protocol plus fork lifecycle/editor hardening     | Preserve owner identity, drain-before-idle, and grapheme boundaries                      |
@@ -2187,6 +2187,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
 
+- 2026-11-11: pure-empty `InvalidOutputError` retries under its own `emptyOutput` budget instead of the server budget, superseding the 2026-10-22 persistent pure-empty budget for main and ordinary actors. `decide` still reports `kind: "server"` and adds `emptyOutput: true`; `budgetFor` routes that flag to `config.emptyOutput` after the scope (request, max-candidate, max-judge), host-class, network and rate-limit checks, so retry parts, status events and the SDK `kind` enum are unchanged. Default: bounded, `EMPTY_OUTPUT_MAX_RETRIES` (8) retries, no wall-clock deadline, server delays (2 s doubling to 30 s). `retry.server` no longer affects empty output; `retry.emptyOutput` (global or `provider.<id>.retry`) configures it, and `mode: "persistent"` restores the previous behavior. Exhaustion ends the turn with `InvalidOutputError` and keeps the retry record (existing processor path). The system-agent cap still applies on top. Why: the request was accepted, so every empty attempt is billed. In production (2026-11-03..11, main and ordinary actors, one gateway), 9 of 12 recovered streaks recovered within 8 retries, while 26 unrecovered streaks averaged 22 retries (up to 51) before a cancel or a newer input ended them; one main turn spent 33 retries in 17 minutes on a 322K-token context. Upstream (`XiaomiMiMo/MiMo-Code`) keeps empty output on the persistent server budget. Evidence: `test/session/retry.test.ts` "InvalidOutputError retries under the bounded emptyOutput budget, not the server budget" (defaults, persistent-server independence, opt-in persistence, provider precedence, scope precedence) and "policy gives up on endless empty output after the emptyOutput count" (stops after `EMPTY_OUTPUT_MAX_RETRIES + 1` attempts under a persistent server budget); `test/session/invalid-output-continuation.test.ts` "endless empty output stops at the default bound even under a persistent server budget" makes `EMPTY_OUTPUT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`. With the `budgetFor` routing removed, the integration test reaches the late scripted answer (12 requests instead of 9) and both unit tests fail on their assertions. The endless-retry cancellation test and the system-agent test now opt into `emptyOutput: { mode: "persistent" }` explicitly.
+
 - 2026-11-02: background system agents (`SYSTEM_SPAWNED_AGENT_TYPES`: checkpoint writer, dream, distill) retry within a bounded budget whatever the configured mode: at most `SYSTEM_AGENT_MAX_RETRIES` (4) retries within `SYSTEM_AGENT_RETRY_DEADLINE_MS` (5 min), keeping the class's delays (`SessionRetry.boundForSystemAgent`, passed as the stream policy's `cap`, which applies after the network and persistent-host constraints that otherwise reset a budget to persistent, and in the request ladder of `llm.ts`). They get another chance on their own schedule (the next checkpoint threshold or pass), so a persistent budget only held their slot. In production a checkpoint writer whose model kept returning empty output retried for about 21 hours, held the writer slot and froze the parent's checkpoint watermark. Main and ordinary actors keep the 2026-10-22 persistent pure-empty budget. Evidence: `test/session/invalid-output-continuation.test.ts` "checkpoint-writer gives up on endless empty output within its bounded budget" makes `SYSTEM_AGENT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`; without the bound it keeps retrying until the scripted answer. `test/session/retry.test.ts` "a system-agent cap bounds network and persistent-host retries" stops an `ECONNRESET` and a persistent host error after 4 retries, and fails when the cap is applied before those constraints. "checkpoint-writer bounds request retries before provider output even when configured persistent" sends 503 under persistent request and server budgets and stops after `(SYSTEM_AGENT_MAX_RETRIES + 1)²` requests (each bounded processor attempt runs a bounded request ladder); without the request-ladder cap it reaches the scripted answer.
 
 - 2026-10-28 quota synchronization: adopt terminal handling for complete HTTP429/code429/type limitation/exact quota exhausted signals in SessionRetry.decide, independent of provider identity and preserved through serialization. Host decisions retain precedence; SDK normalization is unchanged. Adapt the incoming ordinary429 test to the existing bounded request budget and persistent live-step rate-limit budget. Classification and all other retry contracts remain unchanged; see [C01](upstream-sync-2026-10-28-ebd06ee2.md).
@@ -2214,7 +2216,9 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 
 - Current default policy: server and rate-limit live-step recovery now use
   persistent retry without a deadline, matching network and upstream defaults.
-  Request, stream, unknown, candidate and judge budgets remain bounded. This
+  Request, stream, unknown, candidate and judge budgets remain bounded, and
+  pure-empty output uses the separate bounded `emptyOutput` budget (8 retries,
+  no deadline) rather than the server budget. This
   supersedes the server/rate-limit default retained in the 2026-09-17 sync;
   explicit user, project and provider overrides still apply. Cancellation,
   terminal errors, side-effect replay guards and the exact GPT overload
@@ -2240,6 +2244,9 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   nor count configured, the new persistent default applies. Any explicit mode
   keeps the existing provider-over-global precedence, and persistent mode
   ignores the count. Network behavior is unchanged by this compatibility rule.
+  `retry.emptyOutput` is an ordinary budget without that count rule: it
+  defaults to bounded with 8 retries, `mode: "persistent"` drops the count, and
+  `retry.server` settings never reach it.
   Request, max-candidate and max-judge scopes select their
   corresponding retry budgets; these rules are shared policy, not harness
   identity. `docs/architecture/retry-coordinator.md` and retry tests describe
@@ -2248,12 +2255,18 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Upstream relationship: adopts persistent network/server/rate-limit defaults
   while retaining bounded request/stream/unknown/candidate/judge budgets and
   fork budget resolution, final-step enforcement and subagent status isolation.
+  Upstream routes pure-empty `InvalidOutputError` to the persistent server
+  budget; the fork's `emptyOutput` budget (config key, `RetryDecision.emptyOutput`
+  flag and `budgetFor` branch) is fork-only and must survive syncs that touch
+  `decide` or `budgetFor`.
 - Watch surfaces: `packages/cli/src/session/max-mode.ts`,
   `packages/cli/src/session/prompt.ts`,
-  `packages/cli/src/session/retry.ts`,
+  `packages/cli/src/session/retry.ts`, `packages/cli/src/config/retry.ts`,
   `packages/cli/src/session/status.ts`, and processor final-step routing.
 - Tests/evidence: default budgets, overrides and classification in
-  `packages/cli/test/session/retry.test.ts`; the MaxMode final-step regressions in
+  `packages/cli/test/session/retry.test.ts`; system-agent and pure-empty bounds
+  end to end in `packages/cli/test/session/invalid-output-continuation.test.ts`;
+  the MaxMode final-step regressions in
   `packages/cli/test/session/prompt-effect.test.ts`, step-budget coverage in
   `packages/cli/test/session/max-mode.test.ts`, and candidate/judge
   EConnReset coverage in `packages/cli/test/session/max-mode-econnreset.test.ts`
@@ -2262,7 +2275,10 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
   tool choice, bounded candidate/judge retry, and main-only status publication
-  with equivalent regressions.
+  with equivalent regressions. The background system-agent bound and the
+  pure-empty `emptyOutput` bound retire separately, each only when upstream
+  bounds those retries by default with equivalent regressions; retiring the
+  MaxMode part does not retire them.
 
 ## FC-014 — fork Cloud Agent development environment
 
