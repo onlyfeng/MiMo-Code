@@ -38,6 +38,9 @@ export const Info = Schema.Struct({
     description: "Session network recovery is always persistent with no retry count or elapsed-time limit; only delay and jitter fields are configurable. Max-mode uses its own scope budgets.",
   }),
   server: Schema.optional(Budget),
+  emptyOutput: Schema.optional(Budget).annotate({
+    description: "Live-step retries after a model returns no usable output to an accepted request. Each attempt is billed, so the default is bounded and independent of server.",
+  }),
   rateLimit: Schema.optional(Budget),
   unknown: Schema.optional(Budget),
   jitterRatio: Schema.optional(Ratio),

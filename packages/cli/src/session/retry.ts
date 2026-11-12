@@ -37,6 +37,11 @@ export const UNKNOWN_RETRY_DEADLINE_MS = SERVER_RETRY_DEADLINE_MS
 // keeps failing, as one that keeps returning empty output does.
 export const SYSTEM_AGENT_MAX_RETRIES = 4
 export const SYSTEM_AGENT_RETRY_DEADLINE_MS = 5 * 60_000
+// A model that returns no usable output to an accepted request is billed for
+// every attempt, and in production such streaks rarely recover late: they ran
+// tens to thousands of attempts until something cancelled them. Bound them by
+// count on their own budget, so a persistent server budget does not extend them.
+export const EMPTY_OUTPUT_MAX_RETRIES = SERVER_MAX_RETRIES
 
 export type RetryBudget = {
   mode: "bounded" | "persistent"
@@ -59,6 +64,7 @@ export type ResolvedRetryConfig = {
   maxJudge: RetryBudget
   network: RetryBudget
   server: RetryBudget
+  emptyOutput: RetryBudget
   rateLimit: RetryBudget
   unknown: RetryBudget
   jitterRatio: number
@@ -108,6 +114,15 @@ const DEFAULT_RETRY_CONFIG: ResolvedRetryConfig = {
   server: {
     mode: "persistent",
     maxRetries: SERVER_MAX_RETRIES,
+    maxElapsedMs: 0,
+    initialDelayMs: RETRY_INITIAL_DELAY,
+    maxDelayMs: RETRY_MAX_DELAY_NO_HEADERS,
+    jitterRatio: RETRY_JITTER_RATIO,
+  },
+  // Count-bounded with no wall-clock deadline: the count is what limits the bill.
+  emptyOutput: {
+    mode: "bounded",
+    maxRetries: EMPTY_OUTPUT_MAX_RETRIES,
     maxElapsedMs: 0,
     initialDelayMs: RETRY_INITIAL_DELAY,
     maxDelayMs: RETRY_MAX_DELAY_NO_HEADERS,
@@ -202,6 +217,7 @@ export function resolve(config: RetryConfigSource | undefined, providerID?: stri
     maxJudge: configuredBudget(DEFAULT_RETRY_CONFIG.maxJudge, global?.maxJudge, provider?.maxJudge),
     network: configuredBudget(DEFAULT_RETRY_CONFIG.network, global?.network, provider?.network),
     server: configuredBudget(DEFAULT_RETRY_CONFIG.server, global?.server, provider?.server, true),
+    emptyOutput: configuredBudget(DEFAULT_RETRY_CONFIG.emptyOutput, global?.emptyOutput, provider?.emptyOutput),
     rateLimit: configuredBudget(DEFAULT_RETRY_CONFIG.rateLimit, global?.rateLimit, provider?.rateLimit, true),
     unknown: configuredBudget(DEFAULT_RETRY_CONFIG.unknown, global?.unknown, provider?.unknown),
     jitterRatio: provider?.jitterRatio ?? global?.jitterRatio ?? DEFAULT_RETRY_CONFIG.jitterRatio,
@@ -215,6 +231,7 @@ export function budgetFor(config: ResolvedRetryConfig, decision: RetryDecision):
   if (decision.scope === "request") return config.request
   if (decision.kind === "network") return config.network
   if (decision.kind === "rate_limit") return config.rateLimit
+  if (decision.emptyOutput) return config.emptyOutput
   if (decision.kind === "server") return config.server
   if (decision.phase === "request") return config.request
   if (decision.kind === "unknown") return config.unknown
@@ -248,6 +265,8 @@ export type RetryDecision = {
   /** Host registry code when the decision was host-driven (retry banner identity). */
   hostCode?: string
   hostRetryClass?: RetryClass
+  /** Set for InvalidOutputError: kind stays "server", but the budget is `emptyOutput`. */
+  emptyOutput?: true
 }
 
 const RETRYABLE_HTTP_STATUS = new Set([425, 429])
@@ -381,11 +400,12 @@ export function decide(
     return { retryable: false, phase, scope, kind: "terminal", message: error.data.message, ...(hostCode ? { hostCode, hostRetryClass: hostClass! } : {}) }
   }
   // InvalidOutputError = model returned only reasoning or empty body. The request was
-  // accepted and the provider failed to deliver, the same recovery class as an
-  // overloaded upstream: one stalled attempt can outlast any wall-clock deadline,
-  // so it waits under the persistent server budget until output or cancellation.
+  // accepted and the provider failed to deliver, so it is reported as a server
+  // failure. Unlike an unanswered request, each attempt is billed, so it retries
+  // under the count-bounded `emptyOutput` budget (EMPTY_OUTPUT_MAX_RETRIES) rather
+  // than the persistent server budget.
   if (MessageV2.InvalidOutputError.isInstance(error)) {
-    return { retryable: true, phase, scope, kind: "server", message: error.data.message || "Empty model output" }
+    return { retryable: true, phase, scope, kind: "server", emptyOutput: true, message: error.data.message || "Empty model output" }
   }
   if (
     !hostCode &&
