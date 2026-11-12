@@ -6,12 +6,13 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 
 - 用户取消、鉴权、额度、上下文溢出和确定性请求错误立即停止。
 - 网络连接失败、服务端故障和限流默认持续等待恢复，适合 long-running harness。
-- 普通 stream 错误默认使用有限预算；network、server 和 rateLimit 分别使用自己的预算。
+- 模型对已接受请求返回空输出时，每次尝试都会计费，因此默认按次数有限重试，不随 server 持续等待。
+- 普通 stream 错误默认使用有限预算；network、server、emptyOutput 和 rateLimit 分别使用自己的预算。
 - 已执行 tool side effect 后禁止自动重放整个 model step。
 - 所有 retry scope 使用同一个分类器、退避算法、Retry-After 解析器和事件模型。
 - 次数、deadline、退避和 persistent 模式可以配置，provider 可以覆盖全局默认值。
 
-请求、candidate 和 judge 优先使用对应 scope 的预算；其余按错误类型选择。network、server 和 rateLimit 的 live-step 默认均为 persistent 且无 deadline；request、stream、unknown、maxCandidate 和 maxJudge 保留有限预算。顶层 jitter 与 bounded 模式的默认次数保持 FC-013。
+请求、candidate 和 judge 优先使用对应 scope 的预算；其余按错误类型选择。network、server 和 rateLimit 的 live-step 默认均为 persistent 且无 deadline；emptyOutput 默认 bounded（8 次、无 deadline）；request、stream、unknown、maxCandidate 和 maxJudge 保留有限预算。顶层 jitter 与 bounded 模式的默认次数保持 FC-013。
 
 ## 分类不变量与宿主目录
 
@@ -27,7 +28,7 @@ Retry 必须区分两个问题：错误是否可能恢复，以及当前 scope �
 
 空目录或未命中时保留原生信号优先级：stream_read_error/upstream_error、网络和限流等既有恢复信号先于宽泛400/401/403/422兜底终止。无这些信号的普通客户端错误仍终止；真正的 abort/context/missing-key 安全不变量和明确宿主覆盖保持优先。
 
-processor 的原生 network 恢复仍强制 persistent：无限次数、无累计 deadline，配置中的 network 次数和 deadline 不能截断该协调器的等待；仅退避可配置。LLM 内层 request 仍受 request 有界预算约束，失败再交给 processor；max-candidate/max-judge 隔离预算和 side-effect replaySafe 仍优先，取消可中断等待。server/rate_limit 默认 persistent 但允许配置；非网络 stream/unknown 保持有界默认。
+processor 的原生 network 恢复仍强制 persistent：无限次数、无累计 deadline，配置中的 network 次数和 deadline 不能截断该协调器的等待；仅退避可配置。LLM 内层 request 仍受 request 有界预算约束，失败再交给 processor；max-candidate/max-judge 隔离预算和 side-effect replaySafe 仍优先，取消可中断等待。server/rate_limit 默认 persistent 但允许配置；emptyOutput 与非网络 stream/unknown 保持有界默认。
 
 ## 配置
 
@@ -60,6 +61,16 @@ processor 的原生 network 恢复仍强制 persistent：无限次数、无累�
 切换为 bounded 且省略 maxRetries 时，network/server/rateLimit 分别使用 5/8/5 次。仅设置 `mode: "bounded"` 会恢复次数限制，仍无默认 deadline；需要 15 分钟窗口必须显式设置 `deadlineMs: 900000`。
 
 server/rateLimit 保留已有次数配置的兼容性：全局和 provider 均未显式设置该预算的 mode，但任一层设置了 maxRetries 时，按 bounded 处理，因此 `maxRetries: 0` 仍关闭重试。两层都未设置 mode 或 maxRetries 时才使用新的 persistent 默认值。任一层显式设置 mode 时，按 provider 覆盖全局的原优先级选择；显式 persistent 仍忽略 maxRetries。这项兼容规则不改变 network 的既有语义。
+
+纯空输出（`InvalidOutputError`，原因 `empty output`）仍报告为 `kind: "server"`，但使用独立的 `emptyOutput` 预算，`retry.server` 的 mode、次数和 deadline 都不影响它。默认 bounded，最多重试 `EMPTY_OUTPUT_MAX_RETRIES`（8）次，无 wall-clock deadline，退避与 server 相同（2 秒起、30 秒封顶）。原因是请求已被接受，每次空回复都会计费，而连续空输出很少在多次之后恢复：2026-11-03 至 11-11 的 main 与普通 actor 中，恢复的 12 段有 9 段在第 8 次以内，未恢复的 26 段平均重试 22 次后才被取消或被新输入覆盖。次数耗尽后，本轮以 `InvalidOutputError` 结束并保留 retry 记录，父会话或主控可以看到。后台系统 agent 仍在其上叠加 FC-013 的 4 次上限；request、candidate、judge scope 仍优先使用各自预算。需要恢复持续等待时显式配置：
+
+```json
+{
+  "retry": {
+    "emptyOutput": { "mode": "persistent" }
+  }
+}
+```
 
 若希望将 server/rateLimit 的重试窗口限制为一小时，使用下面的替代配置，并移除同一预算的 `noDeadline: true`：
 

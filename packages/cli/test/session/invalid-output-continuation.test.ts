@@ -1,8 +1,9 @@
 /**
  * Integration tests for T01: a `finish=stop` step with no usable output
  * must not silently finish with no usable answer. Pure empty output raises
- * InvalidOutputError so SessionRetry.policy (decide → persistent server budget)
- * owns the retry; it keeps retrying until usable output or cancellation.
+ * InvalidOutputError so SessionRetry.policy (decide → bounded emptyOutput budget)
+ * owns the retry; it retries until usable output, cancellation or the budget's
+ * count runs out, whatever the server budget's mode.
  * Reasoning-only steps keep the fork's bounded, actor-scoped continuation reminder.
  *
  * Driven through a real Session.prompt(...) against the scripted HTTP LLM stub.
@@ -23,7 +24,9 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRetry } from "../../src/session/retry"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util"
-import { tmpdir } from "../fixture/fixture"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 import {
   startScriptedLLMServer,
   textStopResponse,
@@ -60,6 +63,10 @@ function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Servi
   )
 }
 
+const it = testEffect(
+  Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer, Bus.defaultLayer, CrossSpawnSpawner.defaultLayer),
+)
+
 function writeConfig(dir: string, origin: string, retry?: Record<string, unknown>) {
   return Bun.write(
     path.join(dir, "mimocode.json"),
@@ -73,9 +80,10 @@ function writeConfig(dir: string, origin: string, retry?: Record<string, unknown
         build: { model: "alibaba/qwen-plus" },
         "checkpoint-writer": { model: "alibaba/qwen-plus" },
       },
-      // Pure empty output uses the persistent server retry budget; reasoning-only keeps bounded continuation.
+      // Pure empty output uses the bounded emptyOutput retry budget; reasoning-only keeps bounded continuation.
       retry: {
         server: { initialDelayMs: 1, maxDelayMs: 1 },
+        emptyOutput: { initialDelayMs: 1, maxDelayMs: 1 },
         unknown: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 2000 },
         ...retry,
       },
@@ -98,6 +106,7 @@ function writeSlowRetryConfig(dir: string, origin: string) {
         request: { ...slow, mode: "bounded", maxRetries: 5, noDeadline: true },
         network: slow,
         server: slow,
+        emptyOutput: slow,
         rateLimit: slow,
         stream: slow,
         unknown: slow,
@@ -440,14 +449,14 @@ describe("invalid-output continuation — integration", () => {
 
   test("checkpoint-writer gives up on endless empty output within its bounded budget", async () => {
     await using tmp = await tmpdir({ git: true })
-    // Persistent for main (writeConfig): the writer must stop anyway, long before
-    // the sample that would finally answer.
+    // Persistent for main (configured below): the writer must stop anyway, long
+    // before the sample that would finally answer.
     const stub = startScriptedLLMServer([
       ...Array.from({ length: 8 }, () => ({ lines: emptyStopResponse() })),
       { lines: textStopResponse("CHECKPOINT_COMPLETE") },
     ])
     try {
-      await writeConfig(tmp.path, stub.origin)
+      await writeConfig(tmp.path, stub.origin, { emptyOutput: { mode: "persistent", initialDelayMs: 1, maxDelayMs: 1 } })
       await Instance.provide({
         directory: tmp.path,
         fn: () =>
@@ -638,7 +647,8 @@ describe("invalid-output continuation — integration", () => {
       },
     ])
     try {
-      await writeConfig(tmp.path, stub.origin)
+      // Endless only when configured persistent; the default bound would end it first.
+      await writeConfig(tmp.path, stub.origin, { emptyOutput: { mode: "persistent", initialDelayMs: 1, maxDelayMs: 1 } })
       const outcome = await Instance.provide({
         directory: tmp.path,
         fn: () =>
@@ -686,7 +696,7 @@ describe("invalid-output continuation — integration", () => {
           enabled_providers: ["alibaba"],
           provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
           agent: { build: { model: "alibaba/qwen-plus" } },
-          retry: { server: { mode: "bounded", maxRetries: 2, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 2000 } },
+          retry: { emptyOutput: { mode: "bounded", maxRetries: 2, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 2000 } },
         }),
       )
       await Instance.provide({
@@ -714,6 +724,57 @@ describe("invalid-output continuation — integration", () => {
       await stub.stop()
     }
   })
+
+  // Nine real round trips; without the bound, twelve and the late answer.
+  it.live(
+    "endless empty output stops at the default bound even under a persistent server budget",
+    () =>
+      Effect.gen(function* () {
+        // A late answer exists: an unbounded retry would reach it and succeed.
+        const stub = startScriptedLLMServer([
+          ...Array.from({ length: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 3 }, () => ({ lines: emptyStopResponse() })),
+          { lines: textStopResponse("too late") },
+        ])
+        yield* Effect.addFinalizer(() => Effect.promise(() => stub.stop()))
+        yield* provideTmpdirInstance(
+          () =>
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "invalid-default-bound" })
+              const result = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "Answer my question." }],
+              })
+              expect(stub.captures.length).toBe(SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 1)
+              expect(result.info.role).toBe("assistant")
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+              const kept = retryParts(yield* sessions.messages({ sessionID: session.id, agentID: "main" }))
+              expect(kept).toHaveLength(1)
+              expect(kept[0]).toMatchObject({
+                messageID: result.info.id,
+                attempt: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES,
+                kind: "server",
+                message: "empty output",
+              })
+            }),
+          {
+            git: true,
+            config: {
+              enabled_providers: ["alibaba"],
+              provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${stub.origin}/v1` } } },
+              agent: { build: { model: "alibaba/qwen-plus" } },
+              retry: {
+                server: { mode: "persistent", noDeadline: true, initialDelayMs: 1, maxDelayMs: 1 },
+                emptyOutput: { initialDelayMs: 1, maxDelayMs: 1 },
+              },
+            },
+          },
+        )
+      }),
+    30_000,
+  )
 
   test("a prompt queued while the recovered attempt streams waits for it and clears the record once both succeed", async () => {
     await using tmp = await tmpdir({ git: true })

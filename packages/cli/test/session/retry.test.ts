@@ -1532,16 +1532,62 @@ describe("retry decision and coordinator budget", () => {
     expect(decide(overflow)).toMatchObject({ retryable: false, kind: "terminal" })
   })
 
-  test("InvalidOutputError retries persistently under the server budget", () => {
+  test("InvalidOutputError retries under the bounded emptyOutput budget, not the server budget", () => {
     const empty = new MessageV2.InvalidOutputError({ message: "empty output" }).toObject()
     const decision = decide(empty)
-    expect(decision).toMatchObject({ retryable: true, kind: "server", message: "empty output" })
+    expect(decision).toMatchObject({ retryable: true, kind: "server", emptyOutput: true, message: "empty output" })
     expect(isRetryableTransientError(empty)).toBe(true)
     expect(retryable(empty)).toBe("empty output")
-    const budget = budgetFor(SessionRetry.resolve(undefined), decision)
-    expect(budget.mode).toBe("persistent")
-    expect(budget.maxRetries).toBeUndefined()
-    expect(budget.maxElapsedMs).toBe(0)
+    const defaults = SessionRetry.resolve(undefined)
+    expect(budgetFor(defaults, decision)).toEqual({
+      mode: "bounded",
+      maxRetries: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES,
+      maxElapsedMs: 0,
+      initialDelayMs: defaults.server.initialDelayMs,
+      maxDelayMs: defaults.server.maxDelayMs,
+      jitterRatio: defaults.server.jitterRatio,
+    })
+    // A server budget configured persistent with no deadline no longer extends it.
+    const persistentServer = SessionRetry.resolve({ retry: { server: { mode: "persistent", noDeadline: true } } })
+    expect(budgetFor(persistentServer, decision)).toMatchObject({ mode: "bounded", maxRetries: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES })
+    expect(budgetFor(persistentServer, { ...decision, emptyOutput: undefined })).toBe(persistentServer.server)
+    // Opting back into persistence is explicit, and provider overrides global.
+    const optIn = SessionRetry.resolve({ retry: { emptyOutput: { mode: "persistent" } } })
+    expect(budgetFor(optIn, decision)).toMatchObject({ mode: "persistent", maxRetries: undefined, maxElapsedMs: 0 })
+    const layered = SessionRetry.resolve({
+      retry: { emptyOutput: { maxRetries: 3 } },
+      provider: { test: { retry: { emptyOutput: { maxRetries: 1 } } } },
+    }, "test")
+    expect(budgetFor(layered, decision)).toMatchObject({ mode: "bounded", maxRetries: 1 })
+    // Scope budgets keep precedence over the error class.
+    expect(budgetFor(defaults, decide(empty, "request"))).toBe(defaults.request)
+    expect(budgetFor(defaults, decide(empty, "stream", "max-candidate"))).toBe(defaults.maxCandidate)
+    expect(budgetFor(defaults, decide(empty, "stream", "max-judge"))).toBe(defaults.maxJudge)
+  })
+
+  test("policy gives up on endless empty output after the emptyOutput count", async () => {
+    const fast = { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 }
+    const config = SessionRetry.resolve({
+      retry: { server: { ...fast, mode: "persistent", noDeadline: true }, emptyOutput: fast },
+    })
+    let attempts = 0
+    const updates: Array<{ attempt: number; maxAttempts: number; kind: string }> = []
+    const schedule = SessionRetry.policy({
+      parse: (input) => MessageV2.fromError(input, { providerID }),
+      budget: (decision) => budgetFor(config, decision),
+      set: (info) => Effect.sync(() => { updates.push(info) }),
+    })
+    // A late answer exists: a persistent retry would reach it and succeed.
+    const exit = await Effect.runPromiseExit(Effect.suspend(() => {
+      attempts++
+      return attempts <= SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 3
+        ? Effect.fail(new MessageV2.InvalidOutputError({ message: "empty output" }).toObject())
+        : Effect.succeed("too late")
+    }).pipe(Effect.retry(schedule)))
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(attempts).toBe(SessionRetry.EMPTY_OUTPUT_MAX_RETRIES + 1)
+    expect(updates).toHaveLength(SessionRetry.EMPTY_OUTPUT_MAX_RETRIES)
+    for (const update of updates) expect(update).toMatchObject({ kind: "server", maxAttempts: SessionRetry.EMPTY_OUTPUT_MAX_RETRIES })
   })
 })
 

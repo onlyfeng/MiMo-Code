@@ -2149,7 +2149,7 @@ describe("Actor.spawn structured output (P3)", () => {
     ),
   )
 
-  it.live("checkpoint-writer invalid output exhausting a bounded server budget produces a failed actor outcome", () =>
+  it.live("checkpoint-writer invalid output exhausting a bounded emptyOutput budget produces a failed actor outcome", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const actor = yield* Actor.Service
@@ -2159,7 +2159,7 @@ describe("Actor.spawn structured output (P3)", () => {
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
 
-        // Empty output retries under the server budget, configured bounded here:
+        // Empty output retries under the emptyOutput budget, configured bounded here:
         // 1 retry after the initial attempt.
         yield* llm.push(...Array.from({ length: 2 }, () => reply().stop()))
 
@@ -2182,7 +2182,7 @@ describe("Actor.spawn structured output (P3)", () => {
         config: (url: string) => ({
           ...providerCfg(url),
           retry: {
-            server: { mode: "bounded", maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 1000 },
+            emptyOutput: { mode: "bounded", maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1, deadlineMs: 1000 },
           },
         }),
       },
