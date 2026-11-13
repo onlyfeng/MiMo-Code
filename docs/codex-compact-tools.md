@@ -7,9 +7,11 @@ v0.1.14 的紧凑声明与隐藏工具注册实现，并保留 fork 的权限、
 
 - 会话显式选择 `codex`：启用。会话显式选择 `default`：使用原生工具列表。
 - 会话为 `auto` 时，启动进程的 `MIMOCODE_CODEX_MODE=true` / `false` 分别强制
-  Codex / 原生 harness；未设置时由模型身份自动判断。
-- 自动识别支持 GPT-5 及更新模型、已配置的可信 `harness_model` 别名；继续排除
-  MiMo、GPT-4 和 OSS。优先级仍是 **session → process → inference**。
+  Codex / 原生 harness；未设置时所有模型均使用统一默认 harness。
+- 优先级为 **session → process → default**；显式 session `codex` 即使遇到进程
+  false 仍启用，显式 session `default` 即使遇到进程 true 仍使用默认工具集。
+  模型名称、API ID、family 和 legacy `harness_model` 配置不再参与选择；
+  `harness_model` 仅为旧配置保留格式兼容，不改变 API 模型或 transport。
 - `MIMOCODE_ENABLE_EXEC_TOOL=true` 只给非 Codex 模式额外提供 `exec`，不精简其
   顶层工具。MCP 搜索与 Bash 输出过滤开关也不控制此模式。
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { isGPTModel, mcpToolSearchMode, resolveHarnessMode, usesGPTToolset } from "../../src/tool/gpt"
+import { mcpToolSearchMode, resolveHarnessMode, usesCodexMode, usesGPTToolset } from "../../src/tool/gpt"
 
 const codexMode = process.env.MIMOCODE_CODEX_MODE
 
@@ -12,18 +12,29 @@ afterEach(() => {
   else process.env.MIMOCODE_CODEX_MODE = codexMode
 })
 
-describe("isGPTModel", () => {
-  test("recognizes GPT versions and API aliases", () => {
-    expect(isGPTModel("gpt-4o")).toBe(true)
-    expect(isGPTModel("chatgpt-4o-latest")).toBe(true)
-    expect(isGPTModel("gpt-5.3-codex")).toBe(true)
-    expect(isGPTModel("company-alias", "gpt-5.4", "gpt-5")).toBe(true)
+describe("usesCodexMode", () => {
+  test("defaults to the default harness when neither flag nor harness selects Codex", () => {
+    expect(usesCodexMode()).toBe(false)
+    expect(usesCodexMode("auto")).toBe(false)
+    expect(usesCodexMode("default")).toBe(false)
   })
 
-  test("excludes non-GPT and GPT-OSS models", () => {
-    expect(isGPTModel("claude-opus-4-6")).toBe(false)
-    expect(isGPTModel("gpt-oss-120b")).toBe(false)
-    expect(isGPTModel("company-gpt-production", "gpt-oss-120b", "gpt-oss")).toBe(false)
+  test("an explicit codex harness opts in", () => {
+    expect(usesCodexMode("codex")).toBe(true)
+  })
+
+  test("MIMOCODE_CODEX_MODE=true enables Codex for auto but not for an explicit default harness", () => {
+    process.env.MIMOCODE_CODEX_MODE = "true"
+    expect(usesCodexMode()).toBe(true)
+    expect(usesCodexMode("auto")).toBe(true)
+    expect(usesCodexMode("codex")).toBe(true)
+    expect(usesCodexMode("default")).toBe(false)
+  })
+
+  test("an explicit codex harness takes precedence over MIMOCODE_CODEX_MODE=false", () => {
+    process.env.MIMOCODE_CODEX_MODE = "false"
+    expect(usesCodexMode("codex")).toBe(true)
+    expect(usesCodexMode("auto")).toBe(false)
   })
 })
 
@@ -32,7 +43,7 @@ describe("mcpToolSearchMode", () => {
   const never = { type: "never" } as const
   const always = { type: "always" } as const
 
-  test("keeps the configured mode for non-GPT models and always defers for GPT models", () => {
+  test("keeps the configured mode for every model without Codex opt-in", () => {
     expect(mcpToolSearchMode(auto, undefined, "claude-opus-4-6")).toEqual(auto)
     expect(mcpToolSearchMode(auto, undefined, "mimo-v2.5")).toEqual(auto)
     expect(mcpToolSearchMode(never, undefined, "mimo-v2.5-pro")).toEqual(never)
@@ -42,7 +53,7 @@ describe("mcpToolSearchMode", () => {
     expect(mcpToolSearchMode(auto, undefined, "gpt-oss-120b")).toEqual(auto)
     expect(mcpToolSearchMode(never, undefined, "claude-opus-4-6")).toEqual(never)
     expect(mcpToolSearchMode(always, undefined, "claude-opus-4-6")).toEqual(always)
-    expect(mcpToolSearchMode(never, undefined, "gpt-5.2")).toEqual(always)
+    expect(mcpToolSearchMode(never, undefined, "gpt-5.2")).toEqual(never)
   })
 
   test("keeps MiMo identities on the configured mode unless the harness is Codex", () => {
@@ -63,7 +74,7 @@ describe("mcpToolSearchMode", () => {
     expect(mcpToolSearchMode(never, "codex", "claude-opus-4-6")).toEqual(always)
     expect(mcpToolSearchMode(never, "codex", "mimo-v2.6")).toEqual(always)
     expect(mcpToolSearchMode(never, "codex", "mimo-v2.6-ptc")).toEqual(always)
-    expect(mcpToolSearchMode(auto, "auto", "gpt-5.2")).toEqual(always)
+    expect(mcpToolSearchMode(auto, "auto", "gpt-5.2")).toEqual(auto)
     expect(mcpToolSearchMode(auto, "auto", "claude-opus-4-6")).toEqual(auto)
     expect(mcpToolSearchMode(auto, "auto", "mimo-v2.6")).toEqual(auto)
     process.env.MIMOCODE_CODEX_MODE = "true"
@@ -74,7 +85,7 @@ describe("mcpToolSearchMode", () => {
     expect(mcpToolSearchMode(always, "default", "mimo-v2.6")).toEqual(always)
   })
 
-  test("honors an explicit process disable before automatic GPT inference", () => {
+  test("honors process disable for auto while preserving explicit session authority", () => {
     process.env.MIMOCODE_CODEX_MODE = "false"
     expect(mcpToolSearchMode(auto, "auto", "gpt-5.2")).toEqual(auto)
     expect(mcpToolSearchMode(never, undefined, "deployment-primary", "gpt-5.2", "gpt")).toEqual(never)
@@ -84,7 +95,25 @@ describe("mcpToolSearchMode", () => {
 })
 
 describe("resolveHarnessMode", () => {
-  test("uses one complete identity with MiMo precedence", () => {
+  test("defaults to the unified harness in an isolated non-test process", () => {
+    const env = { ...process.env }
+    delete env.MIMOCODE_EXPERIMENTAL
+    delete env.MIMOCODE_MCP_TOOL_SEARCH
+    delete env.MIMOCODE_CODEX_MODE
+    const result = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "-e",
+        'import { resolveHarnessMode } from "./src/tool/gpt.ts"; process.stdout.write(JSON.stringify(["gpt-5.4", "mimo-v2.6", "deployment-primary"].map(modelID => resolveHarnessMode({ modelID, modelAPIID: "gpt-5.4", modelFamily: "gpt", harnessModel: "gpt-5.4" }))))',
+      ],
+      cwd: process.cwd(),
+      env,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout.toString())).toEqual(["default", "default", "default"])
+  })
+
+  test("accepts complete identity while requiring explicit Codex opt-in", () => {
     expect(resolveHarnessMode({ modelID: "mimo", modelAPIID: "vendor-mimo-v2.5" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "mimo-v2.6", modelFamily: "vendor_mimo-v2.5-pro" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "deployment-primary", modelAPIID: "mimo-v2.6-ptc" })).toBe("default")
@@ -92,7 +121,7 @@ describe("resolveHarnessMode", () => {
     expect(resolveHarnessMode({ modelID: "mimo-v2.6-ptc", harness: "codex" })).toBe("codex")
   })
 
-  test("resolves session, process, and automatic inference in precedence order", () => {
+  test("resolves explicit session before process and defaults without model inference", () => {
     process.env.MIMOCODE_CODEX_MODE = "true"
     expect(resolveHarnessMode({ modelID: "claude-opus-4-6", harness: "default" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "claude-opus-4-6", harness: "auto" })).toBe("codex")
@@ -105,12 +134,23 @@ describe("resolveHarnessMode", () => {
     expect(resolveHarnessMode({ modelID: "mimo-v2.6-ptc", harness: "codex" })).toBe("codex")
 
     delete process.env.MIMOCODE_CODEX_MODE
-    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "auto" })).toBe("codex")
+    expect(resolveHarnessMode({ modelID: "gpt-5.2", harness: "auto" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "gpt-4o-mini", harness: "auto" })).toBe("default")
     expect(resolveHarnessMode({ modelID: "gpt-oss-120b", harness: "auto" })).toBe("default")
     expect(
       resolveHarnessMode({ modelID: "deployment-primary", modelAPIID: "gpt-5.2", modelFamily: "gpt" }),
     ).toBe("default")
+  })
+
+  test("trusted harness_model remains metadata rather than an opt-in selector", () => {
+    const identity = { modelID: "deployment-primary", modelAPIID: "test/model", modelFamily: "gpt", harnessModel: "gpt-5.4" }
+    expect(resolveHarnessMode(identity)).toBe("default")
+    expect(resolveHarnessMode({ ...identity, harness: "codex" })).toBe("codex")
+    process.env.MIMOCODE_CODEX_MODE = "true"
+    expect(resolveHarnessMode(identity)).toBe("codex")
+    expect(resolveHarnessMode({ ...identity, harness: "default" })).toBe("default")
+    process.env.MIMOCODE_CODEX_MODE = "false"
+    expect(resolveHarnessMode({ ...identity, harness: "codex" })).toBe("codex")
   })
 })
 
@@ -127,7 +167,7 @@ describe("usesGPTToolset", () => {
     expect(usesGPTToolset("mimo-v2.6-ptc")).toBe(false)
   })
 
-  test("keeps GPT toolset detection bound to the catalog model ID", () => {
+  test("does not infer a Codex toolset from catalog or API model identity", () => {
     expect(usesGPTToolset("gpt-4o-mini", undefined, "gpt-4o-mini", "gpt-mini")).toBe(false)
     expect(usesGPTToolset("custom-model", undefined, "gpt-5", "gpt")).toBe(false)
   })
@@ -144,7 +184,7 @@ describe("usesGPTToolset", () => {
     expect(usesGPTToolset("claude-opus-4-6", "codex")).toBe(true)
     expect(usesGPTToolset("mimo-v2.6", "codex")).toBe(true)
     expect(usesGPTToolset("mimo-v2.6-ptc", "codex")).toBe(true)
-    expect(usesGPTToolset("gpt-5.2", "auto")).toBe(true)
+    expect(usesGPTToolset("gpt-5.2", "auto")).toBe(false)
     expect(usesGPTToolset("mimo-v2.6", "auto")).toBe(false)
     expect(usesGPTToolset("mimo-v2.6-ptc", "auto")).toBe(false)
     expect(usesGPTToolset("claude-opus-4-6", "auto")).toBe(false)

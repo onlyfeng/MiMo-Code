@@ -49,6 +49,12 @@ async function withUpstream<T>(
                 options: { reasoningEffort: "low" },
                 variants: { high: { reasoningEffort: "high" } },
               },
+              "qwen-test": {
+                name: "Qwen Test",
+                temperature: true,
+                tool_call: true,
+                limit: { context: 8192, output: 2048 },
+              },
             },
           },
         },
@@ -354,6 +360,36 @@ describe("what actually reaches the provider", () => {
       temperature: 0.7,
     })
     expect(body.temperature).toBeUndefined()
+  })
+
+  test("uses declared output limits and leaves sampling at the vendor default", async () => {
+    const body = await sentBody({
+      model: "test/qwen-test",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(body.max_tokens).toBe(2048)
+    expect(body).not.toHaveProperty("temperature")
+    expect(body).not.toHaveProperty("top_p")
+
+    const fallback = await sentBody({
+      model: "test/chat-model",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(fallback.max_tokens).toBe(128_000)
+  })
+
+  test("explicit sampling and completion limits reach the wire", async () => {
+    const body = await sentBody({
+      model: "test/qwen-test",
+      messages: [{ role: "user", content: "hi" }],
+      temperature: 0.3,
+      top_p: 0.8,
+      max_tokens: 1024,
+      max_completion_tokens: 512,
+    })
+    expect(body.temperature).toBe(0.3)
+    expect(body.top_p).toBe(0.8)
+    expect(body.max_tokens).toBe(512)
   })
 
   test("reasoning_effort reaches the wire under the provider's own option name", async () => {

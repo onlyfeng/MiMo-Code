@@ -399,13 +399,18 @@ export function decide(
   if (MessageV2.AuthError.isInstance(error)) {
     return { retryable: false, phase, scope, kind: "terminal", message: error.data.message, ...(hostCode ? { hostCode, hostRetryClass: hostClass! } : {}) }
   }
-  // InvalidOutputError = model returned only reasoning or empty body. The request was
+  // InvalidOutputError = model returned an empty body (no text, reasoning or tool call). The request was
   // accepted and the provider failed to deliver, so it is reported as a server
   // failure. Unlike an unanswered request, each attempt is billed, so it retries
   // under the count-bounded `emptyOutput` budget (EMPTY_OUTPUT_MAX_RETRIES) rather
   // than the persistent server budget.
   if (MessageV2.InvalidOutputError.isInstance(error)) {
     return { retryable: true, phase, scope, kind: "server", emptyOutput: true, message: error.data.message || "Empty model output" }
+  }
+  // StreamIncompleteError = the stream closed without the provider's finish frame.
+  // Same recovery class as an upstream stream read failure: bounded stream budget.
+  if (MessageV2.StreamIncompleteError.isInstance(error)) {
+    return { retryable: true, phase, scope, kind: "stream", message: error.data.message }
   }
   if (
     !hostCode &&
@@ -543,10 +548,6 @@ export function isGptServerOverloadedError(error: Err): boolean {
   )
 }
 
-export function isGptModel(model: { id: string; api: { id: string } }): boolean {
-  return [model.id, model.api.id].some((id) => id.toLowerCase().startsWith("gpt-"))
-}
-
 export function policy(opts: {
   parse: (error: unknown) => Err
   set: (input: {
@@ -565,7 +566,7 @@ export function policy(opts: {
   maxElapsedMs?: number
   jitterRatio?: number
   initialDelayMs?: number
-  budget?: (decision: RetryDecision) => RetryBudget
+  budget?: (decision: RetryDecision, error: Err) => RetryBudget
   // Applied last, after host and network constraints have widened the budget.
   cap?: (budget: RetryBudget) => RetryBudget
   replaySafe?: (decision: RetryDecision) => boolean
@@ -585,7 +586,7 @@ export function policy(opts: {
           : Cause.done(meta.attempt)
       }
       const mandatoryNetwork = decision.kind === "network" && scope !== "max-candidate" && scope !== "max-judge"
-      const selected = opts.budget?.(decision) ?? (mandatoryNetwork ? {
+      const selected = opts.budget?.(decision, error) ?? (mandatoryNetwork ? {
         ...DEFAULT_RETRY_CONFIG.network,
         initialDelayMs: opts.initialDelayMs ?? NETWORK_INITIAL_DELAY_MS,
         jitterRatio: opts.jitterRatio ?? 0,

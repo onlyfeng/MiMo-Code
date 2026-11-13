@@ -8,7 +8,7 @@ const PositiveInt = Schema.Number.check(Schema.isInt()).check(Schema.isGreaterTh
 
 export const HarnessModel = Schema.String.check(Schema.isPattern(GPT_HARNESS_MODEL_PATTERN)).annotate({
   description:
-    "Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.",
+    "Legacy canonical GPT-5 or newer identity retained for configuration compatibility. Does not select the harness or change the API model or transport; use an explicit session harness or MIMOCODE_CODEX_MODE instead.",
 })
 
 export const Model = Schema.Struct({

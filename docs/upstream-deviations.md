@@ -48,7 +48,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FD-001 | yolo, permission, Bash delete                                                         | Adopts startup delete approval; rejects run-driven shared switch mutation                                                                       | Preserve deny precedence and live invocation isolation                                                                                                                    |
 | FD-002 | instruction disable parity, model requests, retry, and actor identity                 | Adopts default-on instruction delivery; retains residual parity and fail-closed identity boundaries                                             | Preserve disable UI/payload parity, immutable retry sets, and known-actor replacement                                                                                     |
 | FD-004 | `/v1` capability route, `llm-server` CLI, listener advertisement, TUI worker listener | Adopts upstream's capability route whole; retired the fork model API with its admission, deadline and authentication-before-bootstrap hardening | Keep the operator-password bind guard, `advertiseDirectory` and the three corrections; do not restore retired hardening — recorded behaviours stay as upstream ships them |
-| FD-005 | model identity, prompt, discovery, tools, retry                                       | Adapts inconsistent upstream classification                                                                                                     | Preserve one resolved identity                                                                                                                                            |
+| FD-005 | explicit harness selection, prompt, discovery, tools, retry and frozen profiles | Adopts model-independent opt-in; retains session precedence | Preserve one resolved harness across consumers; explicit session selection wins |
 | FD-006 | compact Codex declarations and nested execution                                       | Adopts compact registration and full authorized nested Actor/interactive composition                                                            | Preserve request authority, frozen schemas, media and size/unit boundaries                                                                                                |
 | FD-009 | actor/checkpoint context capture, retry, resume                                       | Rejects live-context fallback                                                                                                                   | Fail before child execution and reuse frozen membership                                                                                                                   |
 | FD-010 | compaction summary acceptance                                                         | Extends upstream: recovers a think-only summary step instead of rolling the boundary back                                                       | Preserve rollback for every other failure shape and for a content-filtered step; empty steps are FD-012                                                                   |
@@ -396,7 +396,11 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
   `test/fixture/tui-worker-default-child.ts` for the advertise-directory delta.
 - Upstream relationship: the fork tracks upstream on this surface.
 
-## FD-005 — one resolved MiMo identity selects prompt, discovery, and tools
+<a id="fd-005--one-resolved-mimo-identity-selects-prompt-discovery-and-tools"></a>
+
+## FD-005 — one resolved harness selects prompt, discovery, and tools
+
+- 2026-11-13 synchronization: adopt upstream `e3592f0e`'s unified default prompt and model-independent Codex opt-in. Retain the fork resolver and explicit session precedence: session `codex`/`default` wins, otherwise process true selects Codex, otherwise default. Model ids, API ids, families and legacy `harness_model` declarations no longer select the harness. The profile policy generation changes consistently for capture, ordinary requests and compaction, preventing reuse of a prior model-selected frozen prompt under the new policy. Historical inference notes below describe the policy before this synchronization. FD-006's authorized implementation pool and direct controls remain active; FC-050 retains recovery of old oversized prefixes.
 
 - 2026-11-04 reminder synchronization (`10b03cf0`, validated): MCP synthetic parts are tagged with `{ key: "mcp", rev: mcpReminderMarker(meta) }` while retaining `metadata.mcpReminder` for announcement diffs and deferral evidence, including legacy parts. Readiness remains distinct from request authorization; shared announcement budgets, escaping, frozen membership/schema checks and hidden direct-call rules are unchanged. The Claude environment names `Shell.acceptable()` without changing resolved harness/template selection or the dynamic system-prompt gate.
 
@@ -426,18 +430,16 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
   absent; mutable plugin hooks still cannot grant or replace harness authority.
 
 - Status: active
-- Canonical owner: fork `main` model-mode resolution boundary
+- Canonical owner: fork `main` harness resolution boundary
 - Observable contract: prompt selection, MCP discovery, registry filtering,
-  frozen prefix capture, agent generation, and `exec` dispatch classify MiMo
-  from the complete resolved `(model.id, model.api.id, model.family)` identity
-  with the same harness precedence. An explicit session `codex` or `default`
-  selection wins first. For `auto`, an explicit process true/false forces Codex
-  or the resolved default harness respectively; an unset process value preserves
-  model inference. The default harness selects the model's native non-Codex
-  prompt/toolset, which is not necessarily one literal prompt family.
+  frozen prefix capture, agent generation, and `exec` dispatch use the same
+  model-independent harness resolver. An explicit session `codex` or `default`
+  selection wins first, including session `codex` with process false. For
+  `auto`, process true selects Codex; false or unset selects default. All
+  models share the unified default prompt unless Codex is explicitly selected.
   `MIMOCODE_MCP_TOOL_SEARCH` (`true` default, `auto`, `auto:N`, `false`) is the
   configured MCP deferral mode for the default harness; the resolved Codex
-  harness always defers, and that decision uses this same resolved identity.
+  harness always defers, and that decision uses this same resolved harness.
   Ordinary deferred calls use the fixed `mcp_tool_use` entry; searched schemas
   never expand the active tool list. Auto deferral remains sticky while its
   conversation evidence survives, and an empty catalog initially defers.
@@ -445,23 +447,18 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
   user content after assistant execution has begun.
   Process environment selectors are startup configuration; mutating them during
   an active session is outside this contract.
-  An explicitly configured `provider.<id>.models.<id>.harness_model` may name
-  a canonical lower-case GPT-5-or-newer target for an opaque deployment alias.
-  The parsed configuration snapshot is the sole source of this trust; catalog
-  metadata, plugin model replacement, and mutable plugin config hooks cannot
-  grant or replace it. Automatic inference first excludes MiMo, GPT-4, and OSS
-  in any resolved identity, including tagged and namespaced identities.
-  The declaration changes neither API model identity nor transport. Capture,
-  run-loop, and compaction cache profiles include the optional declaration;
-  an absent declaration preserves the original profile key.
-  Exact MiMo v2.5 identities win over generic aliases. Transport is no longer a
-  fork concern: the fork adopts upstream's transport, which since `0fe2cbbc`
+  The legacy `provider.<id>.models.<id>.harness_model` field remains readable
+  for configuration compatibility and does not select a prompt or toolset.
+  Models retain their resolved API identity and declared capabilities.
+  Capture, run-loop and compaction profiles share the new policy generation;
+  frozen actor membership and mismatch rejection remain unchanged.
+  Transport is separate: the fork adopts upstream's transport, which since `0fe2cbbc`
   uses the declared model/provider npm (defaulting to
   `@ai-sdk/openai-compatible`), rather than routing a resolved PTC identity to
-  the Responses API. Transport never selects the Codex harness/toolset. Unrelated GPT-4 families do not gain Codex tools through
-  API/family aliases. Request, live-step, and MaxMode retry policy reuse that
-  same resolved identity instead of independently reclassifying the model
-  between attempts. The Xiaomi WebSearch sidecar clause retired on 2026-10-30
+  the Responses API. Transport never selects the Codex harness/toolset.
+  Request, live-step and MaxMode retries reuse their resolved request identity
+  and harness instead of independently selecting them between attempts.
+  The Xiaomi WebSearch sidecar clause retired on 2026-10-30
   with upstream `d0684a3d`; harness identity and tool authorization remain active.
 - 2026-09-13 transport retirement: upstream `294328d7`/`b6a1008c`/`cfa07fe8`
   remove the `xiaomi` custom loader and pin any MiMo or `mimo-auto` id to
@@ -472,10 +469,10 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
 the complete resolved model identity` case. FD-005 keeps only identity
   resolution for prompt, discovery, toolset and retry policy; it no longer owns
   API transport. Verified: `test/provider/` + `test/tool/gpt.test.ts` 581 pass.
-- Upstream relationship: adapts the classification introduced at
-  `866a5b8a2eff3970a0becb0d27f8f055e4624e19` and merged by
-  `b15b0971846861a4b25576d340ce1a4207f87712`; upstream's separate fallbacks are
-  not authoritative for fork request behavior.
+- Upstream relationship: adopts model-independent opt-in and the unified
+  default prompt from `e3592f0e`; rejects its process-false override of an
+  explicit session Codex selection. The earlier model-inference deviation
+  and alias/veto selection rules retire.
 - Watch surfaces: `packages/cli/src/flag/flag.ts`,
   `packages/cli/src/config/config.ts`,
   `packages/cli/src/config/provider.ts`,
@@ -496,8 +493,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   system-prompt, GPT helper, request-prefix, tool-registry, agent-generation,
   `packages/cli/test/provider/provider.test.ts`, and
   `packages/cli/test/tool/tool-script.test.ts` regressions cover explicit
-  unset/true/false behavior, direct GPT IDs, API/family aliases, MiMo conflicts,
-  explicit session precedence, and retry reuse.
+  unset/true/false behavior, model-independent defaults, legacy aliases,
+  explicit session precedence, frozen profile invalidation, and retry reuse.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - 2026-08-27 review: adopted upstream PTC transport detection through the
@@ -542,9 +539,9 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `responses()` versus `languageModel()` from the complete resolved identity,
   and both members exist on the composed SDK object.
 
-- Retirement condition: the provider layer exposes one immutable model-mode
-  value consumed unchanged by every prompt, discovery, registry, capture, and
-  dispatch surface, with alias-conflict and GPT-4 regressions.
+- Retirement condition: upstream preserves explicit session precedence and one
+  immutable harness selection across prompt, discovery, registry, capture and
+  dispatch, including persistence across a policy upgrade.
 
 - 2026-09-15 debug carrier correction: `cli/cmd/debug/agent.ts` now passes
   the resolved `harness_model` to registry discovery, matching actual requests

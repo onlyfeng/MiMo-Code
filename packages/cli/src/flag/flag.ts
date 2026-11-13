@@ -162,9 +162,8 @@ export const Flag = {
     return ratio("MIMOCODE_COMPACTION_TRIGGER_RATIO") ?? 0.9
   },
   MIMOCODE_DISABLE_MODELS_FETCH: truthy("MIMOCODE_DISABLE_MODELS_FETCH"),
-  // Defaults to automatic model inference. Explicit true forces every model to
-  // use the GPT system prompt and Codex toolset; explicit false forces even GPT
-  // models onto their native, non-Codex prompt and toolset.
+  // Codex is opt-in for auto sessions. Explicit session codex/default choices
+  // take precedence over either process value.
   get MIMOCODE_CODEX_MODE() {
     if (truthy("MIMOCODE_CODEX_MODE")) return true
     if (falsy("MIMOCODE_CODEX_MODE")) return false
@@ -183,6 +182,7 @@ export const Flag = {
   // turned off outright — number() rejects it and would silently fall back to 1.
   MIMOCODE_COMPACTION_RETRY_LIMIT: nonNegativeNumber("MIMOCODE_COMPACTION_RETRY_LIMIT") ?? 1,
   MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT: number("MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT") ?? 2,
+  MIMOCODE_EMPTY_STEP_DROP_LIMIT: number("MIMOCODE_EMPTY_STEP_DROP_LIMIT") ?? 2,
   // Defaults to false. When enabled, unsigned historical reasoning sent through
   // the Anthropic Messages format receives an empty placeholder signature so it
   // follows the same native thinking-block serialization path as signed content.
@@ -370,16 +370,15 @@ export const Flag = {
   // pattern or body fingerprint and rewrites the body to strip predictable
   // noise. Off by default. Set to 1/true to opt in.
   MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_HEURISTIC: truthy("MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_HEURISTIC"),
-  MIMOCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: number("MIMOCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"),
   MIMOCODE_EXPERIMENTAL_OXFMT: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_OXFMT"),
   MIMOCODE_EXPERIMENTAL_LSP_TY: truthy("MIMOCODE_EXPERIMENTAL_LSP_TY"),
   MIMOCODE_EXPERIMENTAL_LSP_TOOL: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_LSP_TOOL"),
-  // Defaults to OFF: exec (tool_script orchestration) is registered only for
-  // GPT-toolset models. Opt in here to expose it to every model.
+  // Defaults to OFF: exec (tool_script orchestration) is registered only in
+  // Codex mode. Opt in here to expose it in every session.
   MIMOCODE_ENABLE_EXEC_TOOL: truthy("MIMOCODE_ENABLE_EXEC_TOOL"),
   // MCP tool lazy-loading: `true` (default) always defers MCP tool schemas
   // behind mcp_tool_search, `auto` defers once they exceed 10% of the context
-  // window, `auto:N` uses N%, `false` never defers. Codex-mode models always defer.
+  // window, `auto:N` uses N%, `false` never defers. Codex-mode sessions always defer.
   get MIMOCODE_MCP_TOOL_SEARCH() {
     return process.env["MIMOCODE_MCP_TOOL_SEARCH"]
   },

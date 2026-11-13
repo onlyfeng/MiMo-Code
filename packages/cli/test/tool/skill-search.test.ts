@@ -378,6 +378,7 @@ description: Exact skill for direct execution boundary tests.
             const tool = (yield* registry.registered({
               providerID: ProviderID.make("opencode"),
               modelID: ModelID.make("gpt-5"),
+              harness: "codex",
               agent,
             })).find((item) => item.id === SkillSearchTool.id)
             if (!tool) throw new Error(`Skill search tool not found for agent ${agentName}`)

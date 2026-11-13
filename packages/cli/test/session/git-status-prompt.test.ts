@@ -2,37 +2,23 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Effect, Layer } from "effect"
-import { ModelID, ProviderID } from "../../src/provider/schema"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Session as SessionNs } from "../../src/session"
 import { GitStatusPrompt } from "../../src/session/git-status"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { MessageID, type SessionID } from "../../src/session/schema"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
 import { Database } from "../../src/storage"
-import { SystemPrompt } from "../../src/session/system"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
-import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(Layer.mergeAll(SystemPrompt.defaultLayer, SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
-const claude = ProviderTest.model({
-  id: ModelID.make("claude-sonnet-4-6"),
-  providerID: ProviderID.make("anthropic"),
-})
-
-// The text between "Status:" and "Recent commits:" in the Claude environment.
-const statusSection = (system: string[]) => {
-  const text = system.join("\n")
-  const start = text.indexOf("\nStatus:\n") + "\nStatus:\n".length
-  return text.slice(start, text.indexOf("\n\nRecent commits:", start))
-}
-
-const environment = (now: number) =>
-  Effect.gen(function* () {
-    return yield* (yield* SystemPrompt.Service).environment(claude, now)
-  })
+const status = (dir: string) =>
+  ChildProcessSpawner.ChildProcessSpawner.use((spawner) =>
+    spawner.string(ChildProcess.make("git", GitStatusPrompt.ARGS, { cwd: dir })),
+  ).pipe(Effect.map((text) => GitStatusPrompt.cap(text.trim())))
 
 const writeFiles = (dir: string, names: string[]) =>
   Effect.promise(async () => {
@@ -42,7 +28,7 @@ const writeFiles = (dir: string, names: string[]) =>
     }
   })
 
-describe("Claude environment git status", () => {
+describe("legacy git status prompt helper", () => {
   it.live(
     "an untracked directory is listed once, not file by file",
     provideTmpdirInstance(
@@ -52,7 +38,7 @@ describe("Claude environment git status", () => {
             dir,
             Array.from({ length: 300 }, (_, i) => `scratch/run-${i}/out.txt`),
           )
-          const section = statusSection(yield* environment(Date.UTC(2026, 10, 6, 1)))
+          const section = yield* status(dir)
           expect(section).toContain("?? scratch/")
           expect(section).not.toContain("scratch/run-0/out.txt")
           expect(section.split("\n")).toHaveLength(1)
@@ -71,7 +57,7 @@ describe("Claude environment git status", () => {
             dir,
             Array.from({ length: count }, (_, i) => `untracked-${i.toString().padStart(4, "0")}.txt`),
           )
-          const section = statusSection(yield* environment(Date.UTC(2026, 10, 6, 2)))
+          const section = yield* status(dir)
           const lines = section.split("\n")
           expect(lines.length).toBeLessThanOrEqual(GitStatusPrompt.MAX_LINES + 1)
           expect(section.length).toBeLessThanOrEqual(GitStatusPrompt.MAX_CHARS)

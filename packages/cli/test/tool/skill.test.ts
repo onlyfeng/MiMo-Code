@@ -87,6 +87,7 @@ Use this skill.
           const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
+            harness: "codex",
             agent,
           })).find((tool) => tool.id === SkillTool.id)
           if (!tool) throw new Error("Skill tool not found")
@@ -125,6 +126,7 @@ Use this skill.
           const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
+            harness: "codex",
             agent,
           })).find((tool) => tool.id === SkillTool.id)
           if (!tool) throw new Error("Skill tool not found")
@@ -269,6 +271,7 @@ description: Anyone may start this one.
           const tool = (yield* registry.registered({
             providerID: "opencode" as any,
             modelID: "gpt-5" as any,
+            harness: "codex",
             agent,
           })).find((tool) => tool.id === SkillTool.id)
           if (!tool) throw new Error("Skill tool not found")

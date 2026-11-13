@@ -34,7 +34,9 @@ import {
   emptyStopResponse,
   reasoningLengthResponse,
   reasoningStopResponse,
+  toolCallStopResponse,
 } from "../lib/scripted-llm-server"
+import { Flag } from "../../src/flag/flag"
 
 void Log.init({ print: false })
 
@@ -578,6 +580,36 @@ describe("invalid-output continuation — integration", () => {
     }
   })
 
+  test("a checkpoint writer that keeps returning empty output stops after the configured empty-output budget", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const stub = startScriptedLLMServer([{ lines: emptyStopResponse() }])
+    try {
+      await writeConfig(tmp.path, stub.origin, { emptyOutput: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1 } })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "checkpoint-writer-empty" })
+              const result = yield* prompt
+                .prompt({
+                  sessionID: session.id,
+                  agent: "checkpoint-writer",
+                  parts: [{ type: "text", text: "Update the checkpoint." }],
+                })
+                .pipe(Effect.timeout("10 seconds"))
+              // The explicit empty-output budget allows one retry after the first attempt.
+              expect(stub.captures.length).toBe(2)
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  })
   test("consecutive empty stops keep retrying past the bounded unknown budget and recover", async () => {
     await using tmp = await tmpdir({ git: true })
     // Read the live retry record while the third attempt is in flight, before the
@@ -1293,4 +1325,130 @@ describe("invalid-output continuation — integration", () => {
       await stub.stop()
     }
   })
+})
+
+// A read of a missing file that finishes with finish_reason "stop" leaves an
+// errored tool part and no text: the step cannot be replayed, so the run loop
+// preserves it and commits an actor-scoped continuation.
+function rejectedToolStop(dir: string) {
+  return {
+    lines: toolCallStopResponse({
+      id: "call_missing",
+      name: "read",
+      args: JSON.stringify({ file_path: path.join(dir, "missing.txt") }),
+    }),
+  }
+}
+
+describe("unreplayable empty steps are bounded", () => {
+  for (const agentID of ["main", "general-1"]) {
+    test(`an endlessly repeated unreplayable empty step stops at the continuation limit (${agentID})`, async () => {
+      await using tmp = await tmpdir({ git: true })
+      const stub = startScriptedLLMServer([rejectedToolStop(tmp.path)])
+      try {
+        await writeConfig(tmp.path, stub.origin)
+        await Instance.provide({
+          directory: tmp.path,
+          fn: () =>
+            run(
+              Effect.gen(function* () {
+                const sessions = yield* Session.Service
+                const prompt = yield* SessionPrompt.Service
+                const session = yield* sessions.create({ title: `drop-limit-${agentID}` })
+                const result = yield* prompt
+                  .prompt({
+                    sessionID: session.id,
+                    agent: "build",
+                    ...(agentID === "main" ? {} : { agentID }),
+                    parts: [{ type: "text", text: "Read the file." }],
+                  })
+                  .pipe(Effect.timeout("10 seconds"))
+                expect(stub.captures.length).toBe(Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 1)
+                expect(result.info.role).toBe("assistant")
+                if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+                const assistants = assistantOnly(yield* sessions.messages({ sessionID: session.id, agentID }))
+                expect(assistants).toHaveLength(Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 1)
+                expect(assistants.at(-1)?.info.id).toBe(result.info.id)
+                expect(assistants.every((message) => message.parts.some((part) => part.type === "tool" && part.state.status === "error"))).toBe(true)
+              }),
+            ),
+        })
+      } finally {
+        await stub.stop()
+      }
+    }, 30_000)
+  }
+
+  test("a productive step between unreplayable empty steps preserves the turn's continuation bound", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const readmePath = path.join(tmp.path, "README.md")
+    const stub = startScriptedLLMServer([
+      rejectedToolStop(tmp.path),
+      { lines: toolCallResponse({ id: "call_read", name: "read", args: JSON.stringify({ file_path: readmePath }) }) },
+      rejectedToolStop(tmp.path),
+    ])
+    try {
+      await Bun.write(readmePath, "# Hello\n")
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "drop-limit-reset" })
+              const result = yield* prompt
+                .prompt({ sessionID: session.id, agent: "build", parts: [{ type: "text", text: "Read the files." }] })
+                .pipe(Effect.timeout("10 seconds"))
+              // A productive tool call does not reset the owning turn's shared continuation budget.
+              expect(stub.captures.length).toBe(Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 2)
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+              const assistants = assistantOnly(yield* sessions.messages({ sessionID: session.id, agentID: "main" }))
+              const completed = assistants.flatMap((message) => message.parts).filter((part) => part.type === "tool" && part.state.status === "completed")
+              expect(completed).toHaveLength(1)
+              expect(JSON.stringify(stub.captures.at(-1)?.messages)).toContain("# Hello")
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  }, 30_000)
+
+  test("a rejected tool call that finishes with tool-calls does not reset the continuation count", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const rejectedToolCalls = {
+      lines: toolCallResponse({
+        id: "call_missing",
+        name: "read",
+        args: JSON.stringify({ file_path: path.join(tmp.path, "missing.txt") }),
+      }),
+    }
+    const stub = startScriptedLLMServer(
+      Array.from({ length: 10 }, (_, index) => (index % 2 === 0 ? rejectedToolCalls : rejectedToolStop(tmp.path))),
+    )
+    try {
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "drop-limit-alternating" })
+              const result = yield* prompt
+                .prompt({ sessionID: session.id, agent: "build", parts: [{ type: "text", text: "Read the file." }] })
+                .pipe(Effect.timeout("10 seconds"))
+              // Each empty stop follows one errored tool-calls step; the bound counts only the stops.
+              expect(stub.captures.length).toBe(2 * (Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 1))
+              if (result.info.role === "assistant") expect(result.info.error?.name).toBe("InvalidOutputError")
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  }, 30_000)
 })

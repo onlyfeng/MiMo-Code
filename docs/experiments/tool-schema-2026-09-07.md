@@ -14,6 +14,10 @@
 工具集合的节省。报告另外记录 auto/codex/default 的成员列表。`exec` 的声明与分发
 以及 `TOOL_SCRIPT_EXCLUDED` 均未更改；不能把“可嵌套”理解成“只读”。
 
+2026-11-13 更新：本节的 GPT 自动选择描述记录原实验行为。当前所有模型默认使用
+统一 harness，Codex 需显式 session 或进程选择；`harness_model` 保留配置兼容和
+前缀隔离用途，不选择 harness 或 transport，详见[当前规则](../harness-aliases.md)。
+
 注册表接收实际 `modelID`、API ID、family 与 `harness_model`；报告 `modelIdentity`
 和 `seed`，以便复查别名和 harness 选择。API 地址、密钥与 transport 配置不进入报告。
 
