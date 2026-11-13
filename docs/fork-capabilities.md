@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-09
-- Upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
-- Prior reviewed upstream: `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`
-- Review completion: complete content review (N=1), FC-011 Compose Next empty states; publication succeeded; focused local regressions pass 16/16 per branch, but exact-SHA CI is blocked by GitHub Actions being disabled, recorded in [the synchronization record](upstream-sync-2026-11-09.md). Historical runtime/test snapshots below are not advanced by this guidance-only selection.
-- Main behavior (runtime/tests): `fc0cdcab5eed1e0bfd87732f411d72e056c87651` (published; exact-SHA lint/typecheck/test successful)
-- Inherited compat behavior: `da08974dfb64ebd6aa995fbe51e87e49051cc076` (published; exact-SHA lint/typecheck/test successful)
-- Bundled guidance content: `e7805cfb3903a8f7a0aafd6fd024b5e74bf49b3d` (FC-011 Compose Next empty states; existing FC-043 guidance retained).
-- Prior fork `main` tip: `dee7b1b84b7853bf47b43aea3d490e1b42dc7792`; prior fork `dev/compat` tip: `c9aac17e023b5d7d4d28d11071077a79f3a4101f`
+- Last reviewed: 2026-11-13
+- Upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
+- Prior reviewed upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
+- Review completion: full seven-capability content and implementation review; both runtime snapshots published; local affected matrices, CLI/SDK typecheck and lint pass. GitHub rejects all three workflow dispatches on both branches with HTTP 422 (Actions disabled); exact-SHA CI acceptance remains pending in [the synchronization record](upstream-sync-2026-11-13.md).
+- Main behavior (runtime/tests): `ff3e89742fe306d2d350cd0861696a1bd7782e70` (published; local affected verification passes; exact-SHA CI blocked)
+- Inherited compat behavior: `8856b86559a1894b51d4523db21015a32b358fba` (published; local affected verification passes; exact-SHA CI blocked)
+- Bundled guidance content: `ff3e89742fe306d2d350cd0861696a1bd7782e70` (FC-011 unified prompts and Compose Next sub-documents; existing fork guidance retained).
+- Prior fork `main` tip: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`; prior fork `dev/compat` tip: `790149b7e6c137c8a7c079868243eb2b852fdc76`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-09 Compose Next empty states](upstream-sync-2026-11-09.md), C01 (N=1). Adopt explicit Report and Journey log empty-state markers and the three accompanying spec examples. FC-011 owns the shared guidance; no runtime/test, schema, dependency or DC implementation changes. All active FD/FC/DC contracts are retained; publication acceptance is recorded in the linked report.
+Latest reviewed synchronization: [2026-11-13 harness and model defaults](upstream-sync-2026-11-13.md), C01–C07 (N=7). Adopt unified default prompts, explicit Codex opt-in, Compose Next sub-documents, request-log privacy, model-declared parameters and raw finish handling. Retain explicit session precedence, authorized frozen tools, bounded pure-empty/system-agent recovery, non-GPT scoped continuation and all compat owners. Both runtime snapshots are published and locally verified; exact-SHA CI acceptance remains blocked by GitHub Actions HTTP 422.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -1548,6 +1548,8 @@ own source list remains the complete watch surface.
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-11-13 synchronization: adopt provider stream-error logging that destructures the actual error and records only its cause summary, excluding `requestBodyValues`. The real request-marker regression passes; logger clone isolation remains FC-022. This adopts upstream privacy behavior and creates no new fork deviation. Local Windows exec fixture path/symlink failures are recorded separately from opt-in migration failures and require clean CI evidence.
 
 - 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
 
@@ -3517,6 +3519,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Retirement condition: upstream embeds and logs the build commit.
 
 ## FC-053 — a config provider on `@ai-sdk/xai` uses Responses, and an OpenAI-compatible reasoning model keeps its effort
+
+- 2026-11-13 synchronization: adopt declared model output limits, sampling and effort capabilities from `c9c91d7b`, including the 128K missing-output default and removal of name-derived defaults. Preserve the three FC-053 routing/options corrections and FC-025 Grok operation flattening. Tests now declare their effort lists explicitly; actual Responses requests prove configured/small effort, encrypted reasoning and explicit opt-out. An `xhigh` config on the pinned xAI adapter is explicitly rejected before any HTTP request; no silent downgrade or dependency upgrade is introduced.
 
 - Status: active
 - Canonical owner: fork `main` — the loader fallback in `Provider.getLanguage`
