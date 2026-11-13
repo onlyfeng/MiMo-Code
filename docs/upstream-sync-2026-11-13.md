@@ -4,6 +4,8 @@
 
 Full synchronization authorized by the upstream-update request, with live branch-only fetches from both remotes and propagation through upstream/main, fork main, and dev/compat. Upstream is read-only.
 
+Code integration and publication are complete through the selected upstream. Local affected verification passes. The synchronization's CI acceptance remains blocked by GitHub Actions being disabled; this record does not claim successful exact-SHA CI or a full-suite pass.
+
 - Selected upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`.
 - Previous upstream ancestor: `26d1f3a601ab29533a2eaf787895236b92c9aed7`.
 - Starting main: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`.
@@ -12,7 +14,7 @@ Full synchronization authorized by the upstream-update request, with live branch
 
 ## Capability inventory (7)
 
-The complete selected delta consists of four upstream commits and 57 changed paths. Each row is owned by main and inherited by compat; compat-specific consumers remain owned by their DC entries. Rows below record the pre-merge disposition; acceptance and validation are pending until explicitly recorded.
+The complete selected delta consists of four upstream commits and 57 changed paths. Each row is owned by main and inherited by compat; compat-specific consumers remain owned by their DC entries. Rows below record the pre-merge disposition, reconciled against the runtime snapshots in the acceptance table.
 
 | ID | Selected behavior and audit range | Producers, consumers and tests | Existing counterparts and owners | Disposition and drift |
 | --- | --- | --- | --- | --- |
@@ -26,7 +28,7 @@ The complete selected delta consists of four upstream commits and 57 changed pat
 
 ## Validation and publication
 
-GitHub Actions permissions report enabled. Local Bun 1.4.4 could not apply the pinned QuickJS patch. Bun 1.3.14 was obtained without changing the repository lockfile. Native lifecycle installation requires a missing Windows node-gyp command; `bun ci --ignore-scripts` on pinned Bun succeeds for source validation. This does not establish native build or packaged-binary acceptance. Final branch CI remains required.
+GitHub's Actions permissions API reports `enabled: true`, but actual lint, typecheck and test dispatches on both published branches each return HTTP 422, `Actions has been disabled for this repository`. No new runs were created. The service-level rejection is authoritative; the permissions response is not proof of runnable CI. Local Bun 1.4.4 could not apply the pinned QuickJS patch. Bun 1.3.14 was obtained without changing the repository lockfile. Native lifecycle installation requires a missing Windows node-gyp command; `bun ci --ignore-scripts` on pinned Bun succeeds for source validation. This does not establish native build or packaged-binary acceptance. Final branch CI remains required.
 
 Main SDK was regenerated with `bun run packages/sdk/script/build.ts` under Bun 1.3.14. Only the intended v2 type file changes: raw finish, incomplete-stream error and accurate harness descriptions; original fork schema extensions remain. CLI and SDK owning-package `bun run typecheck` pass. Root lint passes with 3,724 warnings and zero errors.
 
@@ -48,10 +50,41 @@ Local tests use Bun 1.3.14 from `packages/cli`, unsetting ambient `MIMOCODE_EXPE
 
 Counts above are per-batch evidence and must not be added into a unique-test total. Initial conflict-parser failures and old automatic-Codex assertions were repaired before acceptance. Two early large local batches reached the shell's 60-second limit; their successful replacements are the reported bounded batches, not inferred passes.
 
+Additional main checks: debug-agent passes 10 cases after old inference fixtures migrate to explicit opt-in; builtin skill content passes 5. The unchanged `tool-script.test.ts` has 101 passes and four Windows failures (path literals embedded in guest JS and symlink EPERM). These are not counted as passes or asserted to pass at the starting commit; the test blob is unchanged and the observed failures are unrelated to harness selection. Full Linux shared-process shards remain unverified because CI cannot start.
+
+Compat independently regenerated the SDK from its resolved runtime schema, preserving agent MaxMode, native search/fetch, checkpoint coverage and all existing API extensions. CLI/SDK package typecheck pass; root lint reports 3,809 warnings, zero errors. Its validation removes the three mandatory ambient selectors; permission-sensitive parent batches also remove skip-permissions/Exa, retaining the five host options listed above and package preload.
+
+| Compat local matrix | Result |
+| --- | --- |
+| Provider/transform/xai/OpenAI Responses/capability streaming | 345 pass, zero fail |
+| Overflow, prefix snapshots and actual request prefixes | 126 pass, zero fail |
+| Session owner, execution ownership, model-selection API | 30 pass, zero fail |
+| MaxMode, request-log privacy, isolated flag defaults | 19 pass, zero fail |
+| System/gpt and compat skill catalog projection/capture; spawn variants/tools | 42 + 7 pass, zero fail |
+| Classify/auto-resume, invalid-output, rawFinish integration and selected prompt contracts | 52 + 6 + 6 + 5 + 4 pass, zero fail |
+| Native search request/fallback/replay and tool wire behavior | 9 + 30 pass, zero fail |
+
+Native-search review also checked `pause_turn` against starting compat `790149b7`: the pinned SDK maps it to `stop`, and text-bearing results already terminate. Explicit pause continuation remains an existing unsupported boundary, not a newly supported capability or a regression introduced by this merge.
+
 ## Final capability acceptance
 
-Pending; reconcile C01–C07 against both final branch states.
+The table has exactly seven result rows, matching inventory N=7. Results describe published source and local verification; remote CI acceptance is a separate blocked condition.
+
+| ID | Selected behavior | main result | dev/compat result | Decisive paths/tests |
+| --- | --- | --- | --- | --- |
+| C01 | Unified default prompt/environment | Adopted, vendor templates removed; fork Task/Actor and instruction authority retained | Inherited; UTF-8 skill catalog caps retained | `session/system.ts`, system/agent tests, compat catalog capture/projection, legacy Git-status recovery |
+| C02 | Model-independent Codex opt-in | Adopted with explicit session priority; legacy aliases no longer select tools; persistent profile policy version added | Inherited; variant selection and read-only subagent tools retained | `tool/gpt.ts`, `session/prefix-snapshot.ts`, isolated flag/gpt child tests, harness-alias/request-prefix/debug-agent/spawn tests |
+| C03 | Compose Next presentation/sub-documents | Adopted guidance; no workflow authorization expansion | Inherited unchanged | Bundled `compose-next/SKILL.md`, builtin skill tests |
+| C04 | Finite writer/empty-step recovery | Adapted into independent eight-retry emptyOutput budget, system cap and atomic non-GPT continuation | Inherited; overflow placeholders and process ownership retained | retry/invalid-output/checkpoint/classify integration, writer-fork/runaway and ownership tests |
+| C05 | Request-body-free stream error logging | Adopted | Inherited | `session/llm.ts`, real request-marker `llm-stream-error-log.test.ts` |
+| C06 | Declared limits/sampling/effort | Adopted; xAI Responses/options and Grok schemas retained | Inherited; native server-tool ordering and effective-window preflight retained | provider/transform/Responses/capability wire matrices, overflow and native-search tests |
+| C07 | Raw finish, incomplete streams and public schema | Adopted with fork reasoning-only continuation and no tool replay; SDK regenerated | Inherited with compat MaxMode/context/recovery API extensions; SDK regenerated | classify/processor/auto-resume/MaxMode tests and both generated v2 type files |
 
 ## Publication and cleanup evidence
 
-Pending; record exact-SHA workflows, final remote tips, ancestry, registry updates and removal of operation-created integrated resources.
+- Published main runtime/test/guidance snapshot: `ff3e89742fe306d2d350cd0861696a1bd7782e70`.
+- Published compat runtime/test snapshot: `8856b86559a1894b51d4523db21015a32b358fba`, inheriting that main snapshot.
+- Both `git merge-base --is-ancestor` checks for selected upstream → runtime main → runtime compat exit zero. No lockfile or migration journal changed. Later registry/history/report commits are documentation-only and do not advance these runtime references.
+- Main owns identical FD/FC registries and shared history/report on both branches. FD-005 retires automatic model/alias harness inference while retaining explicit session priority. FC-050 retires production Claude status generation and retains legacy snapshot recovery. Compat updates only its own current review record/history in addition to inheriting main documents.
+- Exact-SHA lint/typecheck/test run URLs are unavailable: all three workflow dispatches on each branch are rejected with HTTP 422. Windows CI is also unavailable. To finish acceptance, restore repository Actions availability, dispatch all three workflows at the then-current branch tips (enable the Windows input for a manual compat test run), and verify each run's full `headSha`. Do not substitute historical green runs or the passing local subsets.
+- Final branch-tip equality, live upstream recheck, documentation-only tree equivalence and operation-resource cleanup are verified by the closing terminal evidence. The source snapshot references above intentionally remain immutable when this record is inherited into later documentation commits.
