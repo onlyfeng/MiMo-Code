@@ -333,11 +333,36 @@ describe("checkpoint writer child-session isolation", () => {
         })
         expect(outcome).toBe("started")
         const task = spawnLog.lastInput?.task ?? ""
-        expect(task).toContain("end your response with one short line")
-        expect(task).toContain("do not end with an empty reply")
-        expect(task).toContain("end with one short line such as `Checkpoint updated.` and stop.")
+        expect(task).toContain("reply with exactly CHECKPOINT_COMPLETE and nothing else")
+        expect(task).toContain("Do not end with an empty reply")
+        expect(task.trimEnd().endsWith("reply with exactly CHECKPOINT_COMPLETE.")).toBe(true)
         expect(task).not.toContain("stop immediately")
         expect(task).not.toContain("your response is complete")
+      }),
+    ),
+  )
+
+  it.live(
+    "writer task asks for a CHECKPOINT_COMPLETE reply once the edits are written",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        yield* resetSpawnLog
+        const svc = yield* SessionCheckpoint.Service
+        const { info } = yield* seedParentSession()
+
+        const outcome = yield* svc.tryStartCheckpointWriter({
+          sessionID: info.id,
+          model: { providerID: "test", modelID: "test-model" },
+          promptOps: {} as never,
+        })
+        expect(outcome).toBe("started")
+
+        // An empty final stop would enter invalid-output recovery, so the writer
+        // must end on the marker text.
+        const task = spawnLog.lastInput?.task ?? ""
+        expect(task.trimEnd().endsWith("reply with exactly CHECKPOINT_COMPLETE.")).toBe(true)
+        expect(task).toContain("reply with exactly CHECKPOINT_COMPLETE and nothing else")
+        expect(task).not.toContain("stop immediately")
       }),
     ),
   )

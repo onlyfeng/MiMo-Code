@@ -94,4 +94,53 @@ describe("config provider on @ai-sdk/xai", () => {
       })
     }),
   )
+
+  it.live("rejects configured xhigh at SDK validation before sending a request", () =>
+    Effect.gen(function* () {
+      const { server, requests } = yield* gateway
+      yield* provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const provider = yield* Provider.Service
+            const model = yield* provider.getModel(providerID, modelID)
+            const language = yield* provider.getLanguage(model)
+            expect(language.provider).toBe("xai.responses")
+            expect(model.variants?.xhigh).toEqual({ reasoningEffort: "xhigh" })
+            yield* Effect.promise(async () => {
+              await expect(
+                language.doGenerate({
+                  prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+                  providerOptions: ProviderTransform.providerOptions(model, model.variants!.xhigh),
+                }),
+              ).rejects.toMatchObject({
+                name: "AI_InvalidArgumentError",
+                argument: "providerOptions",
+                message: "invalid xai provider options",
+              })
+            })
+          }),
+        {
+          config: {
+            provider: {
+              [providerID]: {
+                name: "Example Gateway",
+                npm: "@ai-sdk/xai",
+                env: [],
+                models: {
+                  [modelID]: {
+                    reasoning: true,
+                    tool_call: true,
+                    limit: { context: 8192, output: 2048 },
+                    variants: { xhigh: {} },
+                  },
+                },
+                options: { apiKey: "test-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+          },
+        },
+      )
+      expect(requests).toEqual([])
+    }),
+  )
 })

@@ -947,7 +947,7 @@ export const layer = Layer.effect(
           : yield* Effect.gen(function* () {
               const [env, instructions] = yield* Effect.all([
                 Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
-                  ? sys.environment(model, captureSession.time.created, capturePrompt.harness)
+                  ? sys.environment(model)
                   : Effect.succeed([]),
                 instruction.system().pipe(Effect.orDie),
               ])
@@ -2805,7 +2805,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         if (!deferMcpTools) mcpCatalog.current.entries.forEach((entry) => activeTools.add(entry.name))
         if (legacyFrozenMcp) loadedMcpTools.forEach((name) => activeTools.add(name))
       }
-      // Config-declared always-direct MCP tools join every toolset (including GPT)
+      // Config-declared always-direct MCP tools join every toolset (including Codex mode)
       // as top-level tools; they are not deferred and must not depend on mcp_tool_use.
       for (const name of alwaysDirectTools) activeTools.add(name)
 
@@ -5447,10 +5447,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
 
         // json_schema mode but the model never produced structured output (plain
-        // text stop, empty, think-only, or any other non-tool terminal). Retry up
+        // text stop, empty, reasoning-only, or any other non-tool terminal). Retry up
         // to lastUser.format.retryCount with a repair nudge; on exhaustion write a
         // StructuredOutputError carrying the *real* retry count. Structured retries
-        // are bounded by the per-request retryCount. Empty/think-only for text
+        // are bounded by the per-request retryCount. Empty output for text
         // format is retried inside processor.process via SessionRetry.policy.
         const autoRetryStructuredOutput = Effect.fn("SessionPrompt.autoRetryStructuredOutput")(function* (input: {
           lastUser: MessageV2.User
@@ -6147,8 +6147,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               yield* slog.info("exiting loop", { classification: classification.type })
               break
             }
-            if (classification.type === "final" && classification.degraded)
-              yield* slog.warn("degraded final on abnormal finish", { finish: lastAssistant.finish })
+            if (classification.type === "final" && classification.rawFinish)
+              yield* slog.warn("final on abnormal finish", { finish: lastAssistant.finish, raw: classification.rawFinish })
             if (classification.type !== "continue") {
               if (yield* waitForSubagents(inputRevision, lastUser)) {
                 subagentWaitUser = lastUser
@@ -7067,9 +7067,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       return "continue" as const
                     return "break" as const
                   }
-                  // Tool residue / unreplayable empty turn: process() left it in
-                  // place. Drop it and start a fresh step (SessionRetry already
-                  // covered the clean-replay case inside process).
+                  // Preserve settled tool effects while continuing the owning actor.
                   if (
                     (forkClassification.type === "think-only" || forkClassification.type === "invalid") &&
                     format.type !== "json_schema"
@@ -7078,8 +7076,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     return "break" as const
                   }
 
-                  if (forkClassification.type === "final" && forkClassification.degraded)
-                    yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+                  if (forkClassification.type === "final" && forkClassification.rawFinish)
+                    yield* slog.warn("final on abnormal finish", {
+                      finish: handle.message.finish,
+                      raw: forkClassification.rawFinish,
+                    })
                   // Fork agents are always subagents (lastUser.agentID is set); use
                   // per-actor compaction on overflow (same as non-fork subagent path).
                   if (!isBoundedComputation && result === "overflow") {
@@ -7142,7 +7143,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const currentAdditions = Effect.fnUntraced(function* () {
                   const [env, instructions] = yield* Effect.all([
                     Flag.MIMOCODE_ENABLE_DYNAMIC_SYSTEM_PROMPT
-                      ? sys.environment(model, session.time.created, sessionPrompt.harness)
+                      ? sys.environment(model)
                       : Effect.succeed([]),
                     instruction.system().pipe(Effect.orDie),
                   ])
@@ -7467,8 +7468,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   return "break" as const
                 }
 
-                if (classification.type === "final" && classification.degraded)
-                  yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+                if (classification.type === "final" && classification.rawFinish)
+                  yield* slog.warn("final on abnormal finish", {
+                    finish: handle.message.finish,
+                    raw: classification.rawFinish,
+                  })
                 if (!isBoundedComputation && result === "overflow") {
                   // Subagent overflow → per-actor compaction. Insert a boundary
                   // tagged with the subagent's agent_id; the next runLoop iteration
@@ -8784,7 +8788,7 @@ export const PromptInput = z.object({
     .enum(["auto", "codex", "default"])
     .optional()
     .describe(
-      "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
+      "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.",
     ),
   variant: z.string().optional(),
   parts: z
@@ -8894,7 +8898,7 @@ export const CommandInput = z.object({
     .enum(["auto", "codex", "default"])
     .optional()
     .describe(
-      "Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.",
+      "Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.",
     ),
   parts: z
     .array(

@@ -34,9 +34,13 @@ function makeAgent(): Agent.Info {
 
 describe("buildLLMRequestPrefix", () => {
   test.each([
-    { id: "mimo", api: "mimo-v2.5-pro", family: "mimo-v2.6", trust: undefined, codex: false },
-    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", codex: true },
-  ])("captures the resolved harness toolset for $id", async (identity) => {
+    { id: "mimo", api: "mimo-v2.5-pro", family: "mimo-v2.6", trust: undefined, harness: undefined, codex: false },
+    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", harness: undefined, codex: false },
+    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", harness: "auto", codex: false },
+    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", harness: "default", codex: false },
+    { id: "opaque", api: "slot-17", family: "opaque", trust: "gpt-5.6-sol", harness: "codex", codex: true },
+    { id: "mimo", api: "mimo-v2.5-pro", family: "mimo-v2.6", trust: undefined, harness: "codex", codex: true },
+  ] as const)("captures the resolved harness toolset for $id with session harness $harness", async (identity) => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
@@ -51,6 +55,7 @@ describe("buildLLMRequestPrefix", () => {
               role: "user",
               time: { created: Date.now() },
               agent: "build",
+              harness: identity.harness,
               model: { providerID: ProviderID.make("xiaomi"), modelID: ModelID.make("mimo") },
               tools: {},
               mode: "",
@@ -84,6 +89,7 @@ describe("buildLLMRequestPrefix", () => {
           }),
         )
 
+        expect(prefix.system.join("\n").includes("You are Codex")).toBe(identity.codex)
         expect(!!prefix.tools.exec).toBe(identity.codex)
         expect(!!prefix.tools.apply_patch).toBe(identity.codex)
         expect(!!prefix.tools.edit).toBe(!identity.codex)

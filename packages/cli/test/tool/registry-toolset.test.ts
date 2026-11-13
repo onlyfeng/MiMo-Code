@@ -14,7 +14,7 @@ const it = testEffect(
 )
 
 describe("ToolRegistry.tools: toolset selection", () => {
-  it.live("advertises only exec in Codex mode while keeping hidden tools registered", () =>
+  it.live("advertises compact exec and direct controls in Codex mode while keeping hidden tools registered", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
@@ -22,6 +22,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
         const input = {
           providerID: ProviderID.opencode,
           modelID: ModelID.make("gpt-5.4"),
+          harness: "codex" as const,
           agent: yield* agents.get("build"),
         }
         const advertised = yield* reg.tools(input)
@@ -65,7 +66,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
   )
 
   it.live(
-    "exposes exec by default only to GPT models",
+    "exposes compact tools only after explicit Codex opt-in",
     () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
@@ -73,11 +74,12 @@ describe("ToolRegistry.tools: toolset selection", () => {
           const agents = yield* Agent.Service
           const general = yield* agents.get("general")
           if (!general) throw new Error("no general agent")
-          const ids = (modelID: string) =>
+          const ids = (modelID: string, harness?: "codex" | "default") =>
             reg
               .tools({
                 providerID: ProviderID.opencode,
                 modelID: ModelID.make(modelID),
+                harness,
                 agent: general,
               })
               .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
@@ -85,6 +87,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
           const gpt = yield* reg.tools({
             providerID: ProviderID.opencode,
             modelID: ModelID.make("openai/gpt-5.4"),
+          harness: "codex" as const,
             agent: general,
           })
           const exec = gpt.find((tool) => tool.id === "exec")
@@ -118,6 +121,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
         const input = {
           providerID: ProviderID.opencode,
           modelID: ModelID.make("gpt-5.4"),
+          harness: "codex" as const,
           agent: yield* agents.get("build"),
           permission: [{ permission: "task", pattern: "*", action: "deny" as const }],
           tools: { bash: false },
@@ -140,6 +144,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
         const input = {
           providerID: ProviderID.opencode,
           modelID: ModelID.make("gpt-5.4"),
+          harness: "codex" as const,
           agent: { ...(yield* agents.get("general")), toolAllowlist: ["remote_lookup"] },
           additionalTools: ["remote_lookup"],
         }
@@ -165,6 +170,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
               .tools({
                 providerID: ProviderID.opencode,
                 modelID: ModelID.make("openai/gpt-5.4"),
+          harness: "codex" as const,
                 agent: { ...general, toolAllowlist },
               })
               .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
@@ -244,7 +250,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
     ),
   )
 
-  it.live("uses the filesystem-capable bash description for GPT models", () =>
+  it.live("uses the filesystem-capable bash description in Codex mode", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
@@ -254,6 +260,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
         const tools = yield* reg.registered({
           providerID: ProviderID.make("openai"),
           modelID: ModelID.make("gpt-5"),
+          harness: "codex" as const,
           agent: general,
         })
         const bash = tools.find((tool) => tool.id === "bash")
@@ -267,7 +274,53 @@ describe("ToolRegistry.tools: toolset selection", () => {
     ),
   )
 
-  it.live("keeps the specialized-tool bash description for non-GPT models", () =>
+  it.live("uses the harness rather than the model to select the toolset", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const reg = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const build = yield* agents.get("build")
+        const normalDefault = yield* reg.tools({
+          providerID: ProviderID.make("xiaomi"),
+          modelID: ModelID.make("mimo-v2.6"),
+          agent: build,
+        })
+        const responsesDefault = yield* reg.tools({
+          providerID: ProviderID.make("xiaomi"),
+          modelID: ModelID.make("mimo-v2.6-ptc"),
+          agent: build,
+        })
+        const normalCodex = yield* reg.tools({
+          providerID: ProviderID.make("xiaomi"),
+          modelID: ModelID.make("mimo-v2.6"),
+          agent: build,
+          harness: "codex",
+        })
+        const responsesCodex = yield* reg.tools({
+          providerID: ProviderID.make("xiaomi"),
+          modelID: ModelID.make("mimo-v2.6-ptc"),
+          agent: build,
+          harness: "codex",
+        })
+
+        expect(normalDefault.map((tool) => tool.id)).toContain("bash")
+        expect(normalDefault.map((tool) => tool.id)).not.toContain("exec")
+        expect(responsesDefault.map((tool) => tool.id)).toContain("bash")
+        expect(responsesDefault.map((tool) => tool.id)).not.toContain("exec")
+        expect(normalCodex.map((tool) => tool.id)).toEqual(expect.arrayContaining(["exec", "actor", "question"]))
+        const gptDefault = yield* reg.tools({
+          providerID: ProviderID.openai,
+          modelID: ModelID.make("gpt-5.4"),
+          agent: build,
+        })
+        expect(gptDefault.map((tool) => tool.id)).toContain("bash")
+        expect(gptDefault.map((tool) => tool.id)).not.toContain("exec")
+        expect(responsesCodex.map((tool) => tool.id)).toEqual(expect.arrayContaining(["exec", "actor", "question"]))
+      }),
+    ),
+  )
+
+  it.live("keeps the specialized-tool bash description outside Codex mode", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const reg = yield* ToolRegistry.Service
@@ -291,7 +344,7 @@ describe("ToolRegistry.tools: toolset selection", () => {
   )
 
   it.live(
-    "masks multiedit for GPT models",
+    "masks custom multiedit only in Codex mode",
     () =>
       provideTmpdirInstance((dir) =>
         Effect.gen(function* () {
@@ -315,16 +368,18 @@ describe("ToolRegistry.tools: toolset selection", () => {
           const agents = yield* Agent.Service
           const general = yield* agents.get("general")
           if (!general) throw new Error("no general agent")
-          const ids = (modelID: string) =>
+          const ids = (modelID: string, harness?: "codex" | "default") =>
             reg
               .tools({
                 providerID: ProviderID.opencode,
                 modelID: ModelID.make(modelID),
+                harness,
                 agent: general,
               })
               .pipe(Effect.map((tools) => tools.map((tool) => tool.id)))
 
-          expect(yield* ids("openai/gpt-5.4")).not.toContain("multiedit")
+          expect(yield* ids("openai/gpt-5.4", "codex")).not.toContain("multiedit")
+          expect(yield* ids("openai/gpt-5.4")).toContain("multiedit")
           expect(yield* ids("anthropic/claude-sonnet-4-6")).toContain("multiedit")
         }),
       ),

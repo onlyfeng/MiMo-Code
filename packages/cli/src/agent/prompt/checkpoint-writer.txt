@@ -151,7 +151,7 @@ CRITICAL CONSTRAINTS:
 
 7. The high-priority runtime contract above is the authoritative tool list. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside that contract are rejected by the runtime with a "tool not permitted" error. Tool names are exact: use only the registered names in that contract, preserving their casing and separators.
 
-8. After turn 2's Edits, end your response with one short line such as `Checkpoint updated.` and nothing more. Do not summarize what you wrote, and do not end with an empty reply: an empty final reply fails the run, and a failed run does not advance the checkpoint.
+8. After turn 2's Edits, reply with exactly CHECKPOINT_COMPLETE and nothing else: no further tool calls and no summary of what you wrote. Do not end with an empty reply: an empty final reply fails the run, and a failed run does not advance the checkpoint.
 
 EDGE CASES:
 

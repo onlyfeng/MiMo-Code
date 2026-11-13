@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { createOpenAI } from "@ai-sdk/openai"
 import { Provider, ProviderTransform } from "../../src/provider"
 
-function model(id: string, reasoning: boolean) {
+function model(id: string, reasoning: boolean, efforts?: string[]) {
   return Provider.fromModelsDevProvider({
     id: "example",
     name: "Example",
@@ -15,6 +15,7 @@ function model(id: string, reasoning: boolean) {
         release_date: "2026-01-01",
         attachment: false,
         reasoning,
+        ...(efforts ? { reasoning_options: [{ type: "effort", values: efforts }] } : {}),
         temperature: false,
         tool_call: true,
         voice_design: false,
@@ -33,7 +34,7 @@ test.each([
   ["grok-build-0.1", true, undefined],
   ["grok-4.20-0309-non-reasoning", false, undefined],
 ] as const)("OpenAI Responses honors reasoning capability for %s", async (id, reasoning, effort) => {
-  const mdl = model(id, reasoning)
+  const mdl = model(id, reasoning, effort ? ["none", effort, "low"] : undefined)
   const requests: { url: string; body: Record<string, unknown> }[] = []
   const sdk = createOpenAI({
     apiKey: "test-key",
@@ -57,7 +58,7 @@ test.each([
   })
   const options = {
     ...ProviderTransform.options({ model: mdl, sessionID: "test-session", providerOptions: { setCacheKey: true } }),
-    ...(reasoning ? { reasoningSummary: "auto", ...(effort ? { reasoningEffort: effort } : {}) } : {}),
+    ...(effort ? mdl.variants?.[effort] : {}),
   }
   for (const settings of [options, ProviderTransform.smallOptions(mdl)]) {
     const result = await sdk.languageModel(id).doGenerate({
@@ -76,7 +77,25 @@ test.each([
   expect(requests[0].body).toMatchObject({ store: false, prompt_cache_key: "test-session" })
   if (reasoning) {
     expect(requests[0].body.reasoning).toEqual({ summary: "auto", ...(effort ? { effort } : {}) })
+    expect(requests[1].body.reasoning).toEqual({ summary: "auto", ...(effort ? { effort: "low" } : {}) })
     for (const request of requests) expect(request.body.include).toContain("reasoning.encrypted_content")
+    await sdk.languageModel(id).doGenerate({
+      prompt: [
+        { role: "system", content: "Be concise." },
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+      providerOptions: ProviderTransform.providerOptions(mdl, {
+        store: false,
+        forceReasoning: false,
+        reasoningEffort: effort ?? "low",
+        reasoningSummary: "auto",
+      }),
+    })
+    expect(requests[2].url).toBe("https://example.test/v1/responses")
+    expect(requests[2].body.store).toBe(false)
+    expect(requests[2].body).not.toHaveProperty("reasoning")
+    expect(requests[2].body).not.toHaveProperty("include")
+    expect(requests[2].body.input).toContainEqual({ role: "system", content: "Be concise." })
     return
   }
   for (const request of requests) {

@@ -672,9 +672,51 @@ describe("Actor.spawn subagent mode", () => {
     30000,
   )
 
-  it.live("exposes GPT orchestration and read tools to read-only GPT subagents", () =>
+  it.live("gives GPT subagents the default tool set outside Codex mode", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({ title: "GPT subagent tools" })
+
+        yield* llm.text("done")
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "explore",
+          task: "verify tools",
+          context: "none",
+          tools: "INHERIT",
+          background: false,
+          model: { providerID: ProviderID.make("gpt-test"), modelID: ModelID.make("gpt-5.4") },
+        })
+        yield* Deferred.await(result.outcome)
+
+        const request = (yield* llm.hits).find((hit) => Array.isArray(hit.body.tools) && hit.body.tools.length > 0)
+        const names = (request?.body.tools as Array<{ function?: { name?: string } }> | undefined)?.map(
+          (tool) => tool.function?.name,
+        )
+        expect(names).toContain("read")
+        expect(names).not.toContain("exec")
+        expect(names).not.toContain("apply_patch")
+        expect(names).not.toContain("view_image")
+      }),
+      { git: true, config: gptProviderCfg },
+    ),
+    30000,
+  )
+
+  it.live("exposes GPT orchestration and read tools to read-only GPT subagents in explicit Codex mode", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const previous = process.env.MIMOCODE_CODEX_MODE
+        yield* Effect.acquireRelease(
+          Effect.sync(() => { process.env.MIMOCODE_CODEX_MODE = "true" }),
+          () => Effect.sync(() => {
+            if (previous === undefined) delete process.env.MIMOCODE_CODEX_MODE
+            else process.env.MIMOCODE_CODEX_MODE = previous
+          }),
+        )
         const actor = yield* Actor.Service
         const session = yield* Session.Service
         const parent = yield* session.create({ title: "GPT subagent tools" })
@@ -716,9 +758,20 @@ describe("Actor.spawn subagent mode", () => {
     30000,
   )
 
-  it.live("exposes the full GPT-specific tool set to general GPT subagents", () =>
+  it.live("exposes the full Codex tool set to general subagents in Codex mode", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
+        const previous = process.env.MIMOCODE_CODEX_MODE
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            process.env.MIMOCODE_CODEX_MODE = "true"
+          }),
+          () =>
+            Effect.sync(() => {
+              if (previous === undefined) delete process.env.MIMOCODE_CODEX_MODE
+              else process.env.MIMOCODE_CODEX_MODE = previous
+            }),
+        )
         const actor = yield* Actor.Service
         const session = yield* Session.Service
         const parent = yield* session.create({ title: "General GPT subagent tools" })
@@ -2174,7 +2227,7 @@ describe("Actor.spawn structured output (P3)", () => {
           model: ref,
         })
 
-        const outcome = yield* Deferred.await(result.outcome)
+        const outcome = yield* Deferred.await(result.outcome).pipe(Effect.timeout("10 seconds"))
         expect(outcome.status).toBe("failure")
       }),
       {

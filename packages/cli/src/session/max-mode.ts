@@ -46,6 +46,7 @@ export type Candidate = {
   textMetadata?: Record<string, any>
   toolCalls: SessionProcessor.ProposedToolCall[]
   finishReason: string
+  rawFinishReason?: string
   usage?: any
   providerMetadata?: Record<string, any>
 }
@@ -198,6 +199,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
           break
         case "finish-step":
           candidate.finishReason = event.finishReason ?? candidate.finishReason
+          candidate.rawFinishReason = event.rawFinishReason
           candidate.usage = event.usage
           candidate.providerMetadata = event.providerMetadata
           break
@@ -216,6 +218,13 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       return Effect.void
     })
 
+    // A candidate whose stream closed without a finish frame did not finish;
+    // it never competes. If every candidate is incomplete, runMaxStep falls back
+    // to the single-process path, which retries via StreamIncompleteError.
+    if (candidate.finishReason === "other" && !candidate.rawFinishReason) {
+      log.warn("candidate stream incomplete", { index })
+      return null
+    }
     return candidate
   }).pipe(
     // Mirror the proven build/plan path (processor.ts): convert any DEFECT into
@@ -455,6 +464,7 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
       textMetadata: winner.textMetadata,
       toolCalls: winner.toolCalls,
       finishReason: winner.finishReason,
+      rawFinishReason: winner.rawFinishReason,
       usage: winner.usage,
       providerMetadata: winner.providerMetadata,
       tools: input.tools as any,

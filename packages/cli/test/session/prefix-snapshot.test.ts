@@ -305,6 +305,111 @@ describe("session prefix snapshot", () => {
     })
   })
 
+  test.each([
+    {
+      modelID: "claude-test",
+      modelFamily: "claude",
+      harness: "default",
+      legacyKey: "9fe9bb2c6ae00b0a1b76781f03a20df5a847efabbae09ffb4960254af33bc6fd",
+    },
+    {
+      modelID: "gpt-5-test",
+      modelFamily: "gpt",
+      harness: "codex",
+      legacyKey: "65d148a287a9102d1b16475c9d094efe472cca941b046317a0371e0d991756a8",
+    },
+  ])("does not reuse a pre-policy $harness prefix when profile inputs are unchanged", async (entry) => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((service) => service.create({})))
+        const profile = {
+          providerID: "test",
+          modelID: entry.modelID,
+          modelAPIID: "responses",
+          modelFamily: entry.modelFamily,
+          agent: "build",
+          agentID: "main",
+          harness: entry.harness,
+          systemMode: "append",
+          system: "",
+          permission: [],
+        }
+        // Fixed keys produced by the unversioned profile hash before the policy change.
+        const legacy = await AppRuntime.runPromise(
+          SessionPrefixSnapshot.pin({
+            sessionID: session.id,
+            profileKey: entry.legacyKey,
+            system: ["legacy model-specific prompt"],
+            toolsHash: "legacy-tools",
+            tools: [{ name: "exec", input_schema: { type: "object" } }],
+            loadedMcpTools: ["mcp_legacy"],
+            watermarkMessageID: MessageID.ascending(),
+          }),
+        )
+        const key = SessionPrefixSnapshot.profileKey(profile)
+        expect(key).not.toBe(entry.legacyKey)
+        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, key))).toBeUndefined()
+        const current = await AppRuntime.runPromise(
+          SessionPrefixSnapshot.pin({
+            sessionID: session.id,
+            profileKey: key,
+            system: ["current unified harness prompt"],
+            toolsHash: "current-tools",
+            tools: [{ name: "read", input_schema: { type: "object" } }],
+            loadedMcpTools: [],
+            watermarkMessageID: MessageID.ascending(),
+          }),
+        )
+        expect(current).toMatchObject({
+          system: ["current unified harness prompt"],
+          tools_hash: "current-tools",
+          tools: [{ name: "read", input_schema: { type: "object" } }],
+          loaded_mcp_tools: [],
+          revision: 1,
+        })
+        expect(
+          await AppRuntime.runPromise(
+            SessionPrefixSnapshot.get(session.id, SessionPrefixSnapshot.profileKey({ ...profile })),
+          ),
+        ).toEqual(current)
+        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, entry.legacyKey))).toEqual(legacy)
+      },
+    })
+  })
+
+  test("keeps each profile identity isolated within the current policy", () => {
+    const profile = {
+      providerID: "test",
+      modelID: "test-model",
+      modelAPIID: "responses",
+      modelFamily: "test-family",
+      agent: "build",
+      agentID: "main",
+      harness: "default",
+      systemMode: "append",
+      system: "",
+      permission: [],
+    }
+    const key = SessionPrefixSnapshot.profileKey(profile)
+    const variants = [
+      { providerID: "other" },
+      { modelID: "other-model" },
+      { modelAPIID: "chat" },
+      { modelFamily: "other-family" },
+      { harnessModel: "gpt-5" },
+      { agent: "plan" },
+      { agentID: "peer" },
+      { harness: "codex" },
+      { systemMode: "replace" },
+      { system: "custom prompt" },
+      { permission: [{ permission: "*", pattern: "*", action: "allow" as const }] },
+    ].map((change) => SessionPrefixSnapshot.profileKey({ ...profile, ...change }))
+    expect(new Set([key, ...variants]).size).toBe(variants.length + 1)
+    expect(SessionPrefixSnapshot.profileKey({ ...profile, harnessModel: undefined })).toBe(key)
+  })
+
   test("profile and tool hashes are stable across key order", () => {
     const permission = [{ permission: "*", pattern: "*", action: "allow" as const }]
     const key = SessionPrefixSnapshot.profileKey({

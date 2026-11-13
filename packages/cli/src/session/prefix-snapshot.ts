@@ -54,7 +54,8 @@ function hash(value: unknown) {
 }
 
 export function profileKey(input: Profile) {
-  return hash(input)
+  // Prompt/tool policy can change without changing any of the profile inputs.
+  return hash({ policy: "unified-default-harness-v1", profile: input })
 }
 
 export function systemHash(system: string[]) {

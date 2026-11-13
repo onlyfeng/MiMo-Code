@@ -603,6 +603,18 @@ export type InvalidOutputError = {
   }
 }
 
+export type StreamIncompleteError = {
+  name: "StreamIncompleteError"
+  data: {
+    message: string
+    hostCode?: string
+    hostRetryClass?: "terminal" | "persistent" | "bounded"
+    metadata?: {
+      [key: string]: string
+    }
+  }
+}
+
 export type TextToolCallError = {
   name: "TextToolCallError"
   data: {
@@ -669,6 +681,7 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | InvalidOutputError
+      | StreamIncompleteError
       | TextToolCallError
       | ContentFilterError
       | ModelError
@@ -1200,6 +1213,7 @@ export type AssistantMessage = {
     | StructuredOutputError
     | ContextOverflowError
     | InvalidOutputError
+    | StreamIncompleteError
     | TextToolCallError
     | ContentFilterError
     | ModelError
@@ -1235,6 +1249,7 @@ export type AssistantMessage = {
   }
   variant?: string
   finish?: string
+  rawFinish?: string
 }
 
 export type Message = UserMessage | AssistantMessage
@@ -2365,7 +2380,7 @@ export type ProviderConfig = {
       name?: string
       family?: string
       /**
-       * Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.
+       * Legacy canonical GPT-5 or newer identity retained for configuration compatibility. Does not select the harness or change the API model or transport; use an explicit session harness or MIMOCODE_CODEX_MODE instead.
        */
       harness_model?: string
       release_date?: string
@@ -3287,7 +3302,7 @@ export type Model = {
   name: string
   family?: string
   /**
-   * Explicitly trusted canonical GPT-5 or newer identity for automatic harness inference. Does not change the API model or transport; session/process choices and MiMo/GPT-4/OSS exclusions take precedence.
+   * Legacy canonical GPT-5 or newer identity retained for configuration compatibility. Does not select the harness or change the API model or transport; use an explicit session harness or MIMOCODE_CODEX_MODE instead.
    */
   harness_model?: string
   capabilities: {
@@ -5742,7 +5757,7 @@ export type SessionPromptData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
+     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.
      */
     harness?: "auto" | "codex" | "default"
     variant?: string
@@ -6164,7 +6179,7 @@ export type SessionPromptAsyncData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
+     * Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.
      */
     harness?: "auto" | "codex" | "default"
     variant?: string
@@ -6286,7 +6301,7 @@ export type SessionCommandData = {
      */
     systemMode?: "append" | "replace-agent"
     /**
-     * Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto uses an explicit MIMOCODE_CODEX_MODE true/false when set, then falls back to model inference.
+     * Harness mode selected by the session's first user command. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.
      */
     harness?: "auto" | "codex" | "default"
     parts?: Array<

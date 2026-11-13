@@ -1,5 +1,7 @@
 # 指定别名、schema 实验和 actor 恢复实施计划
 
+> **2026-11-13 行为更新：** 下文 ALIAS-01 的自动推断与未版本化前缀 key 是历史实现。当前 `harness_model` 只保留配置兼容和前缀隔离用途，不选择 harness 或 transport；使用 session → process → default 的显式选择规则，详见[当前说明](../../harness-aliases.md)。
+
 > **2026-09-08 范围修订：** 后续用户授权生产 Codex 紧凑工具融合，见[当前合同](../../codex-compact-tools.md)。下文 Task 2 的仅实验限制记录原交付范围，不再约束当前 Codex 生产路径；ALIAS-01、RECOVERY-01 与独立实验本身继续保留。
 
 > **For agentic workers:** Use compose:subagent or compose:execute task by task, with independent review before integration.

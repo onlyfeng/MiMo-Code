@@ -4,14 +4,16 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "../fixture/fixture"
 
 test.each([
-  { name: "trusted agent model", trusted: true, agentModel: true, codex: true },
-  { name: "trusted default model", trusted: true, codex: true },
+  { name: "trusted agent model without opt-in", trusted: true, agentModel: true, codex: false },
+  { name: "trusted default model without opt-in", trusted: true, codex: false },
   { name: "untrusted API alias", api: "gpt-5", codex: false },
   { name: "GPT4 API veto", trusted: true, api: "gpt-4o", codex: false },
   { name: "OSS family veto", trusted: true, family: "gpt-oss", codex: false },
   { name: "MiMo API veto", trusted: true, api: "mimo-v2.6", codex: false },
   { name: "explicit default", trusted: true, mode: "false", codex: false },
   { name: "explicit codex", api: "mimo-v2.6", mode: "true", codex: true },
+  { name: "trusted agent model with opt-in", trusted: true, agentModel: true, mode: "true", codex: true },
+  { name: "trusted default model with opt-in", trusted: true, mode: "true", codex: true },
 ])(
   "debug agent discovers the toolset for $name",
   async (input) => {

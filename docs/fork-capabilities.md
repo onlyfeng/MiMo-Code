@@ -93,7 +93,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-047 | Checkpoint writer model under `checkpoint.fork: false`: `agent."checkpoint-writer".model`               | Fork addition to upstream writer spawn                           | Let a no-fork writer run on a configured model; a parent-view fork keeps the parent's   |
 | FC-048 | Step-finish summaries: snapshot anchors from the part table, one summary per session, patch budgets      | Fork fix of upstream session summary                             | Keep a step's summary cost flat on long sessions and large worktrees                     |
 | FC-049 | Provider `eventTimeout`: SSE comments do not count as stream progress                                     | Fork addition to upstream SSE chunk timeout                      | End a stalled upstream that a gateway holds open with keep-alive comments                |
-| FC-050 | Claude environment git status: untracked directories collapsed, capped; oversized frozen prefixes rebuilt | Fork fix of upstream environment prompt                         | Keep the fixed request prefix small in worktrees with many untracked files              |
+| FC-050 | Legacy Claude environment snapshots and oversized frozen-prefix recovery | Legacy recovery after unified environment adoption | Rebuild oversized historical prefixes; the unified environment no longer injects git status |
 | FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
 | FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
 | FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
@@ -2030,6 +2030,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-11-13 synchronization: adopt the unified default prompt and retire unused vendor-specific prompt templates, including MiniMax. The MiniMax-specific repository-reminder removal is superseded by template retirement; the factual shared Task/Actor, fixed-cwd and authorized exec guidance remains. Adopt Compose Next spec presentation and independently deliverable sub-documents from `994aa695`, retaining explicit invocation, workspace ownership and publication authorization boundaries.
+
 - 2026-11-09 synchronization: adopt upstream `26d1f3a6` unchanged. Compose Next keeps Report as `[Not finalized yet]` until finalized and Journey log as `None` until a useful entry replaces it; three upstream specs illustrate those markers. Explicit workflow invocation, workspace ownership, discovery/permission and Finish authorization boundaries remain unchanged. Content evidence only; no new runtime behavior is claimed.
 
 - 2026-10-30 registry correction: upstream `2b993ac9` removed the actor shell invocation format on 2026-09-24, including `actor.shell.txt`, its tokenizer/help, heredoc flag-placement errors and the `actor.shell` tests; FC-018 retired with them. Those references leave the observable contract, watch surfaces and Tests/evidence. JSON Actor guidance in `actor.txt` remains. No behavior or content changes.
@@ -2087,7 +2089,7 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   `packages/cli/src/tool/actor.txt`,
   `packages/cli/src/skill/builtin/.bundle/mimocode-docs/`,
   `packages/cli/src/skill/builtin/.bundle/compose-next/SKILL.md`,
-  MiniMax/GPT prompt text, TUI skill i18n, and
+  GPT prompt text, TUI skill i18n, and
   bundled `pdf-official` and `mimocode-docs` content.
 - POLICY-01 content carriers: `docs/codex-compact-tools.md`,
   `packages/cli/src/agent/prompt/generate-gpt.txt`,
@@ -2186,6 +2188,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
+
+- 2026-11-13 synchronization: adopt live `rawFinish` propagation and `StreamIncompleteError` for a stream ending with unified `other` and no provider finish reason. This error uses bounded stream recovery, distinct from a complete pure-empty response's `emptyOutput` budget. Preserve request/candidate/judge scope precedence, the system-agent cap, tool-side-effect replay guards and main-only retry publication. Non-GPT reasoning-only output retains scoped bounded continuation; upstream's global reasoning-only-final policy is not adopted. Historical raw-less `other` messages remain readable by content, and MaxMode excludes live incomplete candidates while retaining raw finish on accepted replay.
 
 - 2026-11-11: pure-empty `InvalidOutputError` retries under its own `emptyOutput` budget instead of the server budget, superseding the 2026-10-22 persistent pure-empty budget for main and ordinary actors. `decide` still reports `kind: "server"` and adds `emptyOutput: true`; `budgetFor` routes that flag to `config.emptyOutput` after the scope (request, max-candidate, max-judge), host-class, network and rate-limit checks, so retry parts, status events and the SDK `kind` enum are unchanged. Default: bounded, `EMPTY_OUTPUT_MAX_RETRIES` (8) retries, no wall-clock deadline, server delays (2 s doubling to 30 s). `retry.server` no longer affects empty output; `retry.emptyOutput` (global or `provider.<id>.retry`) configures it, and `mode: "persistent"` restores the previous behavior. Exhaustion ends the turn with `InvalidOutputError` and keeps the retry record (existing processor path). The system-agent cap still applies on top. Why: the request was accepted, so every empty attempt is billed. In production (2026-11-03..11, main and ordinary actors, one gateway), 9 of 12 recovered streaks recovered within 8 retries, while 26 unrecovered streaks averaged 22 retries (up to 51) before a cancel or a newer input ended them; one main turn spent 33 retries in 17 minutes on a 322K-token context. Upstream (`XiaomiMiMo/MiMo-Code`) keeps empty output on the persistent server budget. Evidence: `test/session/retry.test.ts` "InvalidOutputError retries under the bounded emptyOutput budget, not the server budget" (defaults, persistent-server independence, opt-in persistence, provider precedence, scope precedence) and "policy gives up on endless empty output after the emptyOutput count" (stops after `EMPTY_OUTPUT_MAX_RETRIES + 1` attempts under a persistent server budget); `test/session/invalid-output-continuation.test.ts` "endless empty output stops at the default bound even under a persistent server budget" makes `EMPTY_OUTPUT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`. With the `budgetFor` routing removed, the integration test reaches the late scripted answer (12 requests instead of 9) and both unit tests fail on their assertions. The endless-retry cancellation test and the system-agent test now opt into `emptyOutput: { mode: "persistent" }` explicitly. Configs that bounded empty output through `retry.server` stop doing so: the two processor cleanup cases in `test/session/processor-effect.test.ts` and the checkpoint-writer failure case in `test/actor/spawn.test.ts` now set `retry.emptyOutput` instead.
 
@@ -3385,17 +3389,20 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Retirement condition: upstream bounds the time between SSE events apart from
   comments.
 
-## FC-050 — the Claude environment's git status stays small, and old oversized prefixes are rebuilt
+<a id="fc-050--the-claude-environments-git-status-stays-small-and-old-oversized-prefixes-are-rebuilt"></a>
+
+## FC-050 — old oversized environment prefixes are rebuilt
+
+- 2026-11-13 synchronization: adopt the unified environment from `e3592f0e`, which no longer renders Claude-specific git status or recent commits. The production status-generation deviation retires. Keep `GitStatusPrompt.oversized` and `SessionPrefixSnapshot.get` recovery for historical persisted prefixes until such data no longer needs to be read. The helper's caps remain testable legacy behavior, not a promise that new requests include git status.
 
 - Status: active
-- Canonical owner: fork `main` — `ARGS`, `cap` and `oversized` in
-  `packages/cli/src/session/git-status.ts`; their use in the Claude branch of
-  `SystemPrompt.environment` (`packages/cli/src/session/system.ts`) and in
+- Canonical owner: fork `main` — historical environment recognition in
+  `packages/cli/src/session/git-status.ts` and its use in
   `SessionPrefixSnapshot.get` (`packages/cli/src/session/prefix-snapshot.ts`)
 - Observable contract:
-  - The Claude environment runs `git status --short --untracked-files=normal`:
+  - The retired Claude environment ran `git status --short --untracked-files=normal`:
     an untracked directory is one `?? dir/` line, not one line per file.
-  - The status is capped at `MAX_LINES` (200) lines and `MAX_CHARS` (10,000)
+  - Its legacy helper caps status at `MAX_LINES` (200) lines and `MAX_CHARS` (10,000)
     characters; when anything is left out, the last line gives the number of
     entries omitted and points to `git status` for the full list.
   - `SessionPrefixSnapshot.get` drops a frozen prefix whose environment status
@@ -3410,11 +3417,10 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   request prefix and active turn still do not fit"; three Opus subagents in one
   afternoon failed on their first step. Retrying or a new session re-rendered the
   same list, and a frozen prefix kept it after the worktree was cleaned.
-- Upstream relationship: upstream lists all untracked files without a limit in
-  the same prompt. Fork fix of shared code; the frozen-prefix rebuild is part of
-  the fork's prefix snapshot. `dev/compat` inherits it.
-- Watch surfaces: the Claude branch of `SystemPrompt.environment` and
-  `renderGitResult`; `SessionPrefixSnapshot.get`/`pin`/`rotate` and their callers
+- Upstream relationship: adopts unified environment generation; retains
+  historical frozen-prefix recovery. `dev/compat` inherits it.
+- Watch surfaces: `SystemPrompt.environment`;
+  `SessionPrefixSnapshot.get`/`pin`/`rotate` and their callers
   in `prompt.ts` and `compaction.ts`; the `Status:`/`Recent commits:` labels
   `oversized` locates.
 - Tests/evidence: `packages/cli/test/session/git-status-prompt.test.ts` "an
@@ -3423,8 +3429,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   dropped on read so the caller pins a fresh one, and a capped one is kept"
   reads a legacy row. Listing all untracked files, removing the cap, or never
   treating a prefix as oversized each fails a case.
-- Retirement condition: upstream bounds the environment status and the fork no
-  longer freezes prefixes rendered before that.
+- Retirement condition: the fork no longer reads frozen prefixes rendered
+  before the bounded/unified environment policy.
 
 ## FC-051 — a prompt admitted during a revert is not hidden and later deleted
 

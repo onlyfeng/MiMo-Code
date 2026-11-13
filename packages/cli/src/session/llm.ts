@@ -5,6 +5,7 @@ import path from "path"
 import { Provider, ProviderError } from "@/provider"
 import { openCodeGoSessionHeaders } from "@/provider/opencode-go"
 import { Log } from "@/util"
+import { errorMessage } from "@/util/error"
 import { Context, Duration, Effect, Layer, Record, Cause } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema, NoSuchToolError } from "ai"
@@ -45,7 +46,6 @@ import { TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { Flag } from "@/flag/flag"
 
 const log = Log.create({ service: "llm" })
-export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
 type Result = Awaited<ReturnType<typeof streamText>>
 
@@ -509,9 +509,10 @@ const live: Layer.Layer<
             ]
 
       const defaults = {
-        temperature: input.model.capabilities.temperature ? (input.agent.temperature ?? ProviderTransform.temperature(input.model)) : undefined,
-        topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-        topK: ProviderTransform.topK(input.model),
+        temperature: input.model.capabilities.temperature ? input.agent.temperature : undefined,
+        topP: input.agent.topP,
+        // Only plugins (chat.params) set topK; no harness default.
+        topK: undefined as number | undefined,
         maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
         options,
       }
@@ -525,11 +526,9 @@ const live: Layer.Layer<
           message: input.user,
         },
         {
-          temperature: input.model.capabilities.temperature
-            ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
-            : undefined,
-          topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-          topK: ProviderTransform.topK(input.model),
+          temperature: input.model.capabilities.temperature ? input.agent.temperature : undefined,
+          topP: input.agent.topP,
+          topK: undefined,
           maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
           options,
         },
@@ -734,14 +733,16 @@ const live: Layer.Layer<
         && execution?.sessionID === input.sessionID && execution.userMessageID === input.user.id
         ? { executionAttempt: execution.attempt, directory: execution.directory } : {}
       const result = streamText({
-        onError(error) {
+        onError({ error }) {
           l.debug("streamText error", {
             messageID: input.user.id,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
             elapsedMs: Date.now() - streamStartTs,
           })
+          // The provider error carries requestBodyValues (the whole prompt), so
+          // log only its cause summary.
           l.error("stream error", {
-            error,
+            causes: ProviderError.summarizeCause(error),
           })
         },
         async experimental_repairToolCall(failed) {

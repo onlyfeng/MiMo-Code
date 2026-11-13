@@ -1,7 +1,7 @@
 import { Worktree } from "../../src/worktree"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import path from "path"
 import { pathToFileURL } from "node:url"
@@ -427,6 +427,7 @@ describe("Tool whitelist (Task 14)", () => {
           agent: "build",
           agentID: actorID,
           model: gptRef,
+          harness: "codex",
           tools: { secret_custom: false },
           parts: [{ type: "text", text: "try the nested tools" }],
         })
@@ -629,6 +630,56 @@ describe("Tool whitelist (Task 14)", () => {
           .flatMap((msg) => msg.parts)
           .find((part) => part.type === "tool" && part.state.status === "completed" && (part.state.metadata?.rejected as unknown) === true)
         expect(rejected).toBeUndefined()
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("permits the exec gateway while enforcing its nested Codex-mode tool whitelist", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm, dir }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const reg = yield* ActorRegistry.Service
+        const session = yield* sessions.create({
+          title: "nested whitelist test",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const actorID = "build-3"
+        yield* reg.register({
+          sessionID: session.id,
+          actorID,
+          mode: "subagent",
+          agent: "build",
+          description: "nested whitelist actor",
+          contextMode: "none",
+          background: false,
+          lifecycle: "ephemeral",
+          tools: ["bash"],
+        })
+
+        yield* llm.tool("exec", {
+          code: `return await tools.exec_command({ cmd: "echo nested-ok", description: "print nested marker", workdir: ${JSON.stringify(dir)} })`,
+        })
+        yield* llm.text("done")
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          agentID: actorID,
+          model: gptRef,
+          harness: "codex",
+          parts: [{ type: "text", text: "run the nested command" }],
+        })
+
+        const exec = (yield* MessageV2.filterCompactedEffect(session.id, { agentID: "*" }))
+          .flatMap((message) => message.parts)
+          .find(
+            (part): part is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
+              part.type === "tool" && part.tool === "exec" && part.state.status === "completed",
+          )
+        expect(exec?.state.metadata?.rejected).not.toBe(true)
+        expect(exec?.state.output).toContain("nested-ok")
       }),
       { git: true, config: providerCfg },
     ),

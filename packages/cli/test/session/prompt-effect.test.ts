@@ -6474,7 +6474,7 @@ for (const mode of ["throw", "reject", "short"] as const) {
             title: "Exception boundary",
             permission: [{ permission: "*", pattern: "*", action: "allow" }],
           })
-          yield* prompt.prompt({ sessionID: session.id, agent: "build", model: nested ? mcpRef : ref, noReply: true,
+          yield* prompt.prompt({ sessionID: session.id, agent: "build", model: nested ? mcpRef : ref, ...(nested ? { harness: "codex" as const } : {}), noReply: true,
             parts: [{ type: "text", text: "run diagnostic" }] })
           yield* llm.tool(nested ? "exec" : "diagnostic", nested ? { code: "await tools.diagnostic({})" } : {})
           yield* llm.text("exception handled")
@@ -6936,6 +6936,7 @@ mcpIt.live("exec can call a catalogued MCP tool without loading its outer schema
         sessionID: session.id,
         agent: "build",
         model: mcpRef,
+        harness: "codex",
         noReply: true,
         parts: [{ type: "text", text: "inspect the window through exec" }],
       })
@@ -7511,7 +7512,7 @@ alwaysDirectMcpIt.live(
 )
 
 alwaysDirectMcpIt.live(
-  "exposes config-declared tools top-level on GPT while ordinary MCP stays deferred",
+  "exposes config-declared tools top-level in Codex mode while ordinary MCP stays deferred",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -7526,6 +7527,7 @@ alwaysDirectMcpIt.live(
           sessionID: session.id,
           agent: "build",
           model: mcpRef,
+          harness: "codex",
           noReply: true,
           parts: [{ type: "text", text: "run a sandbox script" }],
         })
@@ -7569,6 +7571,7 @@ alwaysDirectMcpIt.live(
           sessionID: session.id,
           agent: "build",
           model: mcpRef,
+          harness: "codex",
           noReply: true,
           parts: [{ type: "text", text: "run the cell from a script" }],
         })
@@ -11242,6 +11245,7 @@ for (const mode of ["matching", "changed", "legacy-json"] as const) {
           yield* prompt.prompt({
             sessionID: parent.id,
             model,
+            harness: "codex",
             noReply: true,
             parts: [{ type: "text", text: "capture Actor native contract" }],
           })

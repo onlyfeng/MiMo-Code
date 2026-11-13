@@ -5,7 +5,7 @@ export type HarnessMode = "auto" | "codex" | "default"
 export type ResolvedHarnessMode = Exclude<HarnessMode, "auto">
 
 // Explicit configuration names a canonical modern GPT identity, never a
-// display name, wildcard, or arbitrary instruction to force the Codex harness.
+// display name or wildcard. This compatibility field never selects a harness.
 export const GPT_HARNESS_MODEL_PATTERN =
   /^gpt-(?:[5-9]|[1-9][0-9]+)(?:\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$/
 
@@ -34,19 +34,11 @@ export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarne
   if (override !== undefined) return override ? "codex" : "default"
   const processMode = Flag.MIMOCODE_CODEX_MODE
   if (processMode !== undefined) return processMode ? "codex" : "default"
-  const identities = [input.modelID, input.modelAPIID, input.modelFamily].flatMap((value) =>
-    value ? [value.toLowerCase()] : [],
-  )
-  if (
-    identities.some(
-      (id) => id.includes("gpt-4") || id.includes("gpt-oss") || /(?:^|[/_.:-])(?:mimo|oss)(?:$|[/_.:-])/.test(id),
-    )
-  )
-    return "default"
-  if (input.harnessModel && GPT_HARNESS_MODEL_PATTERN.test(input.harnessModel)) return "codex"
-  const modelID = input.modelID.toLowerCase()
-  if (modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")) return "codex"
   return "default"
+}
+
+export function usesCodexMode(harness?: HarnessMode) {
+  return resolveHarnessMode({ modelID: "", harness }) === "codex"
 }
 
 // The configured deferral mode applies to the default harness; the resolved
