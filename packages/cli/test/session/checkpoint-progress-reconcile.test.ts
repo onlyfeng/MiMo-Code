@@ -12,6 +12,7 @@ import { checkpointPath, tasksDir, progressPath, metaDir } from "../../src/sessi
 import { SessionID } from "../../src/session/schema"
 import type { Task } from "../../src/task/schema"
 
+// Global.Path.data is fixed at import; a unique session folder isolates each fixture.
 async function withSessionMemory<T>(fn: (sid: SessionID) => Promise<T>): Promise<T> {
   const sid = SessionID.descending()
   try {

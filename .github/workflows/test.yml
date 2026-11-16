@@ -60,9 +60,8 @@ jobs:
       # ObservingStdioTransport. lifecycle.test.ts mock.module's that path
       # process-wide, so sharing a bun test process with it always breaks
       # these tests. It runs in the dedicated job below.
-      # HTTP recovery and subagent-resume tests share their shard's process: a
-      # disposed prompt layer hands the prefix captor back to the most recent
-      # live one (registerPrefixCapture), so AppRuntime keeps its captor.
+      # Resume negatives run separately: upstream traced shared log-queue stalls
+      # to detached work from this suite. Other recovery suites stay in shards.
       # Provider refresh suites check process-wide instance idleness, so each runs
       # in its own process away from session fixtures that leave detached
       # notification/wake work alive.
@@ -108,6 +107,7 @@ jobs:
           has_stdio=0
           has_mcp_mocks=0
           has_provider_refresh=0
+          has_resume_negatives=0
           files=()
           reported_files=()
 
@@ -131,6 +131,10 @@ jobs:
 
             if [[ "$f" == test/mcp/stdio-exit-observe.test.ts ]]; then
               has_stdio=1
+              continue
+            fi
+            if [[ "$f" == test/actor/subagent-resume-negatives.test.ts ]]; then
+              has_resume_negatives=1
               continue
             fi
             case "$f" in
@@ -161,8 +165,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh"
+          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 || !has_resume_negatives )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh resume_negatives=$has_resume_negatives"
             exit 1
           fi
 
@@ -300,6 +304,38 @@ jobs:
         with:
           name: junit-stdio-exit-observe
           path: packages/cli/.artifacts/unit/junit.xml
+          if-no-files-found: error
+
+  subagent-resume-negatives:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run resume negatives in an independent process
+        shell: bash
+        working-directory: packages/cli
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/resume-negatives
+          report=.artifacts/resume-negatives/junit.xml
+          file=test/actor/subagent-resume-negatives.test.ts
+          rm -f -- "$report"
+          bun test "$file" --timeout 120000 --reporter=junit --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-resume-negatives
+          path: packages/cli/.artifacts/resume-negatives/junit.xml
           if-no-files-found: error
 
   windows-runtime:
