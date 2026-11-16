@@ -5629,3 +5629,16 @@ files remain byte-identical to the accepted main correction.
 ## 2026-11-09 Compose Next empty states
 
 C01 (N=1), FC-011 shared guidance, inherited unchanged from main `b3f6bfd6`. All eleven active DC contracts retained; no runtime/test changes. Previous 2026-11-06 acceptance remains in [its synchronization report](upstream-sync-2026-11-06.md); current evidence is in [the new report](upstream-sync-2026-11-09.md).
+
+## 2026-11-16 worker startup and surviving claims
+
+## Current review record
+
+- Last reviewed: 2026-11-13; selected upstream `26d1f3a601ab29533a2eaf787895236b92c9aed7..c9c91d7b6fff20164629475218fa0a58e16d14b8`.
+- Scope: C01–C07 (N=7), unified default harness, explicit Codex opt-in, Compose Next sub-documents, bounded writer/retry, request-log privacy, declared model parameters and raw finish handling, in [the shared synchronization record](upstream-sync-2026-11-13.md).
+- Starting main: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`; starting compat: `790149b7e6c137c8a7c079868243eb2b852fdc76`; inherited main acceptance: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; main runtime/tests: `ff3e89742fe306d2d350cd0861696a1bd7782e70`; compat runtime/tests: `8856b86559a1894b51d4523db21015a32b358fba`.
+- Result: inherit main's FD/FC/history/report unchanged. Resolve the three conflicting compat paths by capability; preserve UTF-8 skill caps, actor variants, overflow placeholders, non-GPT continuation, effective-window preflight, per-agent MaxMode, native search/fetch and process ownership. All eleven active DC owners retain their implementations and exit conditions; no owner moves or retires. The SDK is independently regenerated from compat schema.
+- Validation: CLI/SDK package typecheck and lint pass on Bun 1.3.14 (lint: 3,809 warnings, zero errors). Affected local matrices pass: provider/wire 345; overflow/prefix 126; ownership/model selection 30; MaxMode/log/default flags 19; system/catalog/spawn 49; classify/retry/selected prompt contracts 73; native search 39. These are per-batch counts, not a unique full-suite total. Native `pause_turn` continuation remains an existing unsupported boundary, verified against the starting compat behavior.
+- Publication: runtime acceptance `8856b86559a1894b51d4523db21015a32b358fba` is published. GitHub rejects all three branch workflow dispatches with HTTP 422, Actions disabled; exact-SHA lint/typecheck/test including Windows remain blocked. Final docs-only acceptance inherits this runtime snapshot and does not advance its behavior reference. See the shared report for environments, local limits and recovery conditions.
+
+This superseded current-review block is retained as history. Current C01–C10 propagation and validation are recorded in [the shared sync record](upstream-sync-2026-11-16.md); compat runtime/test snapshot `7e4580cfdd657f88a4fe9823f94371f104e4f2f8` retains all eleven active DC owners.

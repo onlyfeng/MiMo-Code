@@ -10,12 +10,11 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-13; selected upstream `26d1f3a601ab29533a2eaf787895236b92c9aed7..c9c91d7b6fff20164629475218fa0a58e16d14b8`.
-- Scope: C01–C07 (N=7), unified default harness, explicit Codex opt-in, Compose Next sub-documents, bounded writer/retry, request-log privacy, declared model parameters and raw finish handling, in [the shared synchronization record](upstream-sync-2026-11-13.md).
-- Starting main: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`; starting compat: `790149b7e6c137c8a7c079868243eb2b852fdc76`; inherited main acceptance: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; main runtime/tests: `ff3e89742fe306d2d350cd0861696a1bd7782e70`; compat runtime/tests: `8856b86559a1894b51d4523db21015a32b358fba`.
-- Result: inherit main's FD/FC/history/report unchanged. Resolve the three conflicting compat paths by capability; preserve UTF-8 skill caps, actor variants, overflow placeholders, non-GPT continuation, effective-window preflight, per-agent MaxMode, native search/fetch and process ownership. All eleven active DC owners retain their implementations and exit conditions; no owner moves or retires. The SDK is independently regenerated from compat schema.
-- Validation: CLI/SDK package typecheck and lint pass on Bun 1.3.14 (lint: 3,809 warnings, zero errors). Affected local matrices pass: provider/wire 345; overflow/prefix 126; ownership/model selection 30; MaxMode/log/default flags 19; system/catalog/spawn 49; classify/retry/selected prompt contracts 73; native search 39. These are per-batch counts, not a unique full-suite total. Native `pause_turn` continuation remains an existing unsupported boundary, verified against the starting compat behavior.
-- Publication: runtime acceptance `8856b86559a1894b51d4523db21015a32b358fba` is published. GitHub rejects all three branch workflow dispatches with HTTP 422, Actions disabled; exact-SHA lint/typecheck/test including Windows remain blocked. Final docs-only acceptance inherits this runtime snapshot and does not advance its behavior reference. See the shared report for environments, local limits and recovery conditions.
+- Last reviewed: 2026-11-16; selected upstream `c9c91d7b6fff20164629475218fa0a58e16d14b8..5cf79c3f93318f13e3690531d6f2b0622e37b699`, including the final live advancement after initial `5e9579b6`.
+- Scope: C01–C10 (N=10), worker startup, auth/model/SDK corrections, release/test infrastructure, surviving claim lifecycle and locked npm proxy patch, in [the shared synchronization record](upstream-sync-2026-11-16.md).
+- Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; starting compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`; main runtime/tests: `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b`; compat runtime/tests: `7e4580cfdd657f88a4fe9823f94371f104e4f2f8`.
+- Result: inherit the shared FD/FC/history/report unchanged. Preserve immediate transactions when adopting claim-marker cleanup; retain process ownership, owned recovery and wake routing. TUI claimSession remains after the handshake. Source/SDK overlay equals the starting overlay with `git diff -U0` after removing index metadata and hunk coordinates; all eleven active DC owners and their exit conditions remain. Existing mutable MCP fields and compat SDK extensions require no regeneration.
+- Validation/publication: exact commands, local results, environment and remaining limits are in the shared report. GitHub rejects lint/typecheck/test dispatches on both branches with HTTP 422 (Actions disabled), despite permissions API reporting enabled. Windows workflow acceptance and exact-SHA CI remain pending; publication does not imply CI completion.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
@@ -1307,6 +1306,8 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
   the shared registry.
 
 ## DC-SESSION-001 — one live process drives a session
+
+- 2026-11-16 synchronization: inherit same-process live-claim shielding and monotonic claim run ids. The live set does not authorize a process to run another process’s session: ownership checks, immediate transactions, current-controller wake checks and recovery guards remain. On true orphan recovery preserve FC-024 consumed outcomes; a stop-fenced run with no remaining claim interrupts. See C09 in the shared sync record.
 
 - 2026-11-04 FC-038 propagation (`main` PR #216): a keyed resend that revives an unseen row places the owner's wake in the accept transaction like an inserted input (`placeWake`).
 - 2026-11-04 durable cron delivery: a durable task's fire for another session goes to that session's inbox instead of being refused there, and the lock holder's own turn no longer holds it back (see the Delivery contract); the FC-034 note below describes the state before it.
