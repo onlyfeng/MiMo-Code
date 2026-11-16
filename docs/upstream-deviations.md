@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-13
-- Upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
-- Prior reviewed upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
-- Review completion: full seven-capability content and implementation review; both runtime snapshots published; local affected matrices, CLI/SDK typecheck and lint pass. GitHub rejects all three workflow dispatches on both branches with HTTP 422 (Actions disabled); exact-SHA CI acceptance remains pending in [the synchronization record](upstream-sync-2026-11-13.md).
-- Main behavior (runtime/tests): `ff3e89742fe306d2d350cd0861696a1bd7782e70` (published; local affected verification passes; exact-SHA CI blocked)
-- Inherited compat behavior: `8856b86559a1894b51d4523db21015a32b358fba` (published; local affected verification passes; exact-SHA CI blocked)
-- Bundled guidance content: `ff3e89742fe306d2d350cd0861696a1bd7782e70` (FC-011 unified prompts and Compose Next sub-documents; existing fork guidance retained).
-- Prior fork `main` tip: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`; prior fork `dev/compat` tip: `790149b7e6c137c8a7c079868243eb2b852fdc76`
+- Last reviewed: 2026-11-16
+- Upstream: `5cf79c3f93318f13e3690531d6f2b0622e37b699`
+- Prior reviewed upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
+- Review completion: full ten-capability audit through the live advancement; resolved implementation and guidance on both branches. Local affected verification and exact-SHA CI status are recorded in [the synchronization record](upstream-sync-2026-11-16.md); GitHub Actions HTTP 422 remains a publication acceptance blocker.
+- Main behavior (runtime/tests): `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b` (source snapshot; validation/publication evidence in the sync record)
+- Inherited compat behavior: `7e4580cfdd657f88a4fe9823f94371f104e4f2f8` (source snapshot; validation/publication evidence in the sync record)
+- Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
+- Prior fork `main` tip: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; prior fork `dev/compat` tip: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-13 harness and model defaults](upstream-sync-2026-11-13.md), C01–C07 (N=7). Adopt unified default prompts, explicit Codex opt-in, Compose Next sub-documents, request-log privacy, model-declared parameters and raw finish handling. Retain explicit session precedence, authorized frozen tools, bounded pure-empty/system-agent recovery, non-GPT scoped continuation and all compat owners. Both runtime snapshots are published and locally verified; exact-SHA CI acceptance remains blocked by GitHub Actions HTTP 422.
+Latest reviewed synchronization: [2026-11-16 worker startup, claim lifecycle and npm proxy](upstream-sync-2026-11-16.md), C01–C10 (N=10). Adopt upstream fixes with consumed-claim outcomes, explicit session harness precedence, fork CI coverage and all compat owners retained. Exact-SHA CI acceptance is blocked by GitHub Actions HTTP 422; do not treat local verification or publication as CI completion.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 

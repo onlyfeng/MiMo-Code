@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-13
-- Upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
-- Prior reviewed upstream: `26d1f3a601ab29533a2eaf787895236b92c9aed7`
-- Review completion: full seven-capability content and implementation review; both runtime snapshots published; local affected matrices, CLI/SDK typecheck and lint pass. GitHub rejects all three workflow dispatches on both branches with HTTP 422 (Actions disabled); exact-SHA CI acceptance remains pending in [the synchronization record](upstream-sync-2026-11-13.md).
-- Main behavior (runtime/tests): `ff3e89742fe306d2d350cd0861696a1bd7782e70` (published; local affected verification passes; exact-SHA CI blocked)
-- Inherited compat behavior: `8856b86559a1894b51d4523db21015a32b358fba` (published; local affected verification passes; exact-SHA CI blocked)
-- Bundled guidance content: `ff3e89742fe306d2d350cd0861696a1bd7782e70` (FC-011 unified prompts and Compose Next sub-documents; existing fork guidance retained).
-- Prior fork `main` tip: `f0a02f2376c2c3b668ae1935577e3ddd68b855bb`; prior fork `dev/compat` tip: `790149b7e6c137c8a7c079868243eb2b852fdc76`
+- Last reviewed: 2026-11-16
+- Upstream: `5cf79c3f93318f13e3690531d6f2b0622e37b699`
+- Prior reviewed upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
+- Review completion: full ten-capability audit through the live advancement; resolved implementation and guidance on both branches. Local affected verification and exact-SHA CI status are recorded in [the synchronization record](upstream-sync-2026-11-16.md); GitHub Actions HTTP 422 remains a publication acceptance blocker.
+- Main behavior (runtime/tests): `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b` (source snapshot; validation/publication evidence in the sync record)
+- Inherited compat behavior: `7e4580cfdd657f88a4fe9823f94371f104e4f2f8` (source snapshot; validation/publication evidence in the sync record)
+- Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
+- Prior fork `main` tip: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; prior fork `dev/compat` tip: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-13 harness and model defaults](upstream-sync-2026-11-13.md), C01–C07 (N=7). Adopt unified default prompts, explicit Codex opt-in, Compose Next sub-documents, request-log privacy, model-declared parameters and raw finish handling. Retain explicit session precedence, authorized frozen tools, bounded pure-empty/system-agent recovery, non-GPT scoped continuation and all compat owners. Both runtime snapshots are published and locally verified; exact-SHA CI acceptance remains blocked by GitHub Actions HTTP 422.
+Latest reviewed synchronization: [2026-11-16 worker startup, claim lifecycle and npm proxy](upstream-sync-2026-11-16.md), C01–C10 (N=10). Adopt upstream fixes with consumed-claim outcomes, explicit session harness precedence, fork CI coverage and all compat owners retained. Exact-SHA CI acceptance is blocked by GitHub Actions HTTP 422; do not treat local verification or publication as CI completion.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -110,6 +110,8 @@ condition; review the group together whenever upstream changes `actor/`,
 entry's own source list remains the complete watch surface.
 
 ### FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-11-16 synchronization: adopt process-wide live-claim run tracking and monotonic run ids across every prompt entry. A run with no surviving claimed input interrupts instead of consuming retry supersession indefinitely. Settlement releases the live marker even when acknowledgement fails or there is nothing to acknowledge. Owned acceptance, frozen authority, lane identity and generation checks remain. See C09 in [the sync record](upstream-sync-2026-11-16.md).
 
 - 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
 
@@ -477,6 +479,8 @@ entry's own source list remains the complete watch surface.
   [the implementation report](audit-followups-2026-09-15.md).
 
 ### FC-024 — boot reconciliation reports a delivered claim as interrupted
+
+- 2026-11-16 synchronization: a still-live run in this process survives controller/Instance replacement and is excluded from same-epoch crash reconciliation. Stale-epoch fencing still cancels input. Actual orphaned consumed claims retain `interrupted`, unconsumed claims `never_ran`; crash fixtures explicitly withdraw their live marker, and the new live/orphan mixed regression runs alongside the consumed-outcome case.
 
 - Status: active
 - Canonical owner: fork `main` inbox boot recovery in
@@ -1549,6 +1553,8 @@ own source list remains the complete watch surface.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
+- 2026-11-16 synchronization: keep stable path-hash shards, tsx discovery, zero-case inputs, strict JUnit coverage and Windows acceptance. Run `subagent-resume-negatives` in its own discovery-checked/report-verified job after upstream identified its shared log-queue pollution. Adopt bounded best-effort test-log flush and catalog-only fetch spying. Keep the three incoming timing-bound cases executable; local outcomes and limits are in C07 of [the sync record](upstream-sync-2026-11-16.md). The weighted splitter is available as a tested utility but does not replace this fork contract. Correct the locked `@npmcli/agent@4.0.2` patch and test actual proxy transport.
+
 - 2026-11-13 synchronization: adopt provider stream-error logging that destructures the actual error and records only its cause summary, excluding `requestBodyValues`. The real request-marker regression passes; logger clone isolation remains FC-022. This adopts upstream privacy behavior and creates no new fork deviation. Local Windows exec fixture path/symlink failures are recorded separately from opt-in migration failures and require clean CI evidence.
 
 - 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
@@ -1778,7 +1784,7 @@ own source list remains the complete watch surface.
   is identical. The `test` workflow retains `.test.tsx`
   discovery, assigns all ordinary inputs by a stable path hash, runs enabled
   worktree cases and the HTTP actor recovery and subagent-resume suites in
-  normal shards, and runs the real stdio observer suite in a separate process,
+  normal shards except resume negatives, and runs resume negatives and the real stdio observer suite in separate processes,
   because it requires the real transport despite process-global mocks. No case
   is skipped by this isolation. Each shard and dedicated job removes its prior report and
   then requires strict XML/count consistency, at least one executed case, a
