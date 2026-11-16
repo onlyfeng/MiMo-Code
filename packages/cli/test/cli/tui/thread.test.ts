@@ -171,6 +171,7 @@ describe("tui thread", () => {
             }
           },
           on: () => () => {},
+          dispose: () => {},
         }) as never,
     )
     spyOn(TuiConfig, "get").mockImplementation(async () => {
