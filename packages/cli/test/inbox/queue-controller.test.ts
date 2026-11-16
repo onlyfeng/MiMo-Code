@@ -5,7 +5,7 @@ import { Session as SessionNs } from "../../src/session"
 import { MessageID, PartID } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionTable } from "../../src/session/session.sql"
-import { InboxController, inboxControllerRef, schedulerRef, type Receipt } from "../../src/inbox"
+import { claimRunKey, InboxController, inboxControllerRef, liveClaimRuns, schedulerRef, type Receipt } from "../../src/inbox"
 import { InboxTable, InboxLaneStateTable, InboxSessionEpochTable } from "../../src/inbox/inbox.sql"
 import { Database, eq, and } from "../../src/storage"
 import { Instance } from "../../src/project/instance"
@@ -409,6 +409,8 @@ describe("Inbox controller", () => {
           type: "prompt",
         })
         yield* tq.claimNext(lane, 1)
+        // The claiming run belonged to a process that has since restarted.
+        liveClaimRuns.delete(claimRunKey(session.id, "main", 1))
         yield* tq.reconcileOnBoot(session.id)
         const r = yield* tq.getReceipt(receipt.id)
         expect(r.state).toBe("cancelled")
@@ -429,6 +431,7 @@ describe("Inbox controller", () => {
         const pending = yield* tq.accept({ lane, ...userMessage(session.id, "pending"), type: "prompt" })
         yield* tq.claimNext(lane, 1)
         // The run anchored only the first claim to its delivery message before the process died.
+        liveClaimRuns.delete(claimRunKey(session.id, "main", 1))
         Database.use((db) =>
           db.update(InboxTable).set({ consumed: true }).where(eq(InboxTable.id, delivered.id)).run(),
         )
@@ -436,6 +439,30 @@ describe("Inbox controller", () => {
         const [d, p] = [yield* tq.getReceipt(delivered.id), yield* tq.getReceipt(pending.id)]
         expect({ state: d.state, outcome: d.outcome }).toEqual({ state: "cancelled", outcome: "interrupted" })
         expect({ state: p.state, outcome: p.outcome }).toEqual({ state: "cancelled", outcome: "never_ran" })
+      }),
+    ),
+  )
+
+  it.live(
+    "reconcileOnBoot keeps claims of a run still alive in this process until it settles them",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionNs.Service
+        const tq = yield* InboxController.Service
+        const session = yield* sessions.create({ title: "reconcile-live" })
+        const lane = { sessionID: session.id, agentID: "main" }
+        const live = yield* tq.accept({ lane, ...userMessage(session.id), type: "prompt" })
+        const claim = yield* tq.claimNext(lane, 1)
+        const orphan = yield* tq.accept({ lane, ...userMessage(session.id), type: "prompt" })
+        yield* tq.claimNext(lane, 2)
+        // Run 2 belonged to a process that has since restarted; run 1 keeps going here.
+        liveClaimRuns.delete(claimRunKey(session.id, "main", 2))
+        yield* tq.reconcileOnBoot(session.id)
+        expect((yield* tq.getReceipt(live.id)).state).toBe("claimed")
+        expect((yield* tq.getReceipt(orphan.id)).state).toBe("cancelled")
+        yield* tq.ack(lane, claim!.claimFrontier, [{ receiptId: live.id, outcome: "success" }], 1)
+        expect((yield* tq.getReceipt(live.id)).state).toBe("settled")
+        expect(liveClaimRuns.has(claimRunKey(session.id, "main", 1))).toBe(false)
       }),
     ),
   )
