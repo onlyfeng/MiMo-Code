@@ -8,9 +8,9 @@ Reviewed range: `c9c91d7b6fff20164629475218fa0a58e16d14b8..5e9579b66bae8cbcd7320
 Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`.
 The existing checkout was clean on dev/compat. Dedicated Orca worktrees/branches `upstream-sync-20261116-main` / `sync/upstream-20261116-main` and `upstream-sync-20261116-compat` / `sync/upstream-20261116-compat` are operation-owned; preserve all other resources. No upstream writes or release publication are authorized by this operation.
 
-## Capability inventory (10)
+## Capability inventory (12)
 
-C01–C08 audit the initial immutable range above; C09–C10 audit the live advancement `5e9579b66bae8cbcd73205c98dd5b5fdfae088ec..5cf79c3f93318f13e3690531d6f2b0622e37b699` (2 commits, 11 paths), selected on the final refresh; the complete selected delta is 13 commits and 57 paths. All rows are compared against both starting fork trees. Shared owner is main; compat inherits with its registered overlays. FD/FC/DC active indices and contracts were reviewed before merging. Unchanged owners retain their implementations and exit conditions; no owner retires.
+C01–C08 audit the initial immutable range above; C09–C10 audit the live advancement `5e9579b66bae8cbcd73205c98dd5b5fdfae088ec..5cf79c3f93318f13e3690531d6f2b0622e37b699` (2 commits, 11 paths), selected on the final refresh; the complete selected delta is 13 commits and 57 paths. A second live advancement on 2026-11-17 selects `c34db3645db4ffdf7f2b29a788bd76d9ec3be531`; C11–C12 audit `5cf79c3f..c34db364` (2 commits, 3 paths). Total selected range now has 15 commits. All rows are compared against the fork states before their selected advancement. Shared owner is main; compat inherits with its registered overlays. FD/FC/DC active indices and contracts were reviewed before merging. Unchanged owners retain their implementations and exit conditions; no owner retires.
 
 | ID | Selected behavior and producers/consumers/tests | Relationship and owners | Disposition |
 | --- | --- | --- | --- |
@@ -24,6 +24,9 @@ C01–C08 audit the initial immutable range above; C09–C10 audit the live adva
 | C08 | Worker rpc.ready handshake, queued requests, error/close settlement and intentional disposal; real-worker RPC and TUI-thread tests | FD-004, FC-008; DC-SESSION-001/DC-TUI-001; existing TUI claim/listener behavior | Adopt handshake/disposal; preserve listener advertisement and compat process ownership |
 | C09 | Surviving same-process claim runs, monotonic run ids, fenced-run interruption; controller-ref -> claim/ack/reconcileOnBoot and prompt settlement/run loop; queue-controller and fenced-run tests | FC-001/024/013, FD-001/009; DC-SESSION-001; fork consumed-outcome and compat ownership differ | Adopt live-run shield and fencing; retain interrupted-vs-never_ran outcomes, atomic owned admission, compat transaction/process guards and wake routing; crash fixtures must explicitly drop their live-run marker |
 | C10 | Correct @npmcli/agent patch key/file from 4.0.0 to locked 4.0.2; proxy runtime and real registry-fetch regressions | FC-008/012; Npm.add/Arborist plugin/config install consumers; no compat override | Adopt patch metadata and rename; bun ci from updated lock and test actual proxy chain |
+
+| C11 | Missing-fork negative counts only requests carrying child history; main wake may legitimately call provider | FC-001/008, FD-009; DC-SESSION-001; shared recovery test on both branches | Adopt narrowed child identity evidence; retain missing-fork fail-closed assertions |
+| C12 | Npm.reify creates cache dir, resolves real path for Arborist and maps filesystem errors to InstallFailedError; plugin shared install and config dependency callers; real symlink-cache test | FC-008/012; no compat npm implementation difference; fixed-cwd roots remain | Adopt root canonicalization with existing lock/error behavior; exercise add/install and actual plugin consumers |
 
 ## Validation and publication
 
@@ -69,7 +72,7 @@ The final npm tests resolve Arborist -> pacote -> npm-registry-fetch -> make-fet
 GitHub's permissions endpoint reports `enabled: true` and all workflows active, but actual lint/typecheck/test dispatches on both branches return HTTP 422: `Actions has been disabled for this repository.` No exact-SHA runs exist for the initial runtime tips or the subsequent fixture-correction tips. The successful historical runs at other SHAs are not acceptance evidence for this sync. At runtime tips main `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b` and compat `7e4580cfdd657f88a4fe9823f94371f104e4f2f8`, lint/typecheck/test dispatches again all return HTTP 422 and exact-SHA run queries return `[]`. Compat test dispatch explicitly requested `windows_runtime=true`. Remote runtime equality was checked with `git ls-remote`: upstream `5cf79c3f93318f13e3690531d6f2b0622e37b699`, fork main `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b`, compat `7e4580cfdd657f88a4fe9823f94371f104e4f2f8`. Both `git merge-base --is-ancestor <upstream> <main>` and `<main> <compat>` return 0. Final docs-only tip SHAs, post-push refresh, tree-equality commands and manager-cleanup receipt are recorded in the task completion and local publication evidence. A docs-only tree-equality proof cannot supply the runtime ancestor’s missing successful CI. Acceptance remains incomplete until GitHub permits execution and all final-SHA workflows, including compat Windows runtime, succeed.
 
 
-## Capability results (10)
+## Capability results (12)
 
 | ID | Selected behavior | Main result | dev/compat result | Decisive paths/tests |
 | --- | --- | --- | --- | --- |
@@ -84,7 +87,10 @@ GitHub's permissions endpoint reports `enabled: true` and all workflows active, 
 | C09 | Live claims and fenced-run termination | Adopted with consumed-outcome and all claim-entry ids adapted | Inherited with immediate transactions/ownership/wakes | controller-ref/controller/prompt, queue-controller + fenced-run; compat execution ownership |
 | C10 | Locked npm proxy patch | Adopted for 4.0.2 | Inherited | patchedDependencies/lock/renamed patch, npm-proxy actual dependency-chain tests; final install/runtime result in matrix |
 
-No capability is claimed CI-accepted. Every selected capability appears once in this results table (N=10).
+| C11 | Missing-fork request identity test | Adopted | Inherited | subagent-resume-negatives; child history filter preserves missing-fork failure assertions |
+| C12 | Symlinked npm cache | Adopted | Inherited | npm/index.ts, npm-symlink-cache, npm and plugin consumer tests; final advancement matrix below |
+
+No capability is claimed CI-accepted. Every selected capability appears once in this results table (N=12).
 
 ## Resource closure and remaining state
 
