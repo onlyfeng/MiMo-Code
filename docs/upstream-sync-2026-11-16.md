@@ -25,7 +25,7 @@ C01–C08 audit the initial immutable range above; C09–C10 audit the live adva
 | C09 | Surviving same-process claim runs, monotonic run ids, fenced-run interruption; controller-ref -> claim/ack/reconcileOnBoot and prompt settlement/run loop; queue-controller and fenced-run tests | FC-001/024/013, FD-001/009; DC-SESSION-001; fork consumed-outcome and compat ownership differ | Adopt live-run shield and fencing; retain interrupted-vs-never_ran outcomes, atomic owned admission, compat transaction/process guards and wake routing; crash fixtures must explicitly drop their live-run marker |
 | C10 | Correct @npmcli/agent patch key/file from 4.0.0 to locked 4.0.2; proxy runtime and real registry-fetch regressions | FC-008/012; Npm.add/Arborist plugin/config install consumers; no compat override | Adopt patch metadata and rename; bun ci from updated lock and test actual proxy chain |
 
-| C11 | Missing-fork negative counts only requests carrying child history; main wake may legitimately call provider | FC-001/008, FD-009; DC-SESSION-001; shared recovery test on both branches | Adopt narrowed child identity evidence; retain missing-fork fail-closed assertions |
+| C11 | Missing-fork negative counts only requests carrying child history; main wake may legitimately call provider | FC-001/008, FD-009; DC-SESSION-001; fork already replaced this upstream fixture | Retain current retained-recovery fixtures and separate missing-fork notification coverage; incoming counter has no current counterpart and must not resurrect the obsolete suite |
 | C12 | Npm.reify creates cache dir, resolves real path for Arborist and maps filesystem errors to InstallFailedError; plugin shared install and config dependency callers; real symlink-cache test | FC-008/012; no compat npm implementation difference; fixed-cwd roots remain | Adopt root canonicalization with existing lock/error behavior; exercise add/install and actual plugin consumers |
 
 ## Validation and publication
@@ -87,7 +87,7 @@ GitHub's permissions endpoint reports `enabled: true` and all workflows active, 
 | C09 | Live claims and fenced-run termination | Adopted with consumed-outcome and all claim-entry ids adapted | Inherited with immediate transactions/ownership/wakes | controller-ref/controller/prompt, queue-controller + fenced-run; compat execution ownership |
 | C10 | Locked npm proxy patch | Adopted for 4.0.2 | Inherited | patchedDependencies/lock/renamed patch, npm-proxy actual dependency-chain tests; final install/runtime result in matrix |
 
-| C11 | Missing-fork request identity test | Adopted | Inherited | subagent-resume-negatives; child history filter preserves missing-fork failure assertions |
+| C11 | Missing-fork request identity test | Current fork fixtures retained; no obsolete test restored | Inherited | subagent-resume-negatives and spawn-notification missing-fork coverage; incoming counter has no current counterpart |
 | C12 | Symlinked npm cache | Adopted | Inherited | npm/index.ts, npm-symlink-cache, npm and plugin consumer tests; final advancement matrix below |
 
 No capability is claimed CI-accepted. Every selected capability appears once in this results table (N=12).
@@ -95,3 +95,18 @@ No capability is claimed CI-accepted. Every selected capability appears once in 
 ## Resource closure and remaining state
 
 Only the two named Orca worktrees and temporary sync branches are candidates for manager cleanup after integration. Validation clones (including the pre-C09 baseline comparison), their fresh cache and renamed dependency trees are operation-owned; no user content existed there when created. Automatic approval review rejected recursive removal of the temporary dependency tree with only “blocked by policy”, so it is retained. Validation checkouts/cache and the downloaded pinned Bun tool directory are also retained rather than attempting equivalent recursive deletion through another program. Record concrete retained locations in local publication evidence, not shipped documentation. The original checkout, its dependencies, and unrelated branches/workspaces are preserved. Final local branch updates must be fast-forwards or compare-and-swap against their recorded starting SHAs.
+
+## Second live advancement — 2026-11-17
+
+Upstream advanced from `5cf79c3f93318f13e3690531d6f2b0622e37b699` to `c34db3645db4ffdf7f2b29a788bd76d9ec3be531` before closure. C11–C12 were added before merging; all affected active FD/FC/DC surfaces and selected AGENTS contracts were rechecked. Npm reify has no compat source fork; caller/error/locking contracts remain. The incoming resume-negative hunk conflicts with the fork's prior replacement of the old 754-line suite with retained actor lifecycle fixtures. The old test is not restored: its provider counter has no current counterpart, and missing-fork failure is independently asserted by spawn-notification tests. Current recovery fixtures remain byte-identical across this advancement.
+
+Final runtime/test snapshots are main `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d`, compat `c26c974102ce6857ace779cb77946e97b8d2c8e6`. Earlier matrix SHAs above remain truthful evidence for their unchanged surfaces; final advancement checks cover Npm, affected plugin/config consumers and the retained recovery suite. No lockfile, SDK schema/output or native dependency changed in this advancement. Detached short-path checkouts moved to these snapshots while preserving the same verified isolated dependency tree. The docs-only commit `ee7785ab` records C11–C12 inventory; despite its merge-worded subject, it has one parent and changes only the report. Actual upstream integration is the two-parent `1fc8d7dd` merge.
+
+Final advancement validation (same default-selector environment and isolated dependencies as above):
+
+- Main and compat, from CLI: `bun test test/npm.test.ts test/npm-proxy.test.ts test/npm-symlink-cache.test.ts test/plugin/install.test.ts test/plugin/shared.test.ts test/config/plugin-dependencies.test.ts --timeout 120000`: each 41 pass, 0 fail, 98 assertions, exit 0 (25.88 s / 28.32 s). Actual `Npm.add` through a junction cache resolves the expected package and entrypoint.
+- Main, from CLI: `bun test test/actor/subagent-resume-negatives.test.ts --timeout 120000`: 8 pass, 0 fail, 46 assertions, exit 0 (65.36 s). The unchanged suite/fixture and npm production code are shared by compat; this is the main process result, not a second compat run.
+- CLI `bun run typecheck` passes separately on both final runtime SHAs. SDK/schema/lock are unchanged from the preceding four-package typecheck evidence. Root `bun run lint` exits 0 on both: main 3,736 warnings / 0 errors; compat 3,822 / 0 errors.
+- Both runtime snapshots are pushed. At exact SHAs main `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d` and compat `c26c974102ce6857ace779cb77946e97b8d2c8e6`, run queries return `[]`; all three workflow dispatches again return HTTP 422 on both branches, including compat Windows requested explicitly. The acceptance blockers stated above remain.
+
+All selected capabilities are implemented/reconciled and published; CI acceptance is incomplete. Final docs-only tips, exact remote equality, ancestry, outside-docs equality and cleanup receipts are retained in the local publication evidence. No successful historical CI is substituted for these missing exact-SHA runs.
