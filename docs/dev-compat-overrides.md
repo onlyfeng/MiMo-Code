@@ -10,9 +10,9 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-16; selected upstream `c9c91d7b6fff20164629475218fa0a58e16d14b8..5cf79c3f93318f13e3690531d6f2b0622e37b699`, including the final live advancement after initial `5e9579b6`.
-- Scope: C01–C10 (N=10), worker startup, auth/model/SDK corrections, release/test infrastructure, surviving claim lifecycle and locked npm proxy patch, in [the shared synchronization record](upstream-sync-2026-11-16.md).
-- Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; starting compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`; main runtime/tests: `1f43e4726fe3d80ae5bed4886c48a4055e5fda0b`; compat runtime/tests: `7e4580cfdd657f88a4fe9823f94371f104e4f2f8`.
+- Last reviewed: 2026-11-17; selected upstream `c9c91d7b6fff20164629475218fa0a58e16d14b8..c34db3645db4ffdf7f2b29a788bd76d9ec3be531`, including both live advancements after initial `5e9579b6` and `5cf79c3f`.
+- Scope: C01–C12 (N=12), worker startup, auth/model/SDK corrections, release/test infrastructure, surviving claim lifecycle and locked npm proxy patch, in [the shared synchronization record](upstream-sync-2026-11-16.md).
+- Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; starting compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`; main runtime/tests: `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d`; compat runtime/tests: `c26c974102ce6857ace779cb77946e97b8d2c8e6`.
 - Result: inherit the shared FD/FC/history/report unchanged. Preserve immediate transactions when adopting claim-marker cleanup; retain process ownership, owned recovery and wake routing. TUI claimSession remains after the handshake. Source/SDK overlay equals the starting overlay with `git diff -U0` after removing index metadata and hunk coordinates; all eleven active DC owners and their exit conditions remain. Existing mutable MCP fields and compat SDK extensions require no regeneration.
 - Validation/publication: exact commands, local results, environment and remaining limits are in the shared report. GitHub rejects lint/typecheck/test dispatches on both branches with HTTP 422 (Actions disabled), despite permissions API reporting enabled. Windows workflow acceptance and exact-SHA CI remain pending; publication does not imply CI completion.
 
