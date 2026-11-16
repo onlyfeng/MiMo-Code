@@ -8,9 +8,9 @@ Reviewed range: `c9c91d7b6fff20164629475218fa0a58e16d14b8..5e9579b66bae8cbcd7320
 Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`.
 The existing checkout was clean on dev/compat. Dedicated Orca worktrees/branches `upstream-sync-20261116-main` / `sync/upstream-20261116-main` and `upstream-sync-20261116-compat` / `sync/upstream-20261116-compat` are operation-owned; preserve all other resources. No upstream writes or release publication are authorized by this operation.
 
-## Capability inventory (8)
+## Capability inventory (10)
 
-All rows audit the immutable range above, against both starting fork trees. Shared owner is main; compat inherits with its registered overlays. FD/FC/DC active indices and contracts were reviewed before merging. Unchanged owners retain their implementations and exit conditions; no owner retires.
+C01–C08 audit the initial immutable range above; C09–C10 audit the live advancement `5e9579b66bae8cbcd73205c98dd5b5fdfae088ec..5cf79c3f93318f13e3690531d6f2b0622e37b699` (2 commits, 11 paths), selected on the final refresh. All rows are compared against both starting fork trees. Shared owner is main; compat inherits with its registered overlays. FD/FC/DC active indices and contracts were reviewed before merging. Unchanged owners retain their implementations and exit conditions; no owner retires.
 
 | ID | Selected behavior and producers/consumers/tests | Relationship and owners | Planned disposition |
 | --- | --- | --- | --- |
@@ -22,6 +22,8 @@ All rows audit the immutable range above, against both starting fork trees. Shar
 | C06 | SDK v1/v2 launches mimo and recognizes mimocode readiness; server-launch tests | FC-007/012; no compat-only launcher counterpart | Adopt binary/readiness corrections; retain public API names and fixed-cwd semantics |
 | C07 | Weighted CI shards, isolated resume-negative polluter, bounded test log flush, targeted catalog spy, unique checkpoint fixture sessions, three incoming test skips | FC-001/002/008/024/026; DC-SESSION-001/DC-CONTEXT-001; existing strict JUnit discovery and Windows acceptance | Retain FC-008 stable path-hash assignment and strict discovery/reporting; adopt the sharding utility as an available tool and proven resume-negative isolation; keep all three regressions executable |
 | C08 | Worker rpc.ready handshake, queued requests, error/close settlement and intentional disposal; real-worker RPC and TUI-thread tests | FD-004, FC-008; DC-SESSION-001/DC-TUI-001; existing TUI claim/listener behavior | Adopt handshake/disposal; preserve listener advertisement and compat process ownership |
+| C09 | Surviving same-process claim runs, monotonic run ids, fenced-run interruption; controller-ref -> claim/ack/reconcileOnBoot and prompt settlement/run loop; queue-controller and fenced-run tests | FC-001/024/013, FD-001/009; DC-SESSION-001; fork consumed-outcome and compat ownership differ | Adopt live-run shield and fencing; retain interrupted-vs-never_ran outcomes, atomic owned admission, compat transaction/process guards and wake routing; crash fixtures must explicitly drop their live-run marker |
+| C10 | Correct @npmcli/agent patch key/file from 4.0.0 to locked 4.0.2; proxy runtime and real registry-fetch regressions | FC-008/012; Npm.add/Arborist plugin/config install consumers; no compat override | Adopt patch metadata and rename; bun ci from updated lock and test actual proxy chain |
 
 ## Validation and publication
 
