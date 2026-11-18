@@ -4585,7 +4585,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         )).all())
         const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
         const finalError = Exit.isSuccess(exit) && exit.value.info.role === "assistant" ? exit.value.info.error : undefined
-        const error = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : finalError ? String(finalError) : undefined
+        const error = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : sessionErrorText(finalError)
         yield* controller.ack(lane, owner.frontier, rows.map((row) => {
           const receipt = owner.receipts.find((receipt) => receipt.id === row.id)
           const frozen = receipt?.finalFrozen && receipt.finalMessageID
@@ -4594,7 +4594,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (frozen?.info.role === "assistant") return {
             receiptId: row.id,
             outcome: frozen.info.error ? "assistant_error" as const : "success" as const,
-            error: frozen.info.error ? String(frozen.info.error) : undefined,
+            error: sessionErrorText(frozen.info.error),
           }
           return {
             receiptId: row.id,
