@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-17
-- Upstream: `c34db3645db4ffdf7f2b29a788bd76d9ec3be531`
-- Prior reviewed upstream: `c9c91d7b6fff20164629475218fa0a58e16d14b8`
-- Review completion: full twelve-capability audit through the live advancement; resolved implementation and guidance on both branches. Local affected verification and exact-SHA CI status are recorded in [the synchronization record](upstream-sync-2026-11-16.md); GitHub Actions HTTP 422 remains a publication acceptance blocker.
-- Main behavior (runtime/tests): `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d` (source snapshot; validation/publication evidence in the sync record)
-- Inherited compat behavior: `c26c974102ce6857ace779cb77946e97b8d2c8e6` (source snapshot; validation/publication evidence in the sync record)
+- Last reviewed: 2026-11-18
+- Upstream: `53e481145a6abedae20346ad2cdccdaee299a699`
+- Prior reviewed upstream: `c34db3645db4ffdf7f2b29a788bd76d9ec3be531`
+- Review completion: C01 adopts upstream memory test isolation on both branches. The affected local matrix passes. Exact-SHA CI is blocked by GitHub Actions HTTP 422. See [the synchronization record](upstream-sync-2026-11-18.md).
+- Main behavior (runtime/tests): `51c508648582e50274ce7f46eb6464fc73ce2858` (test isolation snapshot)
+- Inherited compat behavior: `c813b0f05988b9cdb9d291d10ea29f17ae673eeb` (test isolation snapshot)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; prior fork `dev/compat` tip: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`
+- Prior fork `main` tip: `4f33166e17df59299c2e2ea16396525d0ef0740e`. Prior fork `dev/compat` tip: `b6c4bc8d036a7d4f4b9d464d2c8214b3f8448c2f`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-16 worker startup, claim lifecycle and npm proxy](upstream-sync-2026-11-16.md), C01–C12 (N=12). Adopt upstream fixes with consumed-claim outcomes, explicit session harness precedence, fork CI coverage and all compat owners retained. Exact-SHA CI acceptance is blocked by GitHub Actions HTTP 422; do not treat local verification or publication as CI completion.
+Latest reviewed synchronization: [2026-11-18 memory test isolation](upstream-sync-2026-11-18.md), C01 (N=1). Both branches reset the memory directory and index around each affected test. GitHub Actions HTTP 422 blocks exact-SHA CI acceptance.
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 

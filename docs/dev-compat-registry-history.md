@@ -5642,3 +5642,7 @@ C01 (N=1), FC-011 shared guidance, inherited unchanged from main `b3f6bfd6`. All
 - Publication: runtime acceptance `8856b86559a1894b51d4523db21015a32b358fba` is published. GitHub rejects all three branch workflow dispatches with HTTP 422, Actions disabled; exact-SHA lint/typecheck/test including Windows remain blocked. Final docs-only acceptance inherits this runtime snapshot and does not advance its behavior reference. See the shared report for environments, local limits and recovery conditions.
 
 This superseded current-review block is retained as history. Current C01–C10 propagation and validation are recorded in [the shared sync record](upstream-sync-2026-11-16.md); compat runtime/test snapshot `7e4580cfdd657f88a4fe9823f94371f104e4f2f8` retains all eleven active DC owners.
+
+## 2026-11-18 memory test isolation
+
+Compat `c813b0f05988b9cdb9d291d10ea29f17ae673eeb` inherits main `51c508648582e50274ce7f46eb6464fc73ce2858` for upstream `53e481145a6abedae20346ad2cdccdaee299a699`. C01 changes the test fixture and guidance. The compat preload and all eleven owner contracts are preserved. Local checks pass and GitHub Actions dispatch remains blocked. See [the synchronization record](upstream-sync-2026-11-18.md).

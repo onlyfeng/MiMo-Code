@@ -10,11 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-17; selected upstream `c9c91d7b6fff20164629475218fa0a58e16d14b8..c34db3645db4ffdf7f2b29a788bd76d9ec3be531`, including both live advancements after initial `5e9579b6` and `5cf79c3f`.
-- Scope: C01–C12 (N=12), worker startup, auth/model/SDK corrections, release/test infrastructure, surviving claim lifecycle and locked npm proxy patch, in [the shared synchronization record](upstream-sync-2026-11-16.md).
-- Starting main: `d65ee6e1e26fc7a17f46dfdc93733605d4971097`; starting compat: `7100a8705a2fd8b0bf97552266b1fd3ab9a534e9`; main runtime/tests: `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d`; compat runtime/tests: `c26c974102ce6857ace779cb77946e97b8d2c8e6`.
-- Result: inherit the shared FD/FC/history/report unchanged. Preserve immediate transactions when adopting claim-marker cleanup; retain process ownership, owned recovery and wake routing. TUI claimSession remains after the handshake. Source/SDK overlay equals the starting overlay with `git diff -U0` after removing index metadata and hunk coordinates; all eleven active DC owners and their exit conditions remain. Existing mutable MCP fields and compat SDK extensions require no regeneration.
-- Validation/publication: exact commands, local results, environment and remaining limits are in the shared report. GitHub rejects lint/typecheck/test dispatches on both branches with HTTP 422 (Actions disabled), despite permissions API reporting enabled. Windows workflow acceptance and exact-SHA CI remain pending; publication does not imply CI completion.
+- Last reviewed: 2026-11-18. Audited `c34db3645db4ffdf7f2b29a788bd76d9ec3be531..53e481145a6abedae20346ad2cdccdaee299a699`.
+
+- Scope: C01 (N=1), shared memory test isolation. See [the shared synchronization record](upstream-sync-2026-11-18.md).
+
+- Starting main: `4f33166e17df59299c2e2ea16396525d0ef0740e`. Starting compat: `b6c4bc8d036a7d4f4b9d464d2c8214b3f8448c2f`. Main test snapshot: `51c508648582e50274ce7f46eb6464fc73ce2858`. Compat test snapshot: `c813b0f05988b9cdb9d291d10ea29f17ae673eeb`.
+
+- Result: inherit the shared fixture and guidance verbatim. The fork's eleven compat owners retain their contracts, including the process-liveness release in the compat preload.
+
+- Validation: the affected local matrix, CLI typecheck and root lint pass. GitHub Actions rejected all three dispatches with HTTP 422, including the test dispatch requesting Windows runtime. Exact-SHA CI acceptance remains pending.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
