@@ -7363,6 +7363,7 @@ for (const nextFails of [false, true]) {
           })
           expect(receipts.find(receipt => receipt.input_message_id === lateID)).toMatchObject({
             state: "settled", outcome: nextFails ? "assistant_error" : "success",
+            error: nextFails ? "The later request failed" : null,
           })
         }),
         { git: true, config: providerCfg },
