@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { crc32 } from "node:zlib"
+import { PNG } from "pngjs"
 import {
   classifyRequestOverflow,
   contextWindow,
@@ -565,6 +567,158 @@ describe("request preflight overflow", () => {
     const limit = usable({ cfg, model })
 
     expect(isRequestOverflow({ cfg, model, requestTokens: limit })).toBe(false)
+  })
+})
+
+describe("request preflight image estimates", () => {
+  const cfg = mockCfg()
+  // At the default 90% trigger the usable window is 245,000 tokens.
+  const model = createModel({ context: 272_223 })
+
+  function file(data: string, mediaType = "image/png"): ModelMessage {
+    return { role: "user", content: [{ type: "file", mediaType, data }] }
+  }
+
+  function screenshot() {
+    const png = new PNG({ width: 1920, height: 1080 })
+    png.data.fill(127)
+    return PNG.sync.write(png)
+  }
+
+  // A valid ancillary PNG comment gives each sample its exact file size
+  // while preserving the compressed pixel data and the IEND chunk.
+  function padded(png: Buffer, size: number) {
+    const comment = Buffer.alloc(size - png.length, 32)
+    comment.writeUInt32BE(comment.length - 12)
+    comment.write("tEXtComment\0", 4, "ascii")
+    comment.writeUInt32BE(crc32(comment.subarray(4, -4)), comment.length - 4)
+    return Buffer.concat([png.subarray(0, -12), comment, png.subarray(-12)]).toString("base64")
+  }
+
+  test("same pixels fit the window at all three observed file sizes", () => {
+    const png = screenshot()
+    // With request framing the fixed prefix accounts for about 43,850 tokens.
+    const prebuiltSystem = ["s".repeat(131_424)]
+    const estimates = [506_463, 680_424, 831_056].map((size) => {
+      const messages = [file(`data:image/png;base64,${padded(png, size)}`)]
+      expect(classifyRequestOverflow({ cfg, model, prebuiltSystem, messages, recoveryFloorMessages: messages })).toEqual({
+        type: "ok",
+      })
+      return estimateRequestTokens({ prebuiltSystem, messages })
+    })
+    expect(estimates).toEqual([46_535, 46_535, 46_535])
+  })
+
+  // One 256px tile costs 192 tokens including the per-image allowance.
+  // The remaining 38 or 39 tokens are request framing, depending on MIME length.
+  test.each([
+    ["image/png", "89504e470d0a1a0a0000000d494844520000000100000001", 230],
+    ["image/jpeg", "ffd8ffe00002ffc00008080001000101", 231],
+    ["image/webp", "524946461600000057454250565038580a00000000000000000000000000", 231],
+    ["image/gif", "47494638396101000100", 230],
+  ] as const)("reads a 1x1 %s header", (mime, header, expected) => {
+    const data = Buffer.from(header, "hex").toString("base64")
+    expect(estimateRequestTokens({ messages: [file(data, mime)] })).toBe(expected)
+  })
+
+  test("caps a large canvas at the per-image allowance", () => {
+    const gif = Buffer.from("474946383961ffffffff", "hex")
+    expect(estimateRequestTokens({ messages: [file(gif.toString("base64"), "image/gif")] })).toBe(8_230)
+  })
+
+  test("sizes an inline read result in the recovery floor and in the measured tail", () => {
+    const data = padded(screenshot(), 831_056)
+    const current: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "1",
+          toolName: "read",
+          output: { type: "content", value: [{ type: "image-data", mediaType: "image/png", data }] },
+        },
+      ],
+    }
+    const input = {
+      cfg,
+      model,
+      messages: [textMessage("h".repeat(750_000)), current],
+      recoveryFloorMessages: [current],
+    }
+    const floor = classifyRequestOverflow(input)
+    expect(floor.type).toBe("overflow")
+    if (floor.type !== "overflow") return
+    expect(floor.recoveryFloorTokens).toBeGreaterThan(2_600)
+    expect(floor.recoveryFloorTokens).toBeLessThan(3_000)
+
+    const base = { id: PartID.make("image"), sessionID: SessionID.make("session"), messageID: MessageID.make("message") }
+    const attachment: MessageV2.FilePart = {
+      ...base,
+      type: "file",
+      mime: "image/png",
+      url: `data:image/png;base64,${data}`,
+    }
+    const read: MessageV2.ToolPart = {
+      ...base,
+      id: PartID.make("tool"),
+      type: "tool",
+      tool: "read",
+      callID: "1",
+      state: {
+        status: "completed",
+        input: {},
+        output: "",
+        title: "",
+        metadata: {},
+        time: { start: 0, end: 1 },
+        attachments: [attachment],
+      },
+    }
+    // Production passes stored message parts, including tool attachments, then rendered turn context.
+    for (const part of [read, attachment]) {
+      const result = classifyRequestOverflow({ ...input, measured: { inputTokens: 44_000, added: [[[part]], []] } })
+      expect(result.type).toBe("ok")
+      if (result.type !== "ok") return
+      expect(result.measured?.measuredTokens).toBeGreaterThan(46_600)
+      expect(result.measured?.measuredTokens).toBeLessThan(47_000)
+    }
+  })
+
+  test("uses the fixed image allowance for an unreadable header of any file size", () => {
+    const estimates = [4, 120_000].map((length) =>
+      estimateRequestTokens({ messages: [file(`data:image/png;base64,${"A".repeat(length)}`)] }),
+    )
+    expect(estimates).toEqual([8_230, 8_230])
+  })
+
+  test("repeated images in the active turn can exhaust the window", () => {
+    const image = file(`data:image/png;base64,${screenshot().toString("base64")}`)
+    const messages = Array<ModelMessage>(96).fill(image)
+    expect(classifyRequestOverflow({ cfg, model, messages, recoveryFloorMessages: messages }).type).toBe("overflow-static")
+  })
+
+  test("preserves the serialized text and tool choice estimate", () => {
+    expect(estimateRequestTokens({ system: ["scope"], messages: [textMessage("解释\nthis.")], toolChoice: "none" })).toBe(44)
+  })
+
+  test("preserves file-shaped JSON in schema examples, tool inputs and JSON results", () => {
+    const example = { type: "file", mediaType: "image/png", data: "A".repeat(12_000) }
+    const messages: ModelMessage[] = [
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "1", toolName: "echo", input: example }] },
+      {
+        role: "tool",
+        content: [{ type: "tool-result", toolCallId: "1", toolName: "echo", output: { type: "json", value: example } }],
+      },
+    ]
+    expect(estimateRequestTokens({ messages, tools: { echo: { inputSchema: { examples: [example] } } } })).toBe(12_147)
+  })
+
+  test.each([
+    ["application/pdf", 4040],
+    ["audio/wav", 4038],
+    ["video/mp4", 4038],
+  ] as const)("preserves the serialized estimate for %s", (mime, expected) => {
+    expect(estimateRequestTokens({ messages: [file("A".repeat(12_000), mime)] })).toBe(expected)
   })
 })
 

@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import { PNG } from "pngjs"
 import { Deferred, Effect, Layer } from "effect"
 import { eq, sql } from "drizzle-orm"
 import { Bus } from "../../src/bus"
@@ -700,6 +701,34 @@ describe("checkpoint writer forkContext shape per mode", () => {
           expect(captureLog.calls.map((c) => [c.agentName, c.modelID])).toEqual([["checkpoint-writer", "writer-model"]])
           expect(spawnLog.lastInput?.model?.modelID).toBe("writer-model")
           expect(forkModel()).toBe("writer-model")
+        }),
+      { config: { checkpoint: { fork: false } } },
+    ),
+  )
+
+  it.live(
+    "fork:false keeps a writer delta containing an uncompressed PNG on the writer model",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          yield* reset
+          installRecordingCapture()
+          yield* writerModel(60_000)
+          const { info, u1 } = yield* seedFourMessages()
+          const session = yield* SessionNs.Service
+          const png = PNG.sync.write(new PNG({ width: 256, height: 256 }), { deflateLevel: 0 })
+          const url = `data:image/png;base64,${png.toString("base64")}`
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: u1.id,
+            sessionID: info.id,
+            type: "file",
+            mime: "image/png",
+            url,
+          })
+          expect(yield* startWriter(info, 1_000_000)).toBe("started")
+          expect(forkModel()).toBe("writer-model")
+          expect(JSON.stringify(spawnLog.lastInput?.forkContext).includes(url)).toBe(true)
         }),
       { config: { checkpoint: { fork: false } } },
     ),

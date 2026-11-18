@@ -4,6 +4,7 @@ import type { Provider } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import { Log, Token, Wildcard } from "@/util"
 import type { MessageV2 } from "./message-v2"
+import { ImageTokenEstimate } from "./image-token-estimate"
 import { isBoundaryUser } from "./tail-digest"
 import type { ModelMessage } from "ai"
 
@@ -22,12 +23,16 @@ type RequestEstimateInput = {
   toolChoice?: unknown
 }
 
+// The measured delta groups the stored tail parts, SDK turn-context messages
+// and any last-step instructions in arrays, preserving their JSON overhead.
+type AddedContent = MessageV2.Part | ModelMessage | string | AddedContent[]
+
 /** A request sized from the provider's count for an earlier step on the lane. */
 export type MeasuredRequest = {
   /** Input the provider reported for that step: uncached, cache-read and cache-write together. */
   inputTokens: number
   /** Everything sent after that step's request, estimated like a whole request. */
-  added: unknown
+  added: AddedContent
 }
 
 export type RequestOverflowClassification =
@@ -129,20 +134,24 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
   return count >= usable(input)
 }
 
-function estimateSerialized(value: unknown) {
-  const serialized = JSON.stringify(value)
-  const charEstimate = Token.estimate(serialized)
-  const byteEstimate = Math.round(Buffer.byteLength(serialized, "utf8") / 3)
-  return Math.max(charEstimate, byteEstimate)
+function estimateAddedTokens(added: AddedContent) {
+  const images = new ImageTokenEstimate()
+  function project(value: AddedContent): unknown {
+    if (Array.isArray(value)) return value.map(project)
+    if (typeof value === "string") return value
+    return "role" in value ? images.modelMessage(value) : images.storedPart(value)
+  }
+  return images.serialized(project(added))
 }
 
 export function estimateRequestTokens(input: RequestEstimateInput) {
   // Estimate complete descriptors using the same JSON semantics as dispatch.
   // Truncation and circular-reference placeholders can hide an oversized or
   // invalid request; shared objects must be counted at every wire occurrence.
-  return estimateSerialized({
+  const images = new ImageTokenEstimate()
+  return images.serialized({
     system: input.prebuiltSystem ?? input.system ?? [],
-    messages: input.messages,
+    messages: input.messages.map((message) => images.modelMessage(message)),
     tools: input.tools ?? {},
     toolChoice: input.toolChoice,
   })
@@ -196,7 +205,7 @@ export function classifyRequestOverflow(
     // Measure only once the estimate reaches the trigger, and only to clear it:
     // a measured request that also reaches it keeps the estimate's recovery path.
     const measuredTokens = input.measured
-      ? input.measured.inputTokens + estimateSerialized(input.measured.added)
+      ? input.measured.inputTokens + estimateAddedTokens(input.measured.added)
       : undefined
     if (
       measuredTokens !== undefined &&

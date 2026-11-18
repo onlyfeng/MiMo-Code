@@ -26,6 +26,7 @@ import { InboxTable } from "@/inbox/inbox.sql"
 import * as Session from "./session"
 import { SessionStatus } from "./status"
 import { MessageV2 } from "./message-v2"
+import { estimateTextTokens, ImageTokenEstimate } from "./image-token-estimate"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Log, Token } from "../util"
 import { Effect, Layer, Deferred, Context, Scope } from "effect"
@@ -248,22 +249,10 @@ const REBUILD_WAIT_MS = "30 seconds"
 const FIRST_CHECKPOINT_WAIT_MS = "5 minutes"
 
 
-function estimateMessageTokens(m: { parts: Array<{ type: string; [k: string]: unknown }> }): number {
-  // Same estimator used elsewhere in checkpoint.ts (Token.estimate over JSON).
-  // Sum across all parts of the message.
+function estimateMessageTokens(m: { parts: unknown[] }, estimateText = Token.estimate): number {
   let sum = 0
   for (const p of m.parts) {
-    // JSON.stringify throws on circular structures. Parser-produced parts are
-    // plain POJOs, but a plugin-injected part could contain a cycle. Fall back
-    // to a conservative NON-ZERO estimate so a bad part is never counted as
-    // "free" — a 0 here would let the tail-boundary algorithm swallow the part
-    // for nothing and skew the budget. The constant overstates a typical part,
-    // which is the safe direction (boundary walks back, never forward).
-    try {
-      sum += Token.estimate(JSON.stringify(p))
-    } catch {
-      sum += 1000
-    }
+    sum += estimateSerializedTokens((images) => images.storedPart(p), estimateText)
   }
   return sum
 }
@@ -273,27 +262,25 @@ function estimateMessageTokens(m: { parts: Array<{ type: string; [k: string]: un
 // keeps its own estimator because computeBoundary's tail sizing depends on it.
 function estimateViewTokens(msgs: ReadonlyArray<{ parts: unknown[] }>): number {
   let sum = 0
-  for (const m of msgs) for (const p of m.parts) sum += estimateSerializedTokens(p)
+  for (const m of msgs) sum += estimateMessageTokens(m, estimateTextTokens)
   return sum
 }
 
 // Sizes the request a no-fork writer is sent: its system prompt and the delta
 // rendered as model messages. The writer's own tool list is small and fixed.
-function estimateWriterRequestTokens(prefix: {
-  readonly system: readonly string[]
-  readonly inheritedMessages: readonly unknown[]
-}): number {
+function estimateWriterRequestTokens(prefix: Pick<ForkContext, "system" | "inheritedMessages">): number {
   let sum = 0
-  for (const text of prefix.system) sum += estimateSerializedTokens(text)
-  for (const message of prefix.inheritedMessages) sum += estimateSerializedTokens(message)
+  for (const text of prefix.system) sum += estimateTextTokens(text)
+  for (const message of prefix.inheritedMessages) sum += estimateSerializedTokens((images) => images.modelMessage(message))
   return sum
 }
 
-function estimateSerializedTokens(value: unknown): number {
+function estimateSerializedTokens(project: (images: ImageTokenEstimate) => unknown, estimateText = estimateTextTokens): number {
   try {
-    const json = typeof value === "string" ? value : JSON.stringify(value)
-    return Math.max(Token.estimate(json), Math.round(Buffer.byteLength(json, "utf8") / 3))
+    const images = new ImageTokenEstimate()
+    return images.serialized(project(images), estimateText)
   } catch {
+    // A plugin can supply a circular part. Keep its share of the tail budget.
     return 1000
   }
 }
