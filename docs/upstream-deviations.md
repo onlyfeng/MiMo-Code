@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-18
-- Upstream: `53e481145a6abedae20346ad2cdccdaee299a699`
-- Prior reviewed upstream: `c34db3645db4ffdf7f2b29a788bd76d9ec3be531`
-- Review completion: C01 adopts upstream memory test isolation on both branches. The affected local matrix passes. Exact-SHA CI is blocked by GitHub Actions HTTP 422. See [the synchronization record](upstream-sync-2026-11-18.md).
-- Main behavior (runtime/tests): `51c508648582e50274ce7f46eb6464fc73ce2858` (test isolation snapshot)
-- Inherited compat behavior: `c813b0f05988b9cdb9d291d10ea29f17ae673eeb` (test isolation snapshot)
+- Last reviewed: 2026-11-19
+- Upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
+- Prior reviewed upstream: `53e481145a6abedae20346ad2cdccdaee299a699`
+- Review completion: Both branches adopt the media reader split, media labels and tolerant credential metadata. GitHub Actions HTTP 422 blocks exact-SHA CI. See [the synchronization record](upstream-sync-2026-11-19.md).
+- Main behavior (runtime/tests): `1d0a9ee8c93c5a723aee4740a4c104fd3ef7e574`
+- Inherited compat behavior: `9771c91853c8650402eac6631ddf4b57a5927f51`
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `4f33166e17df59299c2e2ea16396525d0ef0740e`. Prior fork `dev/compat` tip: `b6c4bc8d036a7d4f4b9d464d2c8214b3f8448c2f`
+- Prior fork `main` tip: `14af2d4cf623357c42c2c268b19c5b03dec12fdb`. Prior fork `dev/compat` tip: `938df325fb90b768941900b7b7eaf0ff260702b5`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization: [2026-11-18 memory test isolation](upstream-sync-2026-11-18.md), C01 (N=1). Both branches reset the memory directory and index around each affected test. GitHub Actions HTTP 422 blocks exact-SHA CI acceptance.
+Latest reviewed synchronization is the [2026-11-19 media and credential update](upstream-sync-2026-11-19.md), C01–C03 (N=3).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
