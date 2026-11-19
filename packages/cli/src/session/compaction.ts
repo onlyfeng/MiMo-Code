@@ -23,6 +23,7 @@ import { NamedError } from "@mimo-ai/shared/util/error"
 import path from "path"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { observedToolParts } from "./observed-tool-parts"
+import { mediaToolKind } from "@/tool/media-kind"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -132,7 +133,7 @@ export function buildFileManifest(messages: MessageV2.WithParts[], env: { worktr
       if (part.type !== "tool" || part.state.status !== "completed") continue
       const inputPath =
         string(part.state.input.file_path) ?? string(part.state.input.path) ?? string(part.state.input.notebook_path)
-      if (part.tool === "read") {
+      if (part.tool === "read" || mediaToolKind(part.tool)) {
         add(inputPath, readLabel(part))
         continue
       }

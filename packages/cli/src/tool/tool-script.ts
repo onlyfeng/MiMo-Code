@@ -18,6 +18,7 @@ import { normalizeResult } from "../session/try-best-detector"
 import { evalScript, type HostFn } from "../workflow/sandbox"
 import { toolScriptRegistry, TOOL_SCRIPT_ALIASES, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
 import type { HarnessMode } from "./gpt"
+import { mediaToolKind } from "./media-kind"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
 import * as ToolSettlement from "./settlement"
@@ -440,7 +441,10 @@ function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
     }
     if (part.state.output) retain(evidence, "output", normalizeResult(part.state.output))
   }
-  if (["read", "write", "edit", "multiedit", "notebook_edit", "str_replace", "apply_patch"].includes(part.tool)) {
+  if (
+    mediaToolKind(part.tool) ||
+    ["read", "write", "edit", "multiedit", "notebook_edit", "str_replace", "apply_patch"].includes(part.tool)
+  ) {
     for (const key of ["file_path", "path", "notebook_path", "offset"]) retain(input, key, args[key])
     if (args.old_string === "") retain(input, "old_string", "")
     retain(metadata, "filepath", meta.filepath ?? metadataRecord(meta.filediff).file)
