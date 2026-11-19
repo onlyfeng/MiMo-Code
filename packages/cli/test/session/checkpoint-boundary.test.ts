@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { PNG } from "pngjs"
 import type { MessageV2 } from "../../src/session/message-v2"
 import type { MessageID, SessionID } from "../../src/session/schema"
 import { computeBoundary } from "../../src/session/checkpoint"
@@ -135,6 +136,35 @@ describe("computeBoundary", () => {
     ]
     const result = computeBoundary(msgs)
     expect(result).toBe("u2")
+  })
+
+  test("keeps the same history for a read image at different PNG compression levels", () => {
+    const png = new PNG({ width: 256, height: 256 })
+    for (const deflateLevel of [9, 0]) {
+      const bytes = PNG.sync.write(png, { deflateLevel })
+      const attachment = { type: "file", mime: "image/png", url: `data:image/png;base64,${bytes.toString("base64")}` }
+      const read = {
+        type: "tool",
+        tool: "read",
+        callID: "read-image",
+        state: {
+          status: "completed",
+          input: { file_path: "/tmp/example.png" },
+          output: "Image read successfully",
+          title: "example.png",
+          metadata: {},
+          time: { start: 2, end: 3 },
+          attachments: [attachment],
+        },
+      }
+      const messages = [
+        userMsg("first", 0, textParts(100)),
+        asstMsg("reply", 1, "stop", textParts(100)),
+        userMsg("question", 2, textParts(100)),
+        asstMsg("image", 3, "tool-calls", [read]),
+      ]
+      expect(computeBoundary(messages)).toBe("first")
+    }
   })
 
   test("goldilocks range (10K–40K with 5+ text blocks): boundary stays in reasonable range", () => {

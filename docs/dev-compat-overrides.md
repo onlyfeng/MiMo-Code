@@ -514,6 +514,9 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
   upstream ratio trigger. The estimator serializes complete active tool
   schemas with JSON.stringify; the former 80 KiB estimation-only cutoff is
   removed. Repeated object references are counted as serialized occurrences.
+  Image attachments are sized from their pixel dimensions in the full request,
+  the measured tail and the recovery floor. Checkpoint tail and writer window
+  estimates use the same image allowance for stored and rendered attachments.
   An unserializable request yields a terminal preflight error, with no dispatch
   or compaction retry. The estimate remains heuristic rather than an exact
   provider token count or a guarantee that every request fits.
