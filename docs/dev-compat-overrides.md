@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-18. Audited `c34db3645db4ffdf7f2b29a788bd76d9ec3be531..53e481145a6abedae20346ad2cdccdaee299a699`.
+- Last reviewed: 2026-11-19. Audited `53e481145a6abedae20346ad2cdccdaee299a699..75e1ed0b3b6561796bdfeb36edcf091f9793f24d`.
 
-- Scope: C01 (N=1), shared memory test isolation. See [the shared synchronization record](upstream-sync-2026-11-18.md).
+- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-19.md).
 
-- Starting main: `4f33166e17df59299c2e2ea16396525d0ef0740e`. Starting compat: `b6c4bc8d036a7d4f4b9d464d2c8214b3f8448c2f`. Main test snapshot: `51c508648582e50274ce7f46eb6464fc73ce2858`. Compat test snapshot: `c813b0f05988b9cdb9d291d10ea29f17ae673eeb`.
+- Starting main: `14af2d4cf623357c42c2c268b19c5b03dec12fdb`. Starting compat: `938df325fb90b768941900b7b7eaf0ff260702b5`. Main runtime snapshot: `1d0a9ee8c93c5a723aee4740a4c104fd3ef7e574`. Compat runtime snapshot: `9771c91853c8650402eac6631ddf4b57a5927f51`.
 
-- Result: inherit the shared fixture and guidance verbatim. The fork's eleven compat owners retain their contracts, including the process-liveness release in the compat preload.
+- Result: inherit the media readers, type labels and credential metadata handling. The registry keeps compat native search exposure. Request preflight keeps the pixel-based image estimate and preserves active-turn images in the recovery floor. The TUI keeps its provider, model and variant display.
 
-- Validation: the affected local matrix, CLI typecheck and root lint pass. GitHub Actions rejected all three dispatches with HTTP 422, including the test dispatch requesting Windows runtime. Exact-SHA CI acceptance remains pending.
+- Validation: CLI typecheck, lint and the focused media, prompt, auth, native search and preflight matrices pass with the Windows fixture exceptions recorded in the shared review. GitHub rejected lint, typecheck and test dispatches with HTTP 422, including the test dispatch requesting Windows runtime.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
