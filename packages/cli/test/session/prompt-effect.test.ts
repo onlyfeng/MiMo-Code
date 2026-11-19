@@ -9,6 +9,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { afterEach, describe, expect, spyOn } from "bun:test"
+import { PNG } from "pngjs"
 import { ResumeTestHooks } from "../../src/session/resume-test-hooks"
 import path from "path"
 import { mkdir } from "fs/promises"
@@ -5756,38 +5757,79 @@ it.live(
   20_000,
 )
 
-it.live(
-  "request preflight keeps oversized current-turn attachments in the recovery floor",
-  () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Current attachment preflight overflow" })
-        const current = yield* user(chat.id, "inspect the attached image")
-        yield* sessions.updatePart({
-          id: PartID.ascending(),
-          messageID: current.id,
-          sessionID: chat.id,
-          type: "file",
-          mime: "image/png",
-          filename: "oversized.png",
-          url: `data:image/png;base64,${"A".repeat(400 * 1024)}`,
-        })
+function preflightImageProviderCfg(url: string) {
+  const config = mediaProviderCfg(url)
+  config.provider.test.models["test-model"].limit = { context: 120_000, output: 1_000 }
+  return config
+}
 
-        const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.timeout("10 seconds"))
+it.live("request preflight sends a large current-turn PNG to the provider", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Single image preflight" })
+      const png = PNG.sync.write(new PNG({ width: 512, height: 384 }), { deflateLevel: 0 })
+      expect(png.length).toBeGreaterThan(750_000)
+      const url = `data:image/png;base64,${png.toString("base64")}`
+      yield* llm.text("image received")
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        parts: [
+          { type: "text", text: "Inspect the attached image." },
+          { type: "file", mime: "image/png", filename: "example.png", url },
+        ],
+      })
+      expect(result.info).toMatchObject({ role: "assistant", finish: "stop" })
+      expect(yield* llm.inputs).toEqual([
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "user",
+              content: expect.arrayContaining([{ type: "image_url", image_url: { url } }]),
+            }),
+          ]),
+        }),
+      ])
+    }),
+    { git: true, config: preflightImageProviderCfg },
+  ),
+  20_000,
+)
 
-        expect(result.info.role).toBe("assistant")
-        if (result.info.role === "assistant") {
-          expect(result.info.finish).toBe("error")
-          expect(result.info.error?.name).toBe("ModelError")
-        }
-        const messages = yield* sessions.messages({ sessionID: chat.id })
-        expect(messages.flatMap((message) => message.parts).some((part) => part.type === "compaction")).toBe(false)
-        expect(yield* llm.hits).toHaveLength(0)
-      }),
-      { git: true, config: recoverableOverflowCfg },
-    ),
+it.live("request preflight keeps all current-turn images in the recovery floor", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Multi-image preflight overflow" })
+      const png = PNG.sync.write(new PNG({ width: 1920, height: 1080 }))
+      const url = `data:image/png;base64,${png.toString("base64")}`
+      // 48 screenshots at 2,688 tokens each exceed the 120K window before any text.
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        parts: [
+          { type: "text", text: "Inspect the attached images." },
+          ...Array.from({ length: 48 }, (_, index) => ({
+            type: "file" as const, mime: "image/png", filename: `example-${index}.png`, url,
+          })),
+        ],
+      })
+      expect(result.info).toMatchObject({
+        role: "assistant",
+        finish: "error",
+        error: { name: "ModelError", data: { message: expect.stringContaining("active turn") } },
+      })
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      expect(messages.flatMap((message) => message.parts).some((part) => part.type === "compaction")).toBe(false)
+      expect(yield* llm.hits).toHaveLength(0)
+    }),
+    { git: true, config: preflightImageProviderCfg },
+  ),
   20_000,
 )
 
