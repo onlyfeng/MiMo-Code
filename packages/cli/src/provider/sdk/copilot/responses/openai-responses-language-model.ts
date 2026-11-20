@@ -19,6 +19,7 @@ import {
   postJsonToApi,
 } from "@ai-sdk/provider-utils"
 import { z } from "zod/v4"
+import { prefersDeveloperPrefix } from "../../../openai-responses"
 import type { OpenAIConfig } from "./openai-config"
 import { openaiFailedResponseHandler } from "./openai-error"
 import { codeInterpreterInputSchema, codeInterpreterOutputSchema } from "./tool/code-interpreter"
@@ -1802,10 +1803,10 @@ function getResponsesModelConfig(modelId: string): ResponsesModelConfig {
     modelId.startsWith("o4-mini")
   const defaults = {
     requiredAutoTruncation: false,
-    systemMessageMode: "system" as const,
+    systemMessageMode: prefersDeveloperPrefix(modelId) ? "developer" : "system",
     supportsFlexProcessing,
     supportsPriorityProcessing,
-  }
+  } as const
 
   // gpt-5-chat models are non-reasoning
   if (modelId.startsWith("gpt-5-chat")) {

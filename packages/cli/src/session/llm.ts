@@ -4,6 +4,7 @@ import { bindHostError, inheritHostError } from "@/error/host-registry"
 import path from "path"
 import { Provider, ProviderError } from "@/provider"
 import { openCodeGoSessionHeaders } from "@/provider/opencode-go"
+import { prefersDeveloperPrefix } from "@/provider/openai-responses"
 import { Log } from "@/util"
 import { errorMessage } from "@/util/error"
 import { Context, Duration, Effect, Layer, Record, Cause } from "effect"
@@ -534,6 +535,20 @@ const live: Layer.Layer<
         },
       )
 
+      let wireMessages = messages
+      let wireOptions = params.options
+      if (
+        isOpenaiOauth && input.model.api.npm === "@ai-sdk/openai" &&
+        language.provider.endsWith(".responses") && prefersDeveloperPrefix(language.modelId)
+      ) {
+        // Lower the final instructions after chat.params so a plugin can still replace them.
+        const { instructions, ...rest } = params.options
+        if (typeof instructions === "string" && instructions.length > 0) {
+          wireMessages = [{ role: "system", content: instructions }, ...messages]
+          wireOptions = { ...rest, systemMessageMode: "developer" }
+        }
+      }
+
       const { headers } = input.ephemeral ? { headers: {} } : yield* plugin.trigger(
         "chat.headers",
         {
@@ -780,7 +795,7 @@ const live: Layer.Layer<
         temperature: params.temperature,
         topP: params.topP,
         topK: params.topK,
-        providerOptions: ProviderTransform.providerOptions(input.model, params.options),
+        providerOptions: ProviderTransform.providerOptions(input.model, wireOptions),
         activeTools,
         tools: ProviderTransform.tools(tools, input.model),
         toolChoice: input.toolChoice,
@@ -801,7 +816,7 @@ const live: Layer.Layer<
         // Keep one SDK-level retry for a failure before response headers. The
         // processor owns the persistent stream retry budget below this layer.
         maxRetries: input.retries ?? 0,
-        messages,
+        messages: wireMessages,
         model: wrapLanguageModel({
           model: language,
           middleware: [
