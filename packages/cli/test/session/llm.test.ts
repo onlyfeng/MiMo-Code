@@ -23,6 +23,7 @@ import { Bus } from "../../src/bus"
 import { Session } from "../../src/session"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { GlobalBus } from "../../src/bus/global"
+import { Auth } from "../../src/auth"
 import { HostErrorRegistry } from "../../src/error/host-registry"
 
 async function getModel(providerID: ProviderID, modelID: ModelID) {
@@ -353,6 +354,84 @@ function createEventResponse(chunks: unknown[], includeDone = false) {
 }
 
 describe("session.llm.stream", () => {
+  for (const [route, apiID] of [
+    ["api", "gpt-6.2-sol"],
+    ["oauth", "gpt-6.2-astra"],
+    ["copilot", "gpt-6.2-sol"],
+    ["legacy-oauth", "gpt-6.1-sol"],
+    ["chat", "gpt-6.2-astra"],
+  ] as const) {
+    test(`system prompt on the wire for ${route} ${apiID}`, async () => {
+      const server = state.server!
+      const oauth = route === "oauth" || route === "legacy-oauth"
+      const providerID = ProviderID.make(route === "copilot" ? "github-copilot" : route === "chat" ? "test-chat" : "openai")
+      const modelID = ModelID.make("test-alias")
+      await using tmp = await tmpdir({
+        config: {
+          enabled_providers: [providerID],
+          provider: {
+            [providerID]: {
+              ...(route === "chat" && { npm: "@ai-sdk/openai-compatible" }),
+              options: { baseURL: `${server.url.origin}/v1`, apiKey: "test-key" },
+              models: { [modelID]: { id: apiID } },
+            },
+          },
+        },
+      })
+      // Send the Codex plugin's rewritten request to the same loopback capture as the API-key traffic.
+      const send = globalThis.fetch
+      const codexURL = "https://chatgpt.com/backend-api/codex/responses"
+      const redirect = oauth ? spyOn(globalThis, "fetch").mockImplementation(Object.assign(
+        (input: RequestInfo | URL, init?: RequestInit) =>
+          send(String(input) === codexURL ? new URL(new URL(codexURL).pathname, server.url) : input, init),
+        { preconnect: send.preconnect },
+      )) : undefined
+      Auth.inject(JSON.stringify({ [providerID]: oauth
+        ? { type: "oauth", access: "test-token", refresh: "test-refresh", expires: Date.now() + 60_000 }
+        : { type: "api", key: "test-key" } }))
+      try {
+        await Instance.provide({ directory: tmp.path, fn: async () => {
+          const model = await getModel(providerID, modelID)
+          const sessionID = SessionID.make("session-cache-test")
+          const agent = { name: "test", mode: "primary", options: {}, permission: [] } satisfies Agent.Info
+          const user = { id: MessageID.make("user-cache-test"), sessionID, role: "user", time: { created: 1 }, agent: agent.name,
+            model: { modelID, providerID }, system: "turn-specific context" } satisfies MessageV2.User
+          const history: ModelMessage[] = [{ role: "user", content: "first question" }]
+          for (const followup of [false, true]) {
+            if (followup) history.push({ role: "assistant", content: "first answer" }, { role: "user", content: "next question" })
+            const endpoint = route === "chat" ? "/chat/completions" : "/responses"
+            const request = waitRequest(endpoint, route === "chat"
+              ? new Response(createChatStream("ok"), { headers: { "Content-Type": "text/event-stream" } })
+              : createEventResponse([], true))
+            const prefix = "stable example prefix"
+            await drain({ agent, user, sessionID, model, system: [], prebuiltSystem: [prefix], messages: history, tools: {}, retries: 0 })
+            const { body, url, headers } = await request
+            expect(url.pathname).toBe(oauth ? new URL(codexURL).pathname : `/v1${endpoint}`)
+            expect(body.model).toBe(apiID)
+            if (oauth) expect(headers.get("authorization")).toBe("Bearer test-token")
+            const serialized = JSON.stringify(body)
+            expect(serialized.split(prefix)).toHaveLength(2)
+            expect(serialized.split(user.system)).toHaveLength(2)
+            if (followup) expect(serialized).toContain("next question")
+            if (route === "legacy-oauth") {
+              expect(body.instructions).toBe(`${prefix}\n${user.system}`)
+            } else if (route === "chat") {
+              expect(body.messages).toMatchObject([{ role: "system", content: prefix }, ...history, { role: "user" }])
+            } else {
+              expect(body).not.toHaveProperty("instructions")
+              const items = z.array(z.object({ role: z.string(), content: z.unknown() })).parse(body.input)
+              expect(items[0]).toEqual({ role: "developer", content: oauth ? `${prefix}\n${user.system}` : prefix })
+              expect(items[1]?.role).toBe("user")
+            }
+          }
+        } })
+      } finally {
+        redirect?.mockRestore()
+        Auth.inject(undefined)
+      }
+    })
+  }
+
   for (const withType of [false, true]) {
     for (const behavior of ["terminal", "persistent", "context"] as const) {
       test(`compatible post-output ${behavior} preserves raw error structure (type=${withType})`, async () => {
