@@ -1335,7 +1335,9 @@ own source list remains the complete watch surface.
   Discovery refreshes at user-turn boundaries, command lookup/listing, the
   skill route and tool misses. Stat-keyed parsing reuses unchanged files.
   Builtin extraction remains a scoped producer that caller cancellation cannot
-  poison; reload invalidates its generation. Interrupted directory scans do
+  poison; reload invalidates its generation and always rebuilds the snapshot,
+  even when every file keeps its path, mtime and size (a parse that failed for
+  an unreadable file can succeed after chmod). Interrupted directory scans do
   not publish a partial snapshot and later callers retry.
   Frozen prefixes/profile keys and native tool contracts do not depend on live
   skills. Prefix rotation is upstream's: a tools-hash change rebuilds the
@@ -1361,7 +1363,8 @@ own source list remains the complete watch surface.
   authorization, producer lifetime and historical recognition, and adds the
   read-time cleanup of fork-written rows. Deviates from upstream's replay rule,
   which accepts any reminder metadata as announced state, by requiring an
-  entry in the window before a delta counts. The old system-tail POLICY-04
+  entry in the window before a delta counts, and from upstream's snapshot
+  reuse by rebuilding on an explicit reload. The old system-tail POLICY-04
   selection, including its frozen-system-across-rotation rule from
   `8ed2c580`, is historical, superseded by this synchronization.
 - Watch surfaces: `packages/cli/src/skill/index.ts`,
@@ -1395,7 +1398,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `0f29dc2bbc07a737d7df439526d844fafd3acbcc` (pull request #263).
+  main behavior `d3a9d4339ed04f776ed12ebc3bbccfba9d251c80` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that

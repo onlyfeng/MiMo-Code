@@ -10,12 +10,12 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime tip is `0f29dc2bbc07a737d7df439526d844fafd3acbcc`: the merge of upstream, the
+The runtime tip is `d3a9d4339ed04f776ed12ebc3bbccfba9d251c80`: the merge of upstream, the
 entry-anchored catalog delta replay, and the takeover changes below, which
 restore FD-005's dropped regression test, keep `skill/index.ts` at upstream
-text plus the builtin producer, and return prefix rotation and the
+text plus the builtin producer, return prefix rotation and the
 structured-output instruction to upstream's rule with a read-time cleanup of
-fork-written prefixes. The earlier review fixes `b922a551` and `cac9eecd` are
+fork-written prefixes, and rebuild the skill snapshot on an explicit reload. The earlier review fixes `b922a551` and `cac9eecd` are
 superseded by that last change. The `dev/compat` propagation is recorded in the same file on that
 branch.
 
@@ -42,8 +42,13 @@ branch.
   extraction in the first caller's fiber, so an interrupted first caller hands
   its interruption to every concurrent waiter, and its `Effect.onInterrupt`
   invalidation leaves a failed extraction cached for the process.
-  `skill/index.ts` differs from upstream only by this producer; live directory
-  scans keep upstream's ticketed single-flight.
+  Live directory scans keep upstream's ticketed single-flight.
+- **Explicit reload rebuilds.** Upstream reuses the previous snapshot whenever
+  every file keeps its (path, mtime, size), even after `reload()` cleared the
+  parse cache, so a SKILL.md whose parse failed while it was unreadable stays
+  missing after chmod. Fork `main` invalidated the whole state on reload; the
+  fork now counts reloads into the snapshot key. `skill/index.ts` differs from
+  upstream only by this counter and the builtin producer.
 - **Historical data.** The shipped
   `20260908000000_session_prefix_skill_catalog` migration is unchanged.
   `SessionPrefixSnapshot.getFrozen` cleans a row written by an older engine
@@ -311,6 +316,15 @@ system ends with the project's instruction file, and this machine's real
 `~/.claude/CLAUDE.md` follows it through `os.homedir()`; both pass in the
 Windows run above. Each new rule was disabled in turn and a named case
 failed on its assertion, as listed in `0f29dc2b`'s commit message.
+
+A fifth automated finding, against `64a61d9a`, showed that `reload()` left a
+skill missing when its SKILL.md had failed to parse while unreadable and was
+then fixed with chmod: the rebuilt snapshot's file signatures were unchanged,
+so the stale snapshot was reused. Upstream `128adcb7` has the same code; fork
+`main` had invalidated the whole state on reload. Fixed in `d3a9d433` by
+counting reloads into the snapshot key; "reload recovers a SKILL.md that
+became readable without changing" in `test/skill/skill.test.ts` fails without
+it, and the skill, tool, registry, command and catalog suites pass.
 
 ## Publication and CI
 
