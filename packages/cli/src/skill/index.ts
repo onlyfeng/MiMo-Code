@@ -202,6 +202,10 @@ export const layer = Layer.effect(
     const PULL_RETRY_MS = 5 * 60 * 1000
     const pulled = new Map<string, { dirs: string[]; at: number }>()
     const parsed = new Map<string, ParseEntry>()
+    // FC-005: bumped by `reload`, so its rebuild never reuses a snapshot whose
+    // file signatures merely look unchanged; a parse that failed for one
+    // (path, mtime, size), such as an unreadable file, can succeed now.
+    let reloads = 0
 
     const discover = Effect.fnUntraced(function* (directory: string, worktree: string) {
       const state: ScanState = { matches: new Set() }
@@ -307,6 +311,7 @@ export const layer = Layer.effect(
     const build = Effect.fnUntraced(function* (discovered: Discovered, previous?: Snapshot) {
       const entries = yield* Effect.forEach(discovered.matches, (match) => parse(match), { concurrency: 8 })
       const key = JSON.stringify([
+        reloads,
         discovered.bundledRoots,
         discovered.matches.map((match, index) => {
           const entry = entries[index]
@@ -436,6 +441,7 @@ export const layer = Layer.effect(
       yield* invalidateBuiltinRoot
       pulled.clear()
       parsed.clear()
+      reloads++
       yield* refresh()
     })
 

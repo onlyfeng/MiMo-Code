@@ -443,6 +443,29 @@ description: A skill in the .claude/skills directory.
     ),
   )
 
+  // FC-005: chmod changes neither mtime nor size, so the rebuilt snapshot's
+  // file signatures match the previous one. An explicit reload must still
+  // replace it with what the reparse found.
+  ;(process.platform === "win32" || process.getuid?.() === 0 ? it.live.skip : it.live)("reload recovers a SKILL.md that became readable without changing", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const file = path.join(dir, ".agents", "skills", "recovered", "SKILL.md")
+          yield* Effect.promise(() => Bun.write(file, "---\nname: recovered\ndescription: readable again\n---\n"))
+          yield* Effect.promise(() => fs.chmod(file, 0o000))
+          yield* Effect.addFinalizer(() => Effect.promise(() => fs.chmod(file, 0o644)))
+          const skill = yield* Skill.Service
+          yield* skill.refresh()
+          expect(yield* skill.get("recovered")).toBeUndefined()
+
+          yield* Effect.promise(() => fs.chmod(file, 0o644))
+          yield* skill.reload()
+          expect((yield* skill.get("recovered"))?.description).toBe("readable again")
+        }),
+      { git: true },
+    ),
+  )
+
   itGated.live("rescans global roots after the initiating caller is interrupted", () =>
     Effect.gen(function* () {
       const fixture = yield* stableScanFixture()
