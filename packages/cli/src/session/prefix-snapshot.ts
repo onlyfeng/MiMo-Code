@@ -7,8 +7,8 @@ import { Effect } from "effect"
 import { and, Database, eq } from "@/storage"
 import type { Permission } from "@/permission"
 import type { MessageID, SessionID } from "./schema"
-import type { SkillCatalogSnapshot } from "./skill-catalog"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
+import { stripLegacySkillCatalog } from "./skill-catalog"
 import { GitStatusPrompt } from "./git-status"
 import { Log } from "@/util"
 
@@ -133,7 +133,6 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
   loadedMcpTools: string[]
-  skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
 }) {
   const now = Date.now()
@@ -149,7 +148,6 @@ export const pin = Effect.fn("SessionPrefixSnapshot.pin")(function* (input: {
           tools_hash: input.toolsHash,
           tools: input.tools,
           loaded_mcp_tools: input.loadedMcpTools,
-          skill_catalog: input.skillCatalog,
           watermark_message_id: input.watermarkMessageID,
           revision: 1,
           created_at: now,
@@ -171,7 +169,6 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
   toolsHash: string
   tools: SessionPrefixToolSnapshot[]
   loadedMcpTools: string[]
-  skillCatalog?: SkillCatalogSnapshot
   watermarkMessageID: MessageID
 }) {
   const current = yield* get(input.sessionID, input.profileKey)
@@ -186,8 +183,6 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
           tools_hash: input.toolsHash,
           tools: input.tools,
           loaded_mcp_tools: input.loadedMcpTools,
-          // Older callers only rotate the prefix; retain its catalog metadata.
-          ...(input.skillCatalog ? { skill_catalog: input.skillCatalog } : {}),
           watermark_message_id: input.watermarkMessageID,
           revision: current.revision + 1,
           updated_at: Date.now(),
@@ -204,6 +199,92 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
   const snapshot = yield* get(input.sessionID, input.profileKey)
   if (!snapshot) return yield* Effect.die(new Error("Failed to read rotated session prefix snapshot"))
   return snapshot
+})
+
+/**
+ * Replace only the frozen system; tools and watermark stay as pinned. A stored
+ * schema-3 catalog record is cleared with it: it described the system-tail
+ * catalog that this replacement retires.
+ */
+export const replaceSystem = Effect.fn("SessionPrefixSnapshot.replaceSystem")(function* (input: {
+  sessionID: SessionID
+  profileKey: string
+  system: string[]
+}) {
+  yield* Effect.sync(() =>
+    Database.use((db) =>
+      db
+        .update(SessionPrefixSnapshotTable)
+        .set({
+          system: input.system,
+          system_hash: systemHash(input.system),
+          skill_catalog: null,
+          updated_at: Date.now(),
+        })
+        .where(
+          and(
+            eq(SessionPrefixSnapshotTable.session_id, input.sessionID),
+            eq(SessionPrefixSnapshotTable.profile_key, input.profileKey),
+          ),
+        )
+        .run(),
+    ),
+  )
+  const snapshot = yield* get(input.sessionID, input.profileKey)
+  if (!snapshot) return yield* Effect.die(new Error("Failed to read session prefix snapshot after system replace"))
+  return snapshot
+})
+
+// The engine's structured-output instruction, byte for byte as older fork
+// engines froze it. It is a historical recognizer, so it stays a literal.
+const LEGACY_STRUCTURED_OUTPUT =
+  "IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema."
+// As with catalog blocks, the separator buildSystemArray put before it goes too.
+const STALE_STRUCTURED_OUTPUT = new RegExp(
+  "(?:\\n\\n)?" + LEGACY_STRUCTURED_OUTPUT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  "g",
+)
+
+/**
+ * FC-005: a prefix pinned in JSON mode froze the structured-output instruction
+ * together with the StructuredOutput tool, and a tools-hash rotation rebuilds
+ * both. Older fork engines could separate them: a cold capture in JSON mode
+ * froze the instruction without the tool, and the retired system-tail catalog
+ * kept its range (instruction included) across tools-only rotations. Remove
+ * the instruction from a system whose own tools lack StructuredOutput, keeping
+ * as many leading copies as the host-supplied system contains.
+ */
+function stripStaleStructuredOutput(system: readonly string[], hostSystem = "") {
+  let keep = hostSystem.split(LEGACY_STRUCTURED_OUTPUT).length - 1
+  return system.map((part) => part.replace(STALE_STRUCTURED_OUTPUT, (match) => (keep-- > 0 ? match : "")))
+}
+
+/**
+ * The frozen prefix for a profile. Prefixes pinned while the skill catalog
+ * lived in the system tail still carry it; strip it once and persist the
+ * result, since the catalog now arrives as a user-turn reminder.
+ *
+ * FC-005: fork rows also lose a structured-output instruction their own tools
+ * no longer back, drop a system message the removal leaves blank (the retired
+ * catalog could be appended as its own message), and clear a stored schema-3
+ * record even when nothing was left to strip.
+ */
+export const getFrozen = Effect.fn("SessionPrefixSnapshot.getFrozen")(function* (input: {
+  sessionID: SessionID
+  profileKey: string
+  hostSystem?: string
+}) {
+  const frozen = yield* get(input.sessionID, input.profileKey)
+  if (!frozen) return frozen
+  const catalogFree = stripLegacySkillCatalog(frozen.system, input.hostSystem)
+  const stripped = frozen.tools?.some((tool) => tool.name === "StructuredOutput")
+    ? catalogFree
+    : stripStaleStructuredOutput(catalogFree, input.hostSystem)
+  const system = stripped.filter((part, index) => part.trim() || !frozen.system[index].trim())
+  const unchanged =
+    system.length === frozen.system.length && system.every((part, index) => part === frozen.system[index])
+  if (unchanged && !frozen.skill_catalog) return frozen
+  return yield* replaceSystem({ sessionID: input.sessionID, profileKey: input.profileKey, system })
 })
 
 export const advance = Effect.fn("SessionPrefixSnapshot.advance")(function* (input: {

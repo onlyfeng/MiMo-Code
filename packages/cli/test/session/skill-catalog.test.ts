@@ -1,9 +1,164 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import * as Catalog from "../../src/session/skill-catalog"
-import { MessageID } from "../../src/session/schema"
+import {
+  announcedSkillCatalog,
+  catalogState,
+  diffSkillCatalog,
+  isLegacySkillCatalogPart,
+  readSkillReminderMeta,
+  skillReminderRev,
+  stripLegacySkillCatalog,
+} from "../../src/session/skill-catalog"
+import { renderSkillCatalogReminder } from "../../src/session/skill-reminder"
 
-const body = "<available_skills>\n  <skill>\n    <name>workflow</name>\n    <description>A useful workflow</description>\n    <location>file:///skills/workflow/SKILL.md</location>\n  </skill>\n</available_skills>"
+const skill = (name: string, description = `${name} description`) => ({
+  name,
+  description,
+  location: `/tmp/example/skills/${name}/SKILL.md`,
+})
+
+describe("skill catalog diff", () => {
+  test("first catalog is a full entry; an empty catalog announces nothing", () => {
+    expect(diffSkillCatalog({ announced: undefined, current: [] })).toBeUndefined()
+    const change = diffSkillCatalog({ announced: undefined, current: [skill("zeta"), skill("alpha")] })
+    expect(change?.kind).toBe("entry")
+    if (change?.kind !== "entry") throw new Error("expected entry")
+    expect(change.skills.map((item) => item.name)).toEqual(["alpha", "zeta"])
+    expect(Object.keys(change.meta.skills)).toEqual(["alpha", "zeta"])
+    const text = renderSkillCatalogReminder(change)
+    expect(text.startsWith("<system-reminder>\n")).toBe(true)
+    expect(text.endsWith("\n</system-reminder>")).toBe(true)
+    expect(text.indexOf("<name>alpha</name>")).toBeLessThan(text.indexOf("<name>zeta</name>"))
+  })
+
+  test("unchanged catalog announces nothing", () => {
+    const current = [skill("alpha"), skill("beta")]
+    expect(diffSkillCatalog({ announced: catalogState(current), current })).toBeUndefined()
+  })
+
+  test("delta carries added and changed skills in full and removed skills by name", () => {
+    const announced = catalogState([skill("alpha"), skill("beta"), skill("gone")])
+    const change = diffSkillCatalog({
+      announced,
+      current: [skill("alpha"), skill("beta", "edited"), skill("new")],
+    })
+    expect(change?.kind).toBe("delta")
+    if (change?.kind !== "delta") throw new Error("expected delta")
+    expect(change.changed.map((item) => item.name)).toEqual(["beta", "new"])
+    expect(change.removed).toEqual(["gone"])
+    expect(Object.keys(change.meta.skills)).toEqual(["alpha", "beta", "new"])
+    const text = renderSkillCatalogReminder(change)
+    expect(text).toContain("<name>beta</name>")
+    expect(text).toContain("<description>edited</description>")
+    expect(text).not.toContain("<name>alpha</name>")
+    expect(text).toContain("Removed skills (no longer available; do not load or follow them): gone")
+  })
+
+  test("removing every skill retracts the whole announced catalog", () => {
+    const change = diffSkillCatalog({ announced: catalogState([skill("alpha")]), current: [] })
+    expect(change).toMatchObject({ kind: "delta", changed: [], removed: ["alpha"], meta: { skills: {} } })
+  })
+
+  test("a moved skill counts as changed", () => {
+    const moved = { ...skill("alpha"), location: "/tmp/example/other/alpha/SKILL.md" }
+    const change = diffSkillCatalog({ announced: catalogState([skill("alpha")]), current: [moved] })
+    expect(change?.kind).toBe("delta")
+  })
+
+  test("rev identifies the resulting catalog state", () => {
+    const state = catalogState([skill("alpha")])
+    expect(skillReminderRev({ kind: "entry", skills: state })).toMatch(/^skills:entry:[0-9a-f]{64}$/)
+    expect(skillReminderRev({ kind: "entry", skills: state })).toBe(skillReminderRev({ kind: "entry", skills: { ...state } }))
+    expect(skillReminderRev({ kind: "delta", skills: state })).not.toBe(skillReminderRev({ kind: "entry", skills: state }))
+  })
+})
+
+describe("announced skill catalog state", () => {
+  const user = (...metas: Record<string, unknown>[]) => ({
+    info: { role: "user" },
+    parts: metas.map((meta) => ({ type: "text", synthetic: true, metadata: { skillReminder: meta } })),
+  })
+  const entry = { kind: "entry", skills: { alpha: "a1", beta: "b1" } }
+  const delta = { kind: "delta", skills: { alpha: "a1", beta: "b2" } }
+
+  test("an entry followed by deltas yields the latest state", () => {
+    expect(announcedSkillCatalog([user(entry), user(delta)])).toEqual(delta.skills)
+  })
+
+  test("a delta without an entry in the window is not trusted", () => {
+    // Overflow compaction can replay a user turn holding only a delta past
+    // the boundary; its text lists just the changed skills.
+    expect(announcedSkillCatalog([user(delta)])).toBeUndefined()
+    const change = diffSkillCatalog({
+      announced: announcedSkillCatalog([user(delta)]),
+      current: [skill("alpha"), skill("beta")],
+    })
+    expect(change?.kind).toBe("entry")
+  })
+
+  test("ignored, non-synthetic and assistant parts do not count", () => {
+    expect(
+      announcedSkillCatalog([
+        { info: { role: "user" }, parts: [{ type: "text", synthetic: true, ignored: true, metadata: { skillReminder: entry } }] },
+        { info: { role: "user" }, parts: [{ type: "text", metadata: { skillReminder: entry } }] },
+        { info: { role: "assistant" }, parts: [{ type: "text", synthetic: true, metadata: { skillReminder: entry } }] },
+      ]),
+    ).toBeUndefined()
+  })
+})
+
+describe("skill reminder metadata", () => {
+  test("reads well-formed metadata and rejects anything else", () => {
+    expect(readSkillReminderMeta({ kind: "delta", skills: { a: "x" } })).toEqual({ kind: "delta", skills: { a: "x" } })
+    expect(readSkillReminderMeta(undefined)).toBeUndefined()
+    expect(readSkillReminderMeta({ kind: "other", skills: {} })).toBeUndefined()
+    expect(readSkillReminderMeta({ kind: "entry", skills: { a: 1 } })).toBeUndefined()
+  })
+
+  test("legacy user-side catalogs are untagged synthetic generated catalogs", () => {
+    const text = "<system-reminder>\nSkills available in this session:\nNo skills are currently available.\n</system-reminder>"
+    expect(isLegacySkillCatalogPart({ synthetic: true, text })).toBe(true)
+    expect(isLegacySkillCatalogPart({ synthetic: false, text })).toBe(false)
+    expect(isLegacySkillCatalogPart({ synthetic: true, text, metadata: { skillReminder: { kind: "entry", skills: {} } } })).toBe(false)
+    // FC-005: the marker alone does not prove generated catalog content.
+    expect(isLegacySkillCatalogPart({ synthetic: true, text: "<system-reminder>\nSkills available in this session:\n</system-reminder>" })).toBe(false)
+  })
+})
+
+describe("legacy system catalog strip", () => {
+  test("removes the verbose catalog block and its separator", () => {
+    const system = [
+      [
+        "base prompt",
+        "Skills available in this session:\n<available_skills>\n  <skill>\n    <name>a</name>\n  </skill>\n</available_skills>",
+        "instructions",
+      ].join("\n\n"),
+    ]
+    expect(stripLegacySkillCatalog(system)).toEqual(["base prompt\n\ninstructions"])
+  })
+
+  test("removes the empty-catalog sentence", () => {
+    expect(stripLegacySkillCatalog(["base\n\nSkills available in this session:\nNo skills are currently available."]))
+      .toEqual(["base"])
+  })
+
+  test("keeps a block the host system contains and still strips the engine block", () => {
+    const block = "Skills available in this session:\nNo skills are currently available."
+    const host = `host prompt\n\n${block}`
+    expect(stripLegacySkillCatalog([`${host}\n\nmiddle\n\n${block}`], host)).toEqual([`${host}\n\nmiddle`])
+  })
+
+  test("leaves systems without a catalog unchanged", () => {
+    const system = ["base prompt\n\ninstructions"]
+    expect(stripLegacySkillCatalog(system)).toEqual(system)
+  })
+})
+
+// FC-005: history written by older engines stays recognizable after the
+// catalog moved to user-turn reminders, so it is dropped from model input
+// without dropping quotations or loaded skill bodies.
+const body = "<available_skills>\n  <skill>\n    <name>workflow</name>\n    <description>A useful workflow</description>\n    <location>file:///tmp/example/skills/workflow/SKILL.md</location>\n  </skill>\n</available_skills>"
 const catalog = `Skills available in this session:\n${body}`
 const wrap = (text: string) => `<system-reminder>\n${text}\n</system-reminder>`
 const intro = "Skills provide specialized instructions and workflows for specific tasks."
@@ -19,19 +174,7 @@ const search = [
 const v2 = wrap(`Authoritative skills catalog snapshot v2:\nWhen multiple snapshots exist, the last one is authoritative.\n${catalog}`)
 const metadata = { skillCatalog: { schema: 2, version: createHash("sha256").update(catalog).digest("hex") } }
 
-describe("system tail skill catalog", () => {
-  test("captures canonical text and an explicit empty catalog with stable content versions", () => {
-    const turnID = MessageID.make("turn")
-    expect(Catalog.captureSkillCatalog(`  ${catalog.replaceAll("\n", "\r\n")}  `, turnID)).toEqual({
-      schema: 3, text: catalog, version: metadata.skillCatalog.version, turnID,
-    })
-    expect(Catalog.captureSkillCatalog(undefined, turnID)).toEqual({
-      schema: 3, text: "", version: createHash("sha256").update("").digest("hex"), turnID,
-    })
-    expect(Catalog.captureSkillCatalog("", turnID)).toEqual(Catalog.captureSkillCatalog(undefined, turnID))
-    expect(Catalog.captureSkillCatalog(catalog, MessageID.make("next")).version).toBe(metadata.skillCatalog.version)
-  })
-
+describe("historical skill catalog recognition", () => {
   test.each([
     ["v2", v2, metadata],
     ["single marker", wrap(catalog), undefined],
@@ -39,14 +182,18 @@ describe("system tail skill catalog", () => {
     ["historical load intro", wrap(`Skills available in this session:\n${intro}\n${load}\n${body}`), undefined],
     ["historical search intro", wrap(`Skills available in this session:\n${search}\n${body}`), undefined],
     ["empty catalog", wrap("Skills available in this session:\nNo skills are currently available."), undefined],
-  ])("recognizes actual generated %s", (_name, text, metadata) => {
-    expect(Catalog.isGeneratedSkillCatalog({ type: "text", text, synthetic: true, metadata })).toBe(true)
+  ])("drops actual generated %s", (_name, text, metadata) => {
+    expect(Catalog.isLegacySkillCatalogPart({ type: "text", text, synthetic: true, metadata })).toBe(true)
   })
 
   test.each([
-    ["missing metadata", v2, undefined],
-    ["wrong hash", v2, { skillCatalog: { schema: 2, version: "0".repeat(64) } }],
-    ["wrong schema", v2, { skillCatalog: { ...metadata.skillCatalog, schema: 3 } }],
+    ["v2 without metadata", v2, undefined],
+    ["v2 with a stale hash", v2, { skillCatalog: { schema: 2, version: "0".repeat(64) } }],
+  ])("drops an engine-generated %s", (_name, text, metadata) => {
+    expect(Catalog.isLegacySkillCatalogPart({ type: "text", text, synthetic: true, metadata })).toBe(true)
+  })
+
+  test.each([
     ["malformed catalog metadata", wrap(catalog), { skillCatalog: {} }],
     ["ordinary reference", `Quoted: ${wrap(catalog)}`, undefined],
     ["synthetic narrative", wrap("Skills available in this session:\nKeep this human-authored note"), undefined],
@@ -54,8 +201,8 @@ describe("system tail skill catalog", () => {
     ["loaded body nested in wrapper", wrap(`Skills available in this session:\n<skill_content>${body}</skill_content>`), undefined],
     ["changed search intro", wrap(`Skills available in this session:\n${search.replace("BM25", "other")}\n${body}`), undefined],
     ["trailing narrative", `${wrap(catalog)}\nUser note`, undefined],
-  ])("retains unproven %s", (_name, text, metadata) => {
-    expect(Catalog.isGeneratedSkillCatalog({ type: "text", text, synthetic: true, metadata })).toBe(false)
+  ])("keeps unproven %s", (_name, text, metadata) => {
+    expect(Catalog.isLegacySkillCatalogPart({ type: "text", text, synthetic: true, metadata })).toBe(false)
   })
 
   test("authenticated v2 catalogs may describe skill_content syntax", () => {
@@ -65,124 +212,21 @@ describe("system tail skill catalog", () => {
       text: wrap(`Authoritative skills catalog snapshot v2:\nWhen multiple snapshots exist, the last one is authoritative.\n${text}`),
       metadata: { skillCatalog: { schema: 2, version: createHash("sha256").update(text).digest("hex") } },
     }
-    expect(Catalog.isGeneratedSkillCatalog(part)).toBe(true)
-    expect(Catalog.isGeneratedSkillCatalog({ ...part, metadata: undefined })).toBe(false)
-    expect(Catalog.isGeneratedSkillCatalog({ ...part, text: wrap(text), metadata: undefined })).toBe(false)
+    expect(Catalog.isLegacySkillCatalogPart(part)).toBe(true)
+    // Without the authenticating metadata a described <skill_content> could be
+    // a loaded body, so it is kept.
+    expect(Catalog.isLegacySkillCatalogPart({ ...part, metadata: undefined })).toBe(false)
+    expect(Catalog.isLegacySkillCatalogPart({ ...part, text: wrap(text), metadata: undefined })).toBe(false)
   })
 
-  test("never identifies ordinary user text or tool output as a generated directory", () => {
-    expect(Catalog.isGeneratedSkillCatalog({ type: "text", text: v2, metadata })).toBe(false)
-    expect(Catalog.isGeneratedSkillCatalog({ type: "tool", text: v2, synthetic: true, metadata })).toBe(false)
+  test("never identifies ordinary user text or tool output as a generated catalog", () => {
+    // Not synthetic: a user may quote anything.
+    expect(Catalog.isLegacySkillCatalogPart({ type: "text", text: v2, metadata })).toBe(false)
+    expect(Catalog.isLegacySkillCatalogPart({ type: "tool", text: v2, synthetic: true, metadata })).toBe(false)
   })
-})
 
-describe("frozen catalog slot", () => {
-  const turn = MessageID.make("slot-turn")
-  test("materializes one token and refreshes only the recorded range including empty catalogs", () => {
-    const old = Catalog.captureSkillCatalog("old catalog", turn)
-    const token = Catalog.newSkillCatalogSlot()
-    const bound = Catalog.bindSkillCatalog([`ENV\n${token}\nFORMAT\nINSTRUCTIONS\nPLUGIN`], old, token)
-    expect(bound.system).toEqual(["ENV\nold catalog\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
-    expect(bound.catalog.version).toBe(old.version)
-    const empty = Catalog.refreshFrozenSkillCatalog(bound.system, bound.catalog, Catalog.captureSkillCatalog("", turn))
-    expect(empty.system).toEqual(["ENV\n\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
-    const next = Catalog.refreshFrozenSkillCatalog(
-      empty.system,
-      empty.catalog,
-      Catalog.captureSkillCatalog("new", turn),
-    )
-    expect(next.system).toEqual(["ENV\nnew\nFORMAT\nINSTRUCTIONS\nPLUGIN"])
+  test("a tagged reminder is delivered even when it matches a historical shape", () => {
+    const tagged = { skillReminder: { kind: "entry", skills: { workflow: "0123456789abcdef" } } }
+    expect(Catalog.isLegacySkillCatalogPart({ type: "text", text: wrap(catalog), synthetic: true, metadata: tagged })).toBe(false)
   })
-  test("rejects removed or duplicated producer tokens before materializing metadata", () => {
-    const token = Catalog.newSkillCatalogSlot()
-    const value = Catalog.captureSkillCatalog("catalog", turn)
-    expect(() => Catalog.bindSkillCatalog(["removed"], value, token)).toThrow()
-    expect(() => Catalog.bindSkillCatalog([token, token], value, token)).toThrow()
-  })
-  test("migrates unique old schema3 text and legacy empty slots without touching other bytes", () => {
-    const old = Catalog.captureSkillCatalog("old", turn)
-    const next = Catalog.captureSkillCatalog("new", turn)
-    expect(Catalog.refreshFrozenSkillCatalog(["ENV old PLUGIN"], old, next).system).toEqual(["ENV new PLUGIN"])
-    expect(Catalog.refreshFrozenSkillCatalog(["LEGACY ENV"], undefined, next).system).toEqual(["LEGACY ENV", "new"])
-    expect(
-      Catalog.refreshFrozenSkillCatalog(["EMPTY ENV"], Catalog.captureSkillCatalog("", turn), next).system,
-    ).toEqual(["EMPTY ENV", "new"])
-  })
-  test("empty legacy migration never introduces an empty system message", () => {
-    const next = Catalog.captureSkillCatalog("", MessageID.make("empty-next"))
-    for (const system of [[], ["FROZEN ENV"]]) {
-      for (const old of [undefined, Catalog.captureSkillCatalog("", turn)]) {
-        const result = Catalog.refreshFrozenSkillCatalog(system, old, next)
-        expect(result.system).toEqual(system)
-        expect(result.catalog).toEqual(next)
-      }
-    }
-  })
-  test("removes only a catalog-only message when its catalog becomes empty", () => {
-    const old = Catalog.captureSkillCatalog("old", turn)
-    const next = Catalog.captureSkillCatalog("", MessageID.make("empty-next"))
-    const standalone = Catalog.refreshFrozenSkillCatalog(
-      ["ENV", "old", "PLUGIN"],
-      { ...old, systemSlot: { message: 1, offset: 0 } },
-      next,
-    )
-    expect(standalone.system).toEqual(["ENV", "PLUGIN"])
-    expect(standalone.catalog).toEqual(next)
-    const restored = Catalog.refreshFrozenSkillCatalog(
-      standalone.system,
-      standalone.catalog,
-      Catalog.captureSkillCatalog("new", turn),
-    )
-    expect(restored.system).toEqual(["ENV", "PLUGIN", "new"])
-    const embedded = Catalog.refreshFrozenSkillCatalog(
-      ["ENV old PLUGIN"],
-      { ...old, systemSlot: { message: 0, offset: 4 } },
-      next,
-    )
-    expect(embedded.system).toEqual(["ENV  PLUGIN"])
-    const token = Catalog.newSkillCatalogSlot()
-    const cold = Catalog.bindSkillCatalog(["ENV", token, "PLUGIN"], next, token)
-    expect(cold.system).toEqual(["ENV", "PLUGIN"])
-    expect(cold.catalog).toEqual(next)
-  })
-  test("ambiguous legacy matches and invalid persisted slots preserve the old pair", () => {
-    const old = Catalog.captureSkillCatalog("old", turn)
-    const next = Catalog.captureSkillCatalog("new", MessageID.make("next-turn"))
-    const ambiguous = Catalog.refreshFrozenSkillCatalog(["old old"], old, next)
-    expect(ambiguous.system).toEqual(["old old"])
-    expect(ambiguous.catalog).toEqual(old)
-    expect(ambiguous.reason).toBeDefined()
-    const invalid = { ...old, systemSlot: { message: 0, offset: 1 } }
-    const result = Catalog.refreshFrozenSkillCatalog(["old"], invalid, next)
-    expect(result.catalog).toEqual(invalid)
-    expect(result.system).toEqual(["old"])
-    expect(result.reason).toBeDefined()
-  })
-})
-
-
-test("managed format changes preserve frozen instructions and the catalog content version", () => {
-  const value = Catalog.captureSkillCatalog("directory", MessageID.make("format-turn"))
-  const token = Catalog.newSkillCatalogSlot()
-  const bound = Catalog.bindSkillCatalog([`ENV\n${token}\nINSTRUCTIONS`], value, token, "JSON FORMAT\n\n")
-  expect(bound.system).toEqual(["ENV\nJSON FORMAT\n\ndirectory\nINSTRUCTIONS"])
-  const plain = Catalog.refreshFrozenSkillCatalog(bound.system, bound.catalog, bound.catalog, { formatPrefix: "" })
-  expect(plain.system).toEqual(["ENV\ndirectory\nINSTRUCTIONS"])
-  expect(plain.catalog?.version).toBe(value.version)
-  const again = Catalog.refreshFrozenSkillCatalog(plain.system, plain.catalog, plain.catalog, { formatPrefix: "JSON FORMAT\n\n" })
-  expect(again.system).toEqual(bound.system)
-})
-
-test("legacy format provenance moves only the generated adjacent range", () => {
-  const old = Catalog.captureSkillCatalog("old", MessageID.make("old-format"))
-  const next = Catalog.captureSkillCatalog("new", MessageID.make("new-format"))
-  const system = ["ENV\nJSON FORMAT\n\nold\nINSTRUCTIONS"]
-  const result = Catalog.refreshFrozenSkillCatalog(system, { ...old, systemSlot: { message: 0, offset: 17 } }, next, {
-    formatPrefix: "", legacyFormatPrefix: "JSON FORMAT\n\n",
-  })
-  expect(result.system).toEqual(["ENV\nnew\nINSTRUCTIONS"])
-  const legacy = Catalog.refreshFrozenSkillCatalog(["ENV\nJSON FORMAT\n\nINSTRUCTIONS"], undefined, next, {
-    formatPrefix: "", legacyFormatPrefix: "JSON FORMAT\n\n",
-  })
-  expect(legacy.system).toEqual(["ENV\nnew\n\nINSTRUCTIONS"])
 })

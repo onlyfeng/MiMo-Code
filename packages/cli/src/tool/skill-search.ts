@@ -44,11 +44,17 @@ export const SkillSearchTool = Tool.define(
             })
           )
             throw new Error("Skill search tool is not available in this context.")
-          const available = yield* skill.modelInvocable({
-            ...agent,
-            permission,
+          // A miss may come from a skill created since this turn's rescan: rescan
+          // once before reporting no match. The set stays permission-filtered.
+          const search = Effect.fnUntraced(function* () {
+            return searchSkills(params.query, yield* skill.modelInvocable({ ...agent, permission }))
           })
-          const results = searchSkills(params.query, available)
+          let results = yield* search()
+          if (results.length === 0) {
+            yield* skill.refresh()
+            results = yield* search()
+          }
+          const available = yield* skill.modelInvocable({ ...agent, permission })
           if (results.length === 0) {
             return {
               title: "No matching skill",

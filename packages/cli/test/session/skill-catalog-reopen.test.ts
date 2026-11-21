@@ -8,7 +8,7 @@ import { isWindowReminder } from "../lib/reminder"
 const OLD = "CATALOG_BEFORE_PROCESS_EXIT_38c9"
 const NEW = "CATALOG_AFTER_PROCESS_REOPEN_a473"
 
-test("two non-test processes preserve the same user frozen catalog and refresh only on a new direct turn", async () => {
+test("two non-test processes keep one frozen system and announce a reopened skill change as a user-turn delta", async () => {
   await using tmp = await tmpdir({ git: true })
   const requests: { messages?: { role: string; content: unknown }[] }[] = []
   const server = Bun.serve({
@@ -145,10 +145,9 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
     await writeSkill(OLD)
     const first = await run("first")
     expect(requests).toHaveLength(0)
-    expect(first.captured.row.skill_catalog).toMatchObject({ schema: 3, turnID: first.userID })
-    expect(first.captured.row.skill_catalog.systemSlot).toBeDefined()
-    expect(first.captured.system.join("\n")).not.toContain("<mimocode-catalog-slot-")
-    expect(first.captured.system.join("\n")).toContain(OLD)
+    // The catalog is no longer frozen into the system prefix.
+    expect(first.captured.row.skill_catalog).toBeNull()
+    expect(first.captured.system.join("\n")).not.toContain(OLD)
     expect(
       first.captured.row.tools.find((tool: { name: string }) => tool.name === "actor").native_input_schema,
     ).toBeDefined()
@@ -158,12 +157,16 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
     expect(reopened.before.find((message: { info: { role: string } }) => message.info.role === "user").info.id).toBe(
       first.userID,
     )
+    // A restarted process reuses the same frozen prefix and native tool pair.
     expect(reopened.captured).toEqual(first.captured)
-    expect(reopened.captured.system.join("\n")).not.toContain(NEW)
+    expect(reopened.row.system).toEqual(first.captured.row.system)
+    expect(reopened.row.skill_catalog).toBeNull()
     // The first user was never sent, so it carries the context window's
-    // reminders; the catalog refresh must not touch any other part.
+    // reminders; announcing the catalog must not touch any other part.
     const isDirReminder = (part: { type: string; text?: string }) =>
       part.type === "text" && !!part.text?.includes(SESSION_MEMORY_DIR_MARKER)
+    const isSkillReminder = (part: { type: string; metadata?: Record<string, unknown> }) =>
+      part.type === "text" && !!part.metadata?.skillReminder
     const firstAfter: MessageV2.Part[] = reopened.after.find(
       (message: { info: { id: string } }) => message.info.id === first.userID,
     ).parts
@@ -171,16 +174,17 @@ test("two non-test processes preserve the same user frozen catalog and refresh o
       reopened.before.find((message: { info: { id: string } }) => message.info.id === first.userID).parts,
     )
     expect(firstAfter.filter(isDirReminder)).toHaveLength(1)
-    expect(reopened.row.skill_catalog.version).not.toBe(first.captured.row.skill_catalog.version)
-    expect(reopened.row.skill_catalog.turnID).not.toBe(first.userID)
-    expect(reopened.row.skill_catalog.text).toContain(NEW)
-    expect(reopened.row.skill_catalog.text).not.toContain(OLD)
     expect(reopened.response.info.finish).toBe("stop")
     expect(requests).toHaveLength(1)
     const system = JSON.stringify(requests[0].messages?.filter((message) => message.role === "system"))
-    expect(system).toContain(NEW)
+    expect(system).not.toContain(NEW)
     expect(system).not.toContain(OLD)
-    expect(JSON.stringify(requests[0].messages?.filter((message) => message.role === "user"))).not.toContain(NEW)
+    // The live catalog arrives once, on the user side, with the reopened description.
+    const users = JSON.stringify(requests[0].messages?.filter((message) => message.role === "user"))
+    expect(users).toContain(NEW)
+    expect(users).not.toContain(OLD)
+    const announced = reopened.after.flatMap((message: MessageV2.WithParts) => message.parts).filter(isSkillReminder)
+    expect(announced).toHaveLength(1)
   } finally {
     server.stop(true)
   }
