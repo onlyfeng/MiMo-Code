@@ -1327,7 +1327,10 @@ own source list remains the complete watch surface.
   first assistant step. Each context window receives one full entry followed
   by deltas for added, changed and removed skills; unchanged states emit
   nothing. Full-context writers inherit announced metadata without a second
-  entry; compaction starts a new announcement window. Loaded skill bodies stay
+  entry; compaction starts a new announcement window. A delta counts as
+  announced only on top of an entry in the same window, so a user turn that
+  overflow compaction replays with only its delta gets a full entry again
+  rather than leaving unchanged skills invisible. Loaded skill bodies stay
   in existing messages/tool results.
   Discovery refreshes at user-turn boundaries, command lookup/listing, the
   skill route and tool misses. Stat-keyed parsing reuses unchanged files.
@@ -1348,7 +1351,9 @@ own source list remains the complete watch surface.
   rewritten, quotations and loaded `<skill_content>` survive.
 - Upstream relationship: adopts live scan and reminder/delta placement; retains
   stronger shared authorization, producer lifetime, historical recognition and
-  schema-3 managed-range compatibility. The old system-tail POLICY-04 selection
+  schema-3 managed-range compatibility. Deviates from upstream's replay rule,
+  which accepts any reminder metadata as announced state, by requiring an
+  entry in the window before a delta counts. The old system-tail POLICY-04 selection
   is historical, superseded by this synchronization.
 - Watch surfaces: `packages/cli/src/skill/index.ts`,
   `packages/cli/src/skill/search-access.ts`,
@@ -1376,7 +1381,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `cac9eecddb4c8b2e302eee52688e475e587d8e60` (pull request #263).
+  main behavior `a99333128562389148af961df0ad70e4566b699b` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that

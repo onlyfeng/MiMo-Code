@@ -10,10 +10,11 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime tip is `cac9eecddb4c8b2e302eee52688e475e587d8e60`: the merge of
-upstream, the fallback correction for ambiguous schema-3 positions, and two
-review fixes that keep the structured-output instruction out of frozen
-prefixes, both new and historical. The `dev/compat` propagation is recorded in the same file on that
+The runtime tip is `a99333128562389148af961df0ad70e4566b699b`: the merge of
+upstream, the fallback correction for ambiguous schema-3 positions, and three
+review fixes: two keep the structured-output instruction out of frozen
+prefixes, new and historical, and one anchors catalog delta replay on an
+entry. The `dev/compat` propagation is recorded in the same file on that
 branch.
 
 ## Capability inventory and results (1)
@@ -105,7 +106,7 @@ Catalog and skill surface, all passing:
 | `test/skill/skill-external-roots.test.ts` | 7 pass |
 | `test/tool/skill.test.ts` | 5 pass |
 | `test/tool/skill-search.test.ts` | 6 pass |
-| `test/session/skill-catalog.test.ts` | 35 pass |
+| `test/session/skill-catalog.test.ts` | 38 pass |
 | `test/session/skill-catalog-capture.test.ts` | 3 pass |
 | `test/session/skill-catalog-frozen-refresh.test.ts` | 2 pass |
 | `test/session/skill-catalog-reopen.test.ts` | 1 pass |
@@ -153,9 +154,10 @@ Compaction and checkpoint, all passing: `compaction-agent-scope` 3,
   `test/session/checkpoint-splitover-integration.test.ts` failed only in the
   first sweep under the 5-second default timeout and pass on this change with
   `--timeout 120000`; the baseline behaves identically.
-- `test/session/prompt-effect.test.ts`: 209 pass, 4 fail on this change;
-  `origin/main` reports 208 pass, 4 fail with the same four names (the extra
-  pass is upstream's new compaction catalog test). The four are "uses the
+- `test/session/prompt-effect.test.ts`: 210 pass, 4 fail on this change;
+  `origin/main` reports 208 pass, 4 fail with the same four names (the two
+  extra passes are upstream's new compaction catalog test and the fork's
+  overflow-replay delta test). The four are "uses the
   frozen system and appends the compaction prompt to the existing conversation
   with auto", "frozen hidden tools execute matching schemas through exec and
   direct dispatch", "frozen hidden tools reject changed schemas through exec
@@ -187,7 +189,8 @@ reproductions; the recorded results come from a clean reinstall.
 ## Review follow-up
 
 The automated review on the pull request reported one finding against
-`71cf0272` and one against `06bf5a2c`. Both were confirmed and fixed:
+`71cf0272` and one against `06bf5a2c`, both in fork code. Both were confirmed
+and fixed:
 
 - **Structured-output instruction frozen by a cold capture.** The instruction
   was still part of `currentAdditions`, which supplies the system tail only
@@ -218,7 +221,24 @@ The automated review on the pull request reported one finding against
   the pre-catalog bytes, and each fails when the old behavior is restored.
   Fixed in `cac9eecd`.
 
-After both fixes, `packages/cli` typecheck passes and root lint reports 0
+A third finding, against `9fc21241`, concerns behavior adopted unchanged from
+upstream. It was confirmed and fixed as a fork deviation:
+
+- **Catalog delta trusted without its entry after overflow replay.**
+  Overflow compaction replays the latest user turn past the boundary with its
+  parts and metadata, leaving the earlier entry behind. A delta's metadata
+  records the whole resulting catalog state, but its text lists only the
+  changed and removed skills. The window therefore believed every skill was
+  announced, reported no change on later turns, and unchanged skills stayed
+  invisible to the model. `announcedSkillCatalog` now accepts a delta only on
+  top of an entry in the same window, so this case announces a full entry
+  again. `skill-catalog.test.ts` covers the rule. `prompt-effect.test.ts`
+  ("re-announces a full skill catalog when overflow replay carries only a
+  delta") reproduces the compaction path end to end. Both fail when the old
+  rule is restored. The upstream spec `docs/compose/spec/skill-catalog-live.md`
+  is kept verbatim; FC-005 records the deviation.
+
+After these fixes, `packages/cli` typecheck passes and root lint reports 0
 errors.
 
 ## Publication and CI
