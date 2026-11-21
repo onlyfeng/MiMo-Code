@@ -18,8 +18,8 @@ text plus the builtin producer, return prefix rotation and the
 structured-output instruction to upstream's rule with a read-time cleanup of
 fork-written prefixes, rebuild the skill snapshot on an explicit reload, and
 announce MCP prompt commands that settle after the listing. The earlier review fixes `b922a551` and `cac9eecd` are
-superseded by that last change. The `dev/compat` propagation is recorded in the same file on that
-branch.
+superseded by that last change. The `dev/compat` propagation is recorded in
+[the 2026-11-22 record](upstream-sync-2026-11-22.md).
 
 ## Capability inventory and results (1)
 

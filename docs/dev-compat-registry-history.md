@@ -5646,3 +5646,17 @@ This superseded current-review block is retained as history. Current C01–C10 p
 ## 2026-11-18 memory test isolation
 
 Compat `c813b0f05988b9cdb9d291d10ea29f17ae673eeb` inherits main `51c508648582e50274ce7f46eb6464fc73ce2858` for upstream `53e481145a6abedae20346ad2cdccdaee299a699`. C01 changes the test fixture and guidance. The compat preload and all eleven owner contracts are preserved. Local checks pass and GitHub Actions dispatch remains blocked. See [the synchronization record](upstream-sync-2026-11-18.md).
+
+## 2026-11-19 media readers and credential metadata
+
+- Last reviewed: 2026-11-19. Audited `53e481145a6abedae20346ad2cdccdaee299a699..75e1ed0b3b6561796bdfeb36edcf091f9793f24d`.
+
+- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-19.md).
+
+- Starting main: `14af2d4cf623357c42c2c268b19c5b03dec12fdb`. Starting compat: `938df325fb90b768941900b7b7eaf0ff260702b5`. Main runtime snapshot: `1d0a9ee8c93c5a723aee4740a4c104fd3ef7e574`. Compat runtime snapshot: `9771c91853c8650402eac6631ddf4b57a5927f51`.
+
+- Result: inherit the media readers, type labels and credential metadata handling. The registry keeps compat native search exposure. Request preflight keeps the pixel-based image estimate and preserves active-turn images in the recovery floor. The TUI keeps its provider, model and variant display.
+
+- Validation: CLI typecheck, lint and the focused media, prompt, auth, native search and preflight matrices pass with the Windows fixture exceptions recorded in the shared review. GitHub rejected lint, typecheck and test dispatches with HTTP 422, including the test dispatch requesting Windows runtime.
+
+This superseded current-review block is retained as history. The 2026-11-22 propagation of `main` pull request #263 and upstream `2c76c13c` is recorded in [the shared sync record](upstream-sync-2026-11-22.md); compat runtime/test snapshot `671bb78490a76405f8213fc8724bb596a74f2695`.

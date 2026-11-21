@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-21
-- Upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
-- Prior reviewed upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
-- Review completion: main integration adopts live skill scanning, user-turn catalog deltas and upstream's prefix rotation (the structured-output instruction enters and leaves the frozen system with its tool), with FC-005 permission, historical compatibility, read-time cleanup of fork-written prefixes and entry-anchored delta replay. Proposed as pull request #263; CI cannot run because GitHub Actions is disabled for the repository. Compat propagation follows after the pull request lands. See [the synchronization record](upstream-sync-2026-11-21.md).
-- Main behavior (runtime/tests): `d6604ceef828ef6c9ae30536933517a13b46eb8f` (pull request #263)
-- Inherited compat behavior: `9771c91853c8650402eac6631ddf4b57a5927f51`
+- Last reviewed: 2026-11-22
+- Upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`
+- Prior reviewed upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
+- Review completion: `main` adopts the opt-in brief view of the global session list (C02); C01, the live skill catalog, landed through pull request #263 and now also reaches `dev/compat`. No FD changes. GitHub Actions HTTP 422 blocks exact-SHA CI. See [the synchronization record](upstream-sync-2026-11-22.md).
+- Main behavior (runtime/tests): `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`
+- Inherited compat behavior: `671bb78490a76405f8213fc8724bb596a74f2695`
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `4b5dbb976b763f420ac6d34ea0284dda26362cf4`. Inherited compat behavior above is unchanged by this local `main` integration
+- Prior fork `main` tip: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Prior fork `dev/compat` tip: `7723f83da65184447892c4c81a1171e8ad4e5008`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-21 live skill catalog update](upstream-sync-2026-11-21.md), C01 (N=1).
+Latest reviewed synchronization is the [2026-11-22 brief session list and compat catalog propagation](upstream-sync-2026-11-22.md), C01–C02 (N=2).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 

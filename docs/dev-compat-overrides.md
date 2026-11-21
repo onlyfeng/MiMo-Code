@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-19. Audited `53e481145a6abedae20346ad2cdccdaee299a699..75e1ed0b3b6561796bdfeb36edcf091f9793f24d`.
+- Last reviewed: 2026-11-22. Audited `75e1ed0b3b6561796bdfeb36edcf091f9793f24d..2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`: upstream `128adcb7` through `main` pull request #263 and `2c76c13c` through this synchronization.
 
-- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-19.md).
+- Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-22.md).
 
-- Starting main: `14af2d4cf623357c42c2c268b19c5b03dec12fdb`. Starting compat: `938df325fb90b768941900b7b7eaf0ff260702b5`. Main runtime snapshot: `1d0a9ee8c93c5a723aee4740a4c104fd3ef7e574`. Compat runtime snapshot: `9771c91853c8650402eac6631ddf4b57a5927f51`.
+- Starting main: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Starting compat: `7723f83da65184447892c4c81a1171e8ad4e5008`. Main runtime snapshot: `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`. Compat runtime snapshot: `671bb78490a76405f8213fc8724bb596a74f2695`.
 
-- Result: inherit the media readers, type labels and credential metadata handling. The registry keeps compat native search exposure. Request preflight keeps the pixel-based image estimate and preserves active-turn images in the recovery floor. The TUI keeps its provider, model and variant display.
+- Result: inherit the user-turn skill catalog and the opt-in brief session list. DC-CONTEXT-001 keeps the 50 KiB catalog cap at the reminder renderer and strips capped system-tail catalogs from old frozen rows; its strict capped-v2 recognizer and the `skillCatalogInSystem` projection retire. Pin-winner selection follows `main` with compat's loaded-MCP tools hash and current-turn projection (DC-MODEL-001, DC-ACTOR-001). All other DC owners are unchanged.
 
-- Validation: CLI typecheck, lint and the focused media, prompt, auth, native search and preflight matrices pass with the Windows fixture exceptions recorded in the shared review. GitHub rejected lint, typecheck and test dispatches with HTTP 422, including the test dispatch requesting Windows runtime.
+- Validation: CLI typecheck, lint and SDK regeneration pass. The CI-equivalent four-shard run fails the same tests as the starting compat tip apart from two shared-process intermittents, as recorded in the shared review. GitHub rejected workflow dispatch with HTTP 422.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
