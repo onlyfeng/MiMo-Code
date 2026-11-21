@@ -154,82 +154,31 @@ const LEGACY_SYSTEM_CATALOG =
  * Remove legacy catalog blocks from a frozen system prompt. Blocks that the
  * host-supplied system itself contains are host content: as many leading
  * occurrences as the host has stay, and the engine's tail copies go.
- *
- * FC-005: this is the one-time retirement path for prefixes pinned while the
- * catalog lived in the system tail. The schema-3 snapshot below stays readable
- * so an old row's recorded position and content version are still recognized
- * (and can be cleared) rather than being reinterpreted as live catalog text.
  */
-export function stripLegacySkillCatalog(
-  system: readonly string[],
-  hostSystem = "",
-  snapshot?: SkillCatalogSnapshot | null,
-): string[] {
-  const exact = stripRecordedSkillCatalog(system, snapshot)
-  if (exact) return exact
-  // No schema-3 record, or one whose range cannot be proven: fall back to the
-  // generated block pattern. Leaving the block would show the catalog twice
-  // once the entry reminder arrives.
+export function stripLegacySkillCatalog(system: readonly string[], hostSystem = ""): string[] {
   const hostBlocks = new Map<string, number>()
   for (const match of hostSystem.matchAll(LEGACY_SYSTEM_CATALOG)) {
     const block = match[0].trimStart()
     hostBlocks.set(block, (hostBlocks.get(block) ?? 0) + 1)
   }
-  return system.map((part) => part.replace(LEGACY_SYSTEM_CATALOG, (match) => {
-    const block = match.trimStart()
-    const keep = hostBlocks.get(block) ?? 0
-    if (keep === 0) return ""
-    hostBlocks.set(block, keep - 1)
-    return match
-  }))
-}
-
-/**
- * Strip exactly the managed range a schema-3 row recorded: its format prefix
- * (the engine's structured-output instruction, when JSON mode pinned it) and
- * the catalog. Returns undefined when there is no usable record or its
- * position is ambiguous or stale, so the caller falls back to the generated
- * block pattern. Leaving the block would show the catalog twice once the entry
- * reminder arrives; the pattern only matches the engine's own
- * `Skills available in this session:` block, never arbitrary text.
- */
-function stripRecordedSkillCatalog(system: readonly string[], snapshot?: SkillCatalogSnapshot | null) {
-  if (snapshot?.schema !== 3 || !snapshot.text) return undefined
-  if (createHash("sha256").update(canonicalSkillCatalog(snapshot.text)).digest("hex") !== snapshot.version)
-    return undefined
-  const managed = (snapshot.formatPrefix ?? "") + snapshot.text
-  const slots = snapshot.systemSlot ? [snapshot.systemSlot] : occurrences([...system], managed)
-  const slot = slots[0]
-  if (
-    slots.length !== 1 ||
-    !slot ||
-    !Number.isInteger(slot.message) ||
-    !Number.isInteger(slot.offset) ||
-    slot.message < 0 ||
-    slot.offset < 0 ||
-    typeof system[slot.message] !== "string" ||
-    system[slot.message].slice(slot.offset, slot.offset + managed.length) !== managed
+  return system.map((part) =>
+    part.replace(LEGACY_SYSTEM_CATALOG, (match) => {
+      const block = match.trimStart()
+      const keep = hostBlocks.get(block) ?? 0
+      if (keep === 0) return ""
+      hostBlocks.set(block, keep - 1)
+      return match
+    }),
   )
-    return undefined
-  // The whole managed range goes, format prefix included. That prefix was only
-  // ever the engine's own structured-output instruction, kept refreshable
-  // inside the range by the retired re-pinning code. Leaving it frozen would
-  // outlive its request: a later plain-text turn on this prefix would still
-  // demand the then-unregistered StructuredOutput tool. The request-local
-  // assembly adds the instruction back whenever the request is in JSON mode.
-  return system.flatMap((text, index) => {
-    if (index !== slot.message) return [text]
-    const next = text.slice(0, slot.offset) + text.slice(slot.offset + managed.length)
-    return next ? [next] : []
-  })
 }
 
 /**
  * Internal metadata of a prefix frozen while the catalog lived in the system
- * tail. The generating code is retired; the type stays so an existing row's
- * recorded position and content version are still parsed (and cleared) rather
- * than being mistaken for live catalog text. The shipped migration that added
- * the column is unchanged.
+ * tail. Nothing writes it any more; the type stays so the shipped column still
+ * parses, and `SessionPrefixSnapshot.getFrozen` clears it on first read. The
+ * recorded range is not needed for that: its catalog text is the generated
+ * block above, and its format prefix is the engine's structured-output
+ * instruction, which the frozen prefix's own tools decide.
  */
 export type SkillCatalogSnapshot = {
   schema: 3
@@ -238,18 +187,8 @@ export type SkillCatalogSnapshot = {
   turnID: MessageID
   // Position in the frozen system, independent of the catalog content hash.
   systemSlot?: { message: number; offset: number }
-  // Engine structured-output instruction stored inside the managed range;
-  // retired with the catalog because it is now appended per request.
+  // Engine structured-output instruction stored inside the managed range.
   formatPrefix?: string
-}
-
-function occurrences(system: string[], text: string) {
-  return system.flatMap((part, message) => {
-    const offsets: { message: number; offset: number }[] = []
-    for (let offset = part.indexOf(text); offset !== -1; offset = part.indexOf(text, offset + 1))
-      offsets.push({ message, offset })
-    return offsets
-  })
 }
 
 const legacyLoadIntro = [

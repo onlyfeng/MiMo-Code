@@ -56,6 +56,9 @@ const systemOf = (request: { messages?: unknown }) =>
 const usersOf = (request: { messages?: unknown }) =>
   JSON.stringify(requestMessages(request).filter((message) => message.role === "user"))
 const count = (text: string, needle: string) => text.split(needle).length - 1
+// The engine's structured-output instruction, as older engines froze it.
+const STRUCTURED_OUTPUT =
+  "IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema."
 // Persisted skill catalog reminders, identified by metadata rather than text.
 const catalogParts = (messages: MessageV2.WithParts[]) =>
   messages.flatMap((message) =>
@@ -462,7 +465,8 @@ describe("skill command with additional mentions", () => {
   )
 
   // FC-005: a session pinned by the fork's schema-3 layout keeps its exact
-  // non-catalog bytes after upgrade. The recorded range is cut, the old v2
+  // non-catalog bytes after upgrade. The managed range (a JSON-mode format
+  // instruction whose tool is not frozen, then the catalog) is cut, the old v2
   // user-side snapshot is not replayed, and one entry reminder replaces both.
   it.live(
     "retires a schema-3 frozen catalog and its v2 history copy in favor of one entry reminder",
@@ -486,9 +490,12 @@ describe("skill command with additional mentions", () => {
           )
           expect(pinned).toHaveLength(1)
           const catalog = "Skills available in this session:\nNo skills are currently available."
-          const format = "STALE_JSON_MODE\n\n"
+          const format = `${STRUCTURED_OUTPUT}\n\n`
           const last = pinned[0].system.length - 1
-          const legacySystem = [...pinned[0].system.slice(0, last), `${pinned[0].system[last]}${format}${catalog}`]
+          const legacySystem = [
+            ...pinned[0].system.slice(0, last),
+            `${pinned[0].system[last]}\n\n${format}${catalog}`,
+          ]
           Database.use((db) =>
             db
               .update(SessionPrefixSnapshotTable)
@@ -500,7 +507,7 @@ describe("skill command with additional mentions", () => {
                   text: catalog,
                   version: createHash("sha256").update(catalog).digest("hex"),
                   turnID: pinned[0].watermark_message_id,
-                  systemSlot: { message: last, offset: pinned[0].system[last].length },
+                  systemSlot: { message: last, offset: pinned[0].system[last].length + 2 },
                   formatPrefix: format,
                 },
               })
@@ -527,10 +534,10 @@ describe("skill command with additional mentions", () => {
           yield* turn("second request")
 
           const second = (yield* llm.inputs)[1]
-          // The pinned JSON-mode format prefix retires with the catalog, so this
-          // plain-text request carries neither; the original bytes stay.
+          // The frozen tools hold no StructuredOutput, so the format
+          // instruction retires with the catalog; the original bytes stay.
           expect(systemOf(second).startsWith(original)).toBe(true)
-          expect(systemOf(second)).not.toContain("STALE_JSON_MODE")
+          expect(systemOf(second)).not.toContain(STRUCTURED_OUTPUT)
           expect(systemOf(second)).not.toContain("Skills available in this session:")
           expect(usersOf(second)).not.toContain("Authoritative skills catalog snapshot v2:")
           expect(count(usersOf(second), ENTRY)).toBe(1)

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import * as Catalog from "../../src/session/skill-catalog"
-import { MessageID } from "../../src/session/schema"
 import {
   announcedSkillCatalog,
   catalogState,
@@ -229,48 +228,5 @@ describe("historical skill catalog recognition", () => {
   test("a tagged reminder is delivered even when it matches a historical shape", () => {
     const tagged = { skillReminder: { kind: "entry", skills: { workflow: "0123456789abcdef" } } }
     expect(Catalog.isLegacySkillCatalogPart({ type: "text", text: wrap(catalog), synthetic: true, metadata: tagged })).toBe(false)
-  })
-})
-
-describe("schema-3 frozen catalog strip", () => {
-  const turnID = MessageID.make("schema3-turn")
-  const record = (text: string, extra: Partial<Catalog.SkillCatalogSnapshot> = {}): Catalog.SkillCatalogSnapshot => ({
-    schema: 3,
-    text,
-    version: createHash("sha256").update(text).digest("hex"),
-    turnID,
-    ...extra,
-  })
-
-  test("removes exactly the recorded range, its format prefix included", () => {
-    // The format prefix is the engine's structured-output instruction; the
-    // request appends it per JSON request now, so a frozen copy must not stay.
-    const system = ["ENV\nJSON FORMAT\n\ndirectory\nINSTRUCTIONS"]
-    const snapshot = record("directory", { formatPrefix: "JSON FORMAT\n\n", systemSlot: { message: 0, offset: 4 } })
-    expect(Catalog.stripLegacySkillCatalog(system, "", snapshot)).toEqual(["ENV\n\nINSTRUCTIONS"])
-  })
-
-  test("drops a catalog-only system message instead of leaving it empty", () => {
-    const snapshot = record("directory", { systemSlot: { message: 1, offset: 0 } })
-    expect(Catalog.stripLegacySkillCatalog(["ENV", "directory", "PLUGIN"], "", snapshot)).toEqual(["ENV", "PLUGIN"])
-  })
-
-  test("infers a unique position for an older row without one", () => {
-    expect(Catalog.stripLegacySkillCatalog(["ENV directory PLUGIN"], "", record("directory"))).toEqual(["ENV  PLUGIN"])
-  })
-
-  test("an ambiguous or stale position falls back to the generated block pattern", () => {
-    const block = "Skills available in this session:\n<available_skills>\n  <skill>\n    <name>test</name>\n    <description>description</description>\n    <location>file:/tmp/example</location>\n  </skill>\n</available_skills>"
-    const system = [`base\n\n${block}\n\nplugin`, `another\n\n${block}`]
-    const expected = ["base\n\nplugin", "another"]
-    expect(Catalog.stripLegacySkillCatalog(system, "", record(block))).toEqual(expected)
-    const stale = record(block, { systemSlot: { message: 0, offset: 1 } })
-    expect(Catalog.stripLegacySkillCatalog(system, "", stale)).toEqual(expected)
-  })
-
-  test("a record whose content version does not match falls back to the block pattern", () => {
-    const block = "Skills available in this session:\nNo skills are currently available."
-    const forged = { ...record("other"), version: "0".repeat(64) }
-    expect(Catalog.stripLegacySkillCatalog([`base\n\n${block}`], "", forged)).toEqual(["base"])
   })
 })

@@ -255,7 +255,7 @@ it.live(
 )
 
 it.live(
-  "runLoop uses a competing pin winner system while retaining executable tools",
+  "runLoop rotates away from a competing pin winner that froze other tools, keeping executable tools",
     Effect.gen(function* () {
       const key = `runloop-capture-gate-${randomUUID()}`
       const gate = { armed: false, hit: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() }
@@ -341,14 +341,17 @@ it.live(
             yield* Effect.promise(() => gate.hit.promise).pipe(Effect.timeout("10 seconds"))
             expect(yield* rows(session.id)).toEqual([])
             expect(yield* llm.inputs).toHaveLength(0)
-            // A competing legacy pin has different advertised tools. The live loop may
-            // rotate that pool, but must retain the winning system/catalog and execute closures.
+            // A competing pin froze different tools. As with any frozen prefix
+            // whose tools differ, the live loop rotates to its own freshly built
+            // system and tools (upstream's rotation rule; the old rule of keeping
+            // the winner's system belonged to the system-tail catalog). It still
+            // executes through its live closures.
             const tools = [{ ...actor, active: true }]
-            const expectedSystem = ["RUNLOOP_PIN_WINNER_SYSTEM"]
+            const winnerSystem = ["RUNLOOP_PIN_WINNER_SYSTEM"]
             yield* SessionPrefixSnapshot.pin({
               sessionID: session.id,
               profileKey: baseline.profile_key,
-              system: expectedSystem,
+              system: winnerSystem,
               toolsHash: SessionPrefixSnapshot.toolsHash(SessionPrefixSnapshot.restoreTools(tools), ["actor"]),
               tools,
               loadedMcpTools: [],
@@ -358,11 +361,14 @@ it.live(
             yield* Fiber.join(pending)
             const requests = yield* llm.inputs
             expect(requests).toHaveLength(2)
+            const stored = (yield* rows(session.id))[0]
+            expect(stored.revision).toBe(2)
+            expect(stored.system.join("\n")).not.toContain(winnerSystem[0])
             for (const request of requests) {
               if (!Array.isArray(request.messages)) throw new Error("Expected real chat-compatible wire")
               const system = request.messages.filter((message) => message.role === "system")
               const conversation = request.messages.filter((message) => message.role !== "system")
-              expect(system).toEqual([{ role: "system", content: expectedSystem.join("\n\n") }])
+              expect(system).toEqual([{ role: "system", content: stored.system.join("\n\n") }])
               // The stored v2 snapshot is suppressed; the live catalog arrives as
               // a reminder on the user turn instead.
               expect(JSON.stringify(conversation)).not.toContain(OLD)
@@ -372,8 +378,6 @@ it.live(
             expect(requests[1].messages.filter((message) => message.role === "tool")).toEqual([
               expect.objectContaining({ content: expect.stringContaining("WINNER_EXECUTED_1e9d") }),
             ])
-            const stored = (yield* rows(session.id))[0]
-            expect(stored.system).toEqual(expectedSystem)
             expect(stored.skill_catalog).toBeNull()
             expect(stored.tools?.some((tool) => tool.name === "exec" && tool.active !== false)).toBe(true)
             expect(stored.tools?.find((tool) => tool.name === "actor")?.native_input_schema).toEqual(

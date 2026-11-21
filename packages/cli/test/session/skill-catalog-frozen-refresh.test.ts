@@ -38,6 +38,8 @@ const config = (url: string) => ({
     },
   },
 })
+const STRUCTURED = "The user has requested structured output"
+const count = (text: string, needle: string) => text.split(needle).length - 1
 const OLD = "OLD_CATALOG_DESCRIPTION_6a31"
 const NEW = "NEW_CATALOG_DESCRIPTION_2f47"
 const BODY = "SKILL_BODY_STAYS_IN_USER_MESSAGE_8d13"
@@ -67,7 +69,10 @@ const rows = (sessionID: Session.Info["id"]) =>
     ),
   )
 // Five real provider turns include plugin loading and Git snapshot work.
-it.live("skill changes and tool rotation preserve every frozen byte", () =>
+// Skill changes never touch the frozen prefix. A tools-hash rotation rebuilds
+// it from current additions, as upstream does: with the catalog out of the
+// system, nothing frozen depends on keeping the old bytes across rotation.
+it.live("skill changes keep the frozen prefix and a tools rotation rebuilds it", () =>
   Effect.gen(function* () {
     const key = "catalog-frozen-plugin-generation"
     Reflect.set(globalThis, key, "PLUGIN_OLD")
@@ -145,8 +150,11 @@ it.live("skill changes and tool rotation preserve every frozen byte", () =>
           })
           const rotated = (yield* rows(session.id))[0]
           expect(rotated.tools_hash).not.toBe("stale-fixture")
-          expect(rotated.system).toEqual(after.system)
-          expect(wire((yield* llm.inputs)[2], "system")).not.toContain("MUTATED_AGENTS_NEW")
+          expect(rotated.revision).toBe(after.revision + 1)
+          expect(rotated.system.join("\n")).toContain("MUTATED_AGENTS_NEW")
+          expect(rotated.system.join("\n")).toContain("PLUGIN_NEW")
+          expect(rotated.system.join("\n")).not.toContain(NEW)
+          expect(wire((yield* llm.inputs)[2], "system")).toContain("MUTATED_AGENTS_NEW")
           yield* llm.tool("StructuredOutput", { ok: true })
           yield* prompt.prompt({
             sessionID: session.id,
@@ -157,11 +165,14 @@ it.live("skill changes and tool rotation preserve every frozen byte", () =>
               retryCount: 0,
               schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
             },
-            parts: [{ type: "text", text: "Switch to structured output with the frozen instructions" }],
+            parts: [{ type: "text", text: "Switch to structured output" }],
           })
-          expect(wire((yield* llm.inputs)[3], "system")).toContain("The user has requested structured output")
-          expect(wire((yield* llm.inputs)[3], "system")).toContain("FROZEN_AGENTS_OLD")
-          expect(wire((yield* llm.inputs)[3], "system")).not.toContain("PLUGIN_NEW")
+          // StructuredOutput changes the tools hash, so the switch rotates and
+          // the instruction is frozen together with its tool.
+          expect(count(wire((yield* llm.inputs)[3], "system"), STRUCTURED)).toBe(1)
+          const structured = (yield* rows(session.id))[0]
+          expect(structured.system.join("\n")).toContain(STRUCTURED)
+          expect(structured.tools?.some((item) => item.name === "StructuredOutput")).toBe(true)
           yield* llm.text("back to text")
           yield* prompt.prompt({
             sessionID: session.id,
@@ -170,12 +181,11 @@ it.live("skill changes and tool rotation preserve every frozen byte", () =>
             format: { type: "text" },
             parts: [{ type: "text", text: "Switch back to ordinary text" }],
           })
-          expect((yield* rows(session.id))[0].system).toEqual(rotated.system)
-          expect(wire((yield* llm.inputs)[4], "system")).not.toContain("The user has requested structured output")
-          // The instruction is request-owned, so it never reaches the stored row.
-          expect((yield* rows(session.id))[0].system.join("\n")).not.toContain(
-            "The user has requested structured output",
-          )
+          // Switching back rotates again: neither the instruction nor its tool stays.
+          expect(wire((yield* llm.inputs)[4], "system")).not.toContain(STRUCTURED)
+          const text = (yield* rows(session.id))[0]
+          expect(text.system).toEqual(rotated.system)
+          expect(text.tools?.some((item) => item.name === "StructuredOutput")).toBe(false)
         }),
       { git: true, config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
     )
@@ -183,11 +193,10 @@ it.live("skill changes and tool rotation preserve every frozen byte", () =>
   15_000,
 )
 
-// The opposite direction of the case above: the prefix is captured cold while
-// the request is already in json_schema mode. The instruction must stay out of
-// the pinned row, or every later plain-text request on that prefix would keep
-// demanding the then-unregistered StructuredOutput tool.
-it.live("a cold capture in structured mode does not freeze the format instruction", () =>
+// The first request of a session is already structured: the prefix it pins
+// carries the instruction once, with its tool, and the next plain-text
+// request rotates both out instead of demanding an unregistered tool.
+it.live("a prefix pinned in structured mode rotates its format instruction out for text", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
@@ -196,7 +205,7 @@ it.live("a cold capture in structured mode does not freeze the format instructio
         )
         const sessions = yield* Session.Service
         const prompt = yield* SessionPrompt.Service
-        const session = yield* sessions.create({ title: "Cold structured capture" })
+        const session = yield* sessions.create({ title: "Cold structured pin" })
         yield* llm.tool("StructuredOutput", { ok: true })
         yield* prompt.prompt({
           sessionID: session.id,
@@ -210,11 +219,9 @@ it.live("a cold capture in structured mode does not freeze the format instructio
           parts: [{ type: "text", text: "First query is already structured" }],
         })
         const pinned = (yield* rows(session.id))[0]
-        expect(pinned.system.join("\n")).not.toContain("The user has requested structured output")
-        // Exactly one copy on the wire: the request-local append, not a second
-        // one from a frozen duplicate.
-        const first = wire((yield* llm.inputs)[0], "system")
-        expect(first.split("The user has requested structured output").length - 1).toBe(1)
+        expect(count(pinned.system.join("\n"), STRUCTURED)).toBe(1)
+        expect(pinned.tools?.some((item) => item.name === "StructuredOutput")).toBe(true)
+        expect(count(wire((yield* llm.inputs)[0], "system"), STRUCTURED)).toBe(1)
         yield* llm.text("plain answer")
         yield* prompt.prompt({
           sessionID: session.id,
@@ -223,8 +230,11 @@ it.live("a cold capture in structured mode does not freeze the format instructio
           format: { type: "text" },
           parts: [{ type: "text", text: "Now answer as ordinary text" }],
         })
-        expect(wire((yield* llm.inputs)[1], "system")).not.toContain("The user has requested structured output")
-        expect((yield* rows(session.id))[0].system).toEqual(pinned.system)
+        expect(wire((yield* llm.inputs)[1], "system")).not.toContain(STRUCTURED)
+        const text = (yield* rows(session.id))[0]
+        expect(text.revision).toBe(pinned.revision + 1)
+        expect(text.system.join("\n")).not.toContain(STRUCTURED)
+        expect(text.tools?.some((item) => item.name === "StructuredOutput")).toBe(false)
       }),
     { git: true, config },
   ),

@@ -6,7 +6,13 @@ import { Session as SessionNs } from "../../src/session"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { MessageID } from "../../src/session/schema"
 import { AppRuntime } from "../../src/effect/app-runtime"
+import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
+import { and, Database, eq } from "../../src/storage"
 import { tmpdir } from "../fixture/fixture"
+
+const STRUCTURED =
+  "IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema."
+const CATALOG = "Skills available in this session:\nNo skills are currently available."
 
 describe("session prefix snapshot", () => {
   test("retains hidden executable schemas separately from advertised membership", async () => {
@@ -177,25 +183,15 @@ describe("session prefix snapshot", () => {
     })
   })
 
-  // FC-005: the schema-3 column is retired for writing. An existing row must
-  // still parse, and reading the prefix must retire it exactly once while every
-  // non-catalog byte, the native tool pair and the watermark stay as pinned.
-  test("retires a stored schema-3 catalog on read without touching other frozen bytes", async () => {
+  // FC-005: rows written by older fork engines are cleaned once on read. The
+  // schema-3 column is no longer written, so each row is stored here the way
+  // those engines left it.
+  test("retires legacy catalogs and unbacked format instructions on read, keeping every other frozen byte", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const session = await AppRuntime.runPromise(SessionNs.Service.use((service) => service.create({})))
-        const text = "Skills available in this session:\nNo skills are currently available."
-        const catalog = {
-          schema: 3 as const,
-          text,
-          version: createHash("sha256").update(text).digest("hex"),
-          turnID: MessageID.ascending(),
-          // The slot marks the start of the managed range (format prefix + catalog).
-          systemSlot: { message: 1, offset: 0 },
-          formatPrefix: "JSON FORMAT\n\n",
-        }
         const native = { type: "object" as const, properties: { action: { enum: ["spawn", "resume"] } } }
         const actor = {
           ...tool({
@@ -204,41 +200,116 @@ describe("session prefix snapshot", () => {
           }),
           nativeInputSchema: native,
         }
-        const tools = await SessionPrefixSnapshot.snapshotTools({ actor }, ["actor"])
+        const plainTools = await SessionPrefixSnapshot.snapshotTools({ actor }, ["actor"])
+        const jsonTools = [
+          ...plainTools,
+          { name: "StructuredOutput", input_schema: { type: "object" as const }, active: true },
+        ]
+        const record = (text: string, formatPrefix?: string) => ({
+          schema: 3 as const,
+          text,
+          version: createHash("sha256").update(text).digest("hex"),
+          turnID: MessageID.ascending(),
+          ...(formatPrefix === undefined ? {} : { formatPrefix }),
+        })
         const watermarkMessageID = MessageID.ascending()
-        const profileKey = "catalog-retirement"
-        const pinned = await AppRuntime.runPromise(
-          SessionPrefixSnapshot.pin({
-            sessionID: session.id,
-            profileKey,
-            system: ["ENV", `JSON FORMAT\n\n${text}`, "INSTRUCTIONS"],
-            toolsHash: "native-tools",
-            tools,
-            loadedMcpTools: ["mcp_hidden"],
-            skillCatalog: catalog,
-            watermarkMessageID,
-          }),
-        )
-        expect(pinned.skill_catalog).toEqual(catalog)
+        const seed = async (input: {
+          profileKey: string
+          system: string[]
+          tools: typeof plainTools
+          skillCatalog?: ReturnType<typeof record>
+        }) => {
+          const pinned = await AppRuntime.runPromise(
+            SessionPrefixSnapshot.pin({
+              sessionID: session.id,
+              profileKey: input.profileKey,
+              system: ["placeholder"],
+              toolsHash: "legacy-tools",
+              tools: input.tools,
+              loadedMcpTools: ["mcp_hidden"],
+              watermarkMessageID,
+            }),
+          )
+          Database.use((db) =>
+            db
+              .update(SessionPrefixSnapshotTable)
+              .set({
+                system: input.system,
+                system_hash: SessionPrefixSnapshot.systemHash(input.system),
+                skill_catalog: input.skillCatalog ?? null,
+              })
+              .where(
+                and(
+                  eq(SessionPrefixSnapshotTable.session_id, session.id),
+                  eq(SessionPrefixSnapshotTable.profile_key, input.profileKey),
+                ),
+              )
+              .run(),
+          )
+          return pinned
+        }
+        const read = (profileKey: string, hostSystem?: string) =>
+          AppRuntime.runPromise(SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey, hostSystem }))
 
-        const retired = await AppRuntime.runPromise(
-          SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey }),
-        )
-        // The whole managed range goes, format prefix included; a system
-        // message left empty is dropped rather than sent blank.
-        expect(retired?.system).toEqual(["ENV", "INSTRUCTIONS"])
+        // A cold capture in JSON mode froze the instruction without its tool;
+        // the schema-3 range held instruction and catalog together.
+        const captured = await seed({
+          profileKey: "json-capture",
+          system: [`BASE\n\nENV\n\n${STRUCTURED}\n\n${CATALOG}\n\nINSTRUCTIONS`],
+          tools: plainTools,
+          skillCatalog: record(CATALOG, `${STRUCTURED}\n\n`),
+        })
+        const retired = await read("json-capture")
+        expect(retired?.system).toEqual(["BASE\n\nENV\n\nINSTRUCTIONS"])
         expect(retired?.system_hash).toBe(SessionPrefixSnapshot.systemHash(retired!.system))
         expect(retired?.skill_catalog).toBeNull()
-        expect(retired?.tools).toEqual(tools)
+        expect(retired?.tools).toEqual(plainTools)
+        expect(SessionPrefixSnapshot.restoreTools(retired!.tools!).actor).toHaveProperty("nativeInputSchema", native)
         expect(retired?.loaded_mcp_tools).toEqual(["mcp_hidden"])
         expect(retired?.watermark_message_id).toBe(watermarkMessageID)
-        expect(retired?.revision).toBe(pinned.revision)
-
+        expect(retired?.revision).toBe(captured.revision)
         // Idempotent: a second read neither rewrites nor re-strips.
-        const again = await AppRuntime.runPromise(
-          SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey }),
-        )
-        expect(again).toEqual(retired)
+        expect(await read("json-capture")).toEqual(retired)
+
+        // A JSON-mode prefix froze its StructuredOutput tool too: the
+        // instruction stays until a tools-hash rotation rebuilds the system.
+        await seed({
+          profileKey: "json-pinned",
+          system: [`BASE\n\n${STRUCTURED}\n\n${CATALOG}\n\nINSTRUCTIONS`],
+          tools: jsonTools,
+          skillCatalog: record(CATALOG, `${STRUCTURED}\n\n`),
+        })
+        expect((await read("json-pinned"))?.system).toEqual([`BASE\n\n${STRUCTURED}\n\nINSTRUCTIONS`])
+
+        // A catalog the retired code appended as its own message goes with
+        // that message, and host-supplied copies of the instruction stay.
+        const host = `Host rules.\n\n${STRUCTURED}`
+        await seed({
+          profileKey: "appended",
+          system: [`${host}\n\nENV\n\n${STRUCTURED}`, `${STRUCTURED}\n\n${CATALOG}`, `${STRUCTURED}\n\n`],
+          tools: plainTools,
+        })
+        expect((await read("appended", host))?.system).toEqual([`${host}\n\nENV`])
+
+        // An empty catalog owned no text, but its record is still retired;
+        // a JSON-mode instruction its tool backs stays.
+        await seed({
+          profileKey: "empty-catalog",
+          system: [`BASE\n\n${STRUCTURED}\n\n\n\nINSTRUCTIONS`],
+          tools: jsonTools,
+          skillCatalog: record("", `${STRUCTURED}\n\n`),
+        })
+        const empty = await read("empty-catalog")
+        expect(empty?.system).toEqual([`BASE\n\n${STRUCTURED}\n\n\n\nINSTRUCTIONS`])
+        expect(empty?.skill_catalog).toBeNull()
+        await seed({
+          profileKey: "empty-catalog-text",
+          system: [`BASE\n\n${STRUCTURED}\n\n\n\nINSTRUCTIONS`],
+          tools: plainTools,
+          skillCatalog: record("", `${STRUCTURED}\n\n`),
+        })
+        // The same bytes a text-mode prefix with an empty catalog had.
+        expect((await read("empty-catalog-text"))?.system).toEqual(["BASE\n\n\n\nINSTRUCTIONS"])
       },
     })
   })
