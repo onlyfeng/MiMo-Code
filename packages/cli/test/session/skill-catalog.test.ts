@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import * as Catalog from "../../src/session/skill-catalog"
 import { MessageID } from "../../src/session/schema"
 import {
+  announcedSkillCatalog,
   catalogState,
   diffSkillCatalog,
   isLegacySkillCatalogPart,
@@ -71,6 +72,40 @@ describe("skill catalog diff", () => {
     expect(skillReminderRev({ kind: "entry", skills: state })).toMatch(/^skills:entry:[0-9a-f]{64}$/)
     expect(skillReminderRev({ kind: "entry", skills: state })).toBe(skillReminderRev({ kind: "entry", skills: { ...state } }))
     expect(skillReminderRev({ kind: "delta", skills: state })).not.toBe(skillReminderRev({ kind: "entry", skills: state }))
+  })
+})
+
+describe("announced skill catalog state", () => {
+  const user = (...metas: Record<string, unknown>[]) => ({
+    info: { role: "user" },
+    parts: metas.map((meta) => ({ type: "text", synthetic: true, metadata: { skillReminder: meta } })),
+  })
+  const entry = { kind: "entry", skills: { alpha: "a1", beta: "b1" } }
+  const delta = { kind: "delta", skills: { alpha: "a1", beta: "b2" } }
+
+  test("an entry followed by deltas yields the latest state", () => {
+    expect(announcedSkillCatalog([user(entry), user(delta)])).toEqual(delta.skills)
+  })
+
+  test("a delta without an entry in the window is not trusted", () => {
+    // Overflow compaction can replay a user turn holding only a delta past
+    // the boundary; its text lists just the changed skills.
+    expect(announcedSkillCatalog([user(delta)])).toBeUndefined()
+    const change = diffSkillCatalog({
+      announced: announcedSkillCatalog([user(delta)]),
+      current: [skill("alpha"), skill("beta")],
+    })
+    expect(change?.kind).toBe("entry")
+  })
+
+  test("ignored, non-synthetic and assistant parts do not count", () => {
+    expect(
+      announcedSkillCatalog([
+        { info: { role: "user" }, parts: [{ type: "text", synthetic: true, ignored: true, metadata: { skillReminder: entry } }] },
+        { info: { role: "user" }, parts: [{ type: "text", metadata: { skillReminder: entry } }] },
+        { info: { role: "assistant" }, parts: [{ type: "text", synthetic: true, metadata: { skillReminder: entry } }] },
+      ]),
+    ).toBeUndefined()
   })
 })
 

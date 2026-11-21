@@ -87,6 +87,35 @@ export function readSkillReminderMeta(value: unknown): SkillReminderMeta | undef
   return { kind: value.kind, skills }
 }
 
+/**
+ * Latest catalog state the model has actually been shown in this window.
+ *
+ * A delta's metadata records the whole resulting state, but its text carries
+ * only the changed and removed skills, so it is trustworthy only on top of a
+ * full entry earlier in the same window. A delta without one (for example a
+ * user turn that overflow compaction replayed past the boundary, leaving its
+ * entry behind) is ignored, and the caller announces a full entry again
+ * instead of treating unchanged skills as already visible.
+ */
+export function announcedSkillCatalog(
+  messages: readonly {
+    info: { role: string }
+    parts: readonly { type: string; synthetic?: boolean; ignored?: boolean; metadata?: Record<string, unknown> }[]
+  }[],
+): Record<string, string> | undefined {
+  let announced: Record<string, string> | undefined
+  for (const message of messages) {
+    if (message.info.role !== "user") continue
+    for (const part of message.parts) {
+      if (part.type !== "text" || !part.synthetic || part.ignored) continue
+      const meta = readSkillReminderMeta(part.metadata?.[SKILL_REMINDER_METADATA_KEY])
+      if (!meta) continue
+      if (meta.kind === "entry" || announced) announced = meta.skills
+    }
+  }
+  return announced
+}
+
 export type SkillCatalogChange =
   | { kind: "entry"; skills: CatalogSkill[]; meta: SkillReminderMeta }
   | { kind: "delta"; changed: CatalogSkill[]; removed: string[]; meta: SkillReminderMeta }

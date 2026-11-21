@@ -226,8 +226,8 @@ import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { isDeepStrictEqual } from "node:util"
 import { SessionReminder } from "./reminder"
 import {
+  announcedSkillCatalog,
   diffSkillCatalog,
-  readSkillReminderMeta,
   SKILL_REMINDER_KEY,
   SKILL_REMINDER_METADATA_KEY,
   skillReminderRev,
@@ -2779,15 +2779,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // would rewrite cached history, so changes wait for the next user turn.
       if (input.messages.slice(userIndex + 1).some((message) => message.info.role === "assistant")) return
       yield* sys.refreshSkills()
-      let announced: Record<string, string> | undefined
-      for (const message of input.messages) {
-        if (message.info.role !== "user") continue
-        for (const part of message.parts) {
-          if (part.type !== "text" || !part.synthetic || part.ignored) continue
-          const meta = readSkillReminderMeta(part.metadata?.[SKILL_REMINDER_METADATA_KEY])
-          if (meta) announced = meta.skills
-        }
-      }
+      // A delta counts only on top of an entry in this window; see
+      // announcedSkillCatalog for the compaction-replay case.
+      const announced = announcedSkillCatalog(input.messages)
       const owner = input.messages[userIndex].info
       const current = yield* sys.skillCatalog(input.agent, {
         permission: Agent.runtimePermission(input.agent, input.session.permission),
