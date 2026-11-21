@@ -11,7 +11,7 @@ merge; `dev/compat` and its checkout were not touched. `bun.lock` and
 `packages/cli/migration/` are byte-identical to the starting fork; the SDK
 differs only by the regenerated `command.updated` event type.
 
-The runtime tip is `227f195d76411a64f73bca0f113f45e3413814c7`: the merge of upstream, the
+The runtime tip is `d6604ceef828ef6c9ae30536933517a13b46eb8f`: the merge of upstream, the
 entry-anchored catalog delta replay, and the takeover changes below, which
 restore FD-005's dropped regression test, keep `skill/index.ts` at upstream
 text plus the builtin producer, return prefix rotation and the
@@ -339,6 +339,14 @@ on MCP. Fixed in `227f195d`: the background collection publishes
 after the listing" uses a real stdio MCP server that answers `initialize` only
 after a gate opens; `test/cli/tui/command-refresh.test.tsx` drives the TUI
 store. Each fails without its half of the change.
+
+A seventh automated finding, against `771abfc3`, showed that this new refresh
+lacked the stale-source check bootstrap applies to its own non-blocking writes:
+a response resolving after a directory or workspace switch replaced the new
+source's command list. Fixed in `d6604cee`; "drops a command refresh that
+resolves after a directory switch" in `command-refresh.test.tsx` holds the old
+directory's response until the new one has bootstrapped and fails without the
+check.
 
 ## Publication and CI
 

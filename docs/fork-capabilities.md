@@ -1336,7 +1336,8 @@ own source list remains the complete watch surface.
   skill route and tool misses. Stat-keyed parsing reuses unchanged files.
   Command listing does not wait for MCP servers; once background collection
   adds MCP prompt commands, `command.updated` is published and the TUI
-  refetches its cached list, so late prompts reach slash completion.
+  refetches its cached list, so late prompts reach slash completion; a
+  response that resolves after a directory or workspace switch is dropped.
   Builtin extraction remains a scoped producer that caller cancellation cannot
   poison; reload invalidates its generation and always rebuilds the snapshot,
   even when every file keeps its path, mtime and size (a parse that failed for
@@ -1408,7 +1409,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `227f195d76411a64f73bca0f113f45e3413814c7` (pull request #263).
+  main behavior `d6604ceef828ef6c9ae30536933517a13b46eb8f` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that
