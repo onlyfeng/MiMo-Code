@@ -848,9 +848,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         // FC-005: MCP prompt commands can settle after the bootstrap listing.
+        // As with bootstrap's own writes, a response that outlives a directory
+        // or workspace switch must not overwrite the new source's list.
         case "command.updated": {
           const workspace = project.workspace.current()
-          void sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? [])))
+          const directory = sdk.directory
+          void sdk.client.command.list({ workspace }).then((x) => {
+            if (sdk.directory !== directory || project.workspace.current() !== workspace) return
+            setStore("command", reconcile(x.data ?? []))
+          })
           break
         }
 
