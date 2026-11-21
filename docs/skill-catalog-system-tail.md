@@ -1,4 +1,31 @@
-# Frozen skill catalog layout
+# Frozen skill catalog layout (historical)
+
+> **Superseded on 2026-11-21.** Upstream `128adcb7` moved the catalog to
+> persisted user-turn reminders (one entry per context window, then
+> fingerprinted deltas) and made discovery a live rescan. The system prompt no
+> longer carries a catalog and new prefixes record no schema-3 catalog. This
+> page describes the layout older sessions were written with, so they can still
+> be read. The current contract is FC-005 in
+> [fork-capabilities.md](fork-capabilities.md); the change is recorded in
+> [the 2026-11-21 synchronization](upstream-sync-2026-11-21.md).
+>
+> What still applies to stored data:
+>
+> - The shipped `20260908000000_session_prefix_skill_catalog` migration is
+>   unchanged. The nullable `skill_catalog` column is read only.
+> - On the first read of a frozen prefix, `SessionPrefixSnapshot.getFrozen`
+>   removes the catalog once. A schema-3 row whose content version verifies has
+>   exactly its recorded range removed; the adjacent caller-owned format
+>   instruction is kept and the record is cleared. A row without a usable record
+>   falls back to the generated block pattern, keeping any copies the
+>   host-supplied system contains. A schema-3 position that is ambiguous or
+>   stale removes nothing.
+> - In history, generated v2 snapshots and recognized metadata-free legacy
+>   catalogs are dropped from model input. Stored messages are never rewritten.
+>   User quotations, loaded `<skill_content>` bodies and tagged reminders still
+>   reach the model.
+>
+> The rest of this page is the original description, kept for reference.
 
 The model receives the authorized skill catalog in the system tail, after the
 environment and structured-output blocks and before instruction files. Loading

@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-19
-- Upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
-- Prior reviewed upstream: `53e481145a6abedae20346ad2cdccdaee299a699`
-- Review completion: Both branches adopt the media reader split, media labels and tolerant credential metadata. GitHub Actions HTTP 422 blocks exact-SHA CI. See [the synchronization record](upstream-sync-2026-11-19.md).
-- Main behavior (runtime/tests): `1d0a9ee8c93c5a723aee4740a4c104fd3ef7e574`
+- Last reviewed: 2026-11-21
+- Upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
+- Prior reviewed upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
+- Review completion: local main integration adopts live skill scanning and user-turn catalog deltas with FC-005 permission and historical compatibility. Not yet pushed; CI not verified. Compat propagation is outside this local task. See [the synchronization record](upstream-sync-2026-11-21.md).
+- Main behavior (runtime/tests): `afc1d9da8d732bc86ec9b4fc73da18220341d2a9` (local, unpublished)
 - Inherited compat behavior: `9771c91853c8650402eac6631ddf4b57a5927f51`
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `14af2d4cf623357c42c2c268b19c5b03dec12fdb`. Prior fork `dev/compat` tip: `938df325fb90b768941900b7b7eaf0ff260702b5`
+- Prior fork `main` tip: `4b5dbb976b763f420ac6d34ea0284dda26362cf4`. Inherited compat behavior above is unchanged by this local `main` integration
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-19 media and credential update](upstream-sync-2026-11-19.md), C01–C03 (N=3).
+Latest reviewed synchronization is the [2026-11-21 live skill catalog update](upstream-sync-2026-11-21.md), C01 (N=1).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -146,12 +146,11 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
   `system` portion alone. The final provider payload and telemetry must agree;
   `test/session/llm-gitlab-workflow-system.test.ts` covers this separate FD-002
   carrier. This existing code delta was made explicit by the 2026-09-15 audit.
-- POLICY-04 carrier review: the authorized skill catalog now occupies the
-  frozen system tail after environment/format and before instruction files.
-  FC-005 owns its schema-3 snapshot and legacy-pair migration; this placement
-  does not change instruction enablement, disable event/payload parity, or
-  actor identity. The separate instruction-delivery policy is not advanced by
-  this selection. See [skill catalog layout](skill-catalog-system-tail.md).
+- 2026-11-21 synchronization: the catalog leaves the frozen system tail and
+  arrives as user-turn reminders; FC-005 owns historical schema-3/v2 retirement.
+  Instruction files retain default-on delivery, disable event/payload parity,
+  frozen bytes and actor scope. POLICY-04's prior layout is historical; see
+  [historical layout and migration](skill-catalog-system-tail.md).
 - Watch surfaces: `packages/cli/src/cli/cmd/tui/app.tsx`,
   `packages/cli/src/session/instruction.ts`,
   `packages/cli/src/session/llm-request-prefix.ts`,
@@ -399,6 +398,8 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
 <a id="fd-005--one-resolved-mimo-identity-selects-prompt-discovery-and-tools"></a>
 
 ## FD-005 — one resolved harness selects prompt, discovery, and tools
+
+- 2026-11-21 synchronization: The live skill set never rebuilds agent permission or changes profile-key inputs; explicit session harness precedence remains.
 
 - 2026-11-13 synchronization: adopt upstream `e3592f0e`'s unified default prompt and model-independent Codex opt-in. Retain the fork resolver and explicit session precedence: session `codex`/`default` wins, otherwise process true selects Codex, otherwise default. Model ids, API ids, families and legacy `harness_model` declarations no longer select the harness. The profile policy generation changes consistently for capture, ordinary requests and compaction, preventing reuse of a prior model-selected frozen prompt under the new policy. Historical inference notes below describe the policy before this synchronization. FD-006's authorized implementation pool and direct controls remain active; FC-050 retains recovery of old oversized prefixes.
 
@@ -736,6 +737,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-009 — frozen-context capture fails closed before actor execution
 
+- 2026-11-21 synchronization: Cold/warm capture removes historical catalogs through getFrozen while retaining fail-closed admission, pin ownership and complete native tool contracts.
+
 - 2026-11-04 reminder synchronization (`10b03cf0`, validated): add the receiving session's environment only to an unsent own user message. It neither recaptures nor changes the frozen system, tools, permissions, model identity or parent history. A non-bounded full-context child can retain the parent's reminder and receive its own; duplicate content in that request is accepted. Missing or empty capture still fails closed, and native hidden bounded agents receive no new session-environment part.
 
 - 2026-11-01: FC-002 changes how the `prefix-capture-ref.ts` slot is registered (live captors, so disposing one layer no longer clears another's). The fail-closed admission decision is unchanged.
@@ -863,6 +866,8 @@ the others. Review all three together whenever `session/compaction.ts`,
 
 ### FD-010 — a think-only compaction step is recovered, not discarded
 
+- 2026-11-21 synchronization: Catalog transport changes only; think-only summary recovery and rollback boundaries remain.
+
 - 2026-10-30 synchronization: Adopt `2491aae5` failure/interruption cleanup around the complete compaction effect. Keep reasoning acceptance and rejection of filtered/error output; an unprojected boundary is removed and an interrupted summary is marked aborted. The summarize outcome test exhausts both empty attempts under FD-012.
 
 - 2026-10-20 synchronization: conversation pure-empty retries move to `SessionRetry.policy`; summary assistants remain owned here and by FD-011/FD-012. Keep reasoning-summary acceptance, content-filter/error rejection and the compaction-specific empty retry bound. No compaction owner retires.
@@ -940,6 +945,8 @@ the others. Review all three together whenever `session/compaction.ts`,
 
 ### FD-011 — the compaction request keeps tool calls disabled
 
+- 2026-11-21 synchronization: Compaction consumes the catalog-free frozen prefix and still sends toolChoice "none"; the ported system-tail suite retains its literal wire assertion.
+
 - 2026-10-30 synchronization: The requested boundary model drives summary/prefix/tail selection. Frozen tool membership and `toolChoice: "none"` remain; cleanup creates no summary-time tool authority.
 
 - Status: active
@@ -973,6 +980,8 @@ the others. Review all three together whenever `session/compaction.ts`,
   relaxed to inherit the conversation's `tool_choice`.
 
 ### FD-012 — a compaction step that produced nothing is retried once by default
+
+- 2026-11-21 synchronization: Catalog transport changes only; the empty-step retry limit and rollback behavior remain.
 
 - 2026-10-30 synchronization: Keep the bounded empty-summary retry. Adapt the incoming HTTP rollback fixture to queue two empty responses, so it tests exhausted rollback instead of the successful retry.
 
