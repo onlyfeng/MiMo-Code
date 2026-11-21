@@ -159,18 +159,23 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Sk
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const scope = yield* Scope.Scope
     const discovery = yield* Discovery.Service
     const config = yield* Config.Service
     const bus = yield* Bus.Service
     const fsys = yield* AppFileSystem.Service
 
-    // Keep process-wide builtin discovery alive across caller cancellation; a
-    // failed or interrupted producer is invalidated and can be retried.
+    // Process-wide one-offs: builtin extraction and remote pulls never run on a
+    // turn's critical path after the first time. `reload` resets them.
+    // FC-005: extraction runs as a producer forked into the layer scope, so a
+    // cancelled caller cannot turn a partial extraction into the process-wide
+    // answer. A failed or interrupted producer retires its generation and the
+    // next caller retries; `cachedInvalidateWithTTL` runs the work in the first
+    // caller's fiber and hands concurrent waiters that caller's interruption.
+    const scope = yield* Scope.Scope
     const stable = yield* SynchronizedRef.make<{ generation: number; fiber?: Fiber.Fiber<string | undefined> }>({
       generation: 0,
     })
-    const getBuiltinRoot = Effect.uninterruptibleMask((restore) =>
+    const builtinRoot = Effect.uninterruptibleMask((restore) =>
       SynchronizedRef.modifyEffect(
         stable,
         Effect.fnUntraced(function* (current) {
@@ -189,9 +194,11 @@ export const layer = Layer.effect(
         }),
       ).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
     )
-
-    // Process-wide one-offs: builtin extraction and remote pulls never run on a
-    // turn's critical path after the first time. `reload` resets them.
+    // Retire the producer generation rather than a cached effect: a later
+    // caller re-extracts instead of joining the retired fiber.
+    const invalidateBuiltinRoot = SynchronizedRef.update(stable, (current) => ({ generation: current.generation + 1 }))
+    // An empty pull may be a network failure; retry it after a while instead of
+    // caching it for the process lifetime.
     const PULL_RETRY_MS = 5 * 60 * 1000
     const pulled = new Map<string, { dirs: string[]; at: number }>()
     const parsed = new Map<string, ParseEntry>()
@@ -201,7 +208,7 @@ export const layer = Layer.effect(
       const bundledRoots: string[] = []
 
       if (!Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS) {
-        const root = yield* getBuiltinRoot
+        const root = yield* builtinRoot
         if (root && (yield* fsys.isDir(root))) {
           bundledRoots.push(root)
           yield* scan(state, root, BUILTIN_SKILL_PATTERN, { scope: "builtin" })
@@ -254,12 +261,17 @@ export const layer = Layer.effect(
             ? cached.dirs
             : yield* discovery.pull(url)
         if (dirs !== cached?.dirs) pulled.set(url, { dirs, at: Date.now() })
-        for (const dir of dirs) yield* scan(state, dir, SKILL_PATTERN)
+        for (const dir of dirs) {
+          yield* scan(state, dir, SKILL_PATTERN)
+        }
       }
+
       return { matches: Array.from(state.matches), bundledRoots } satisfies Discovered
     })
 
-    // Parse through a (path, mtime, size) cache. A failed parse is cached too.
+    // Parse through a (path, mtime, size) cache. A failed parse is cached too,
+    // so a broken SKILL.md reports its error once per file version, not once
+    // per refresh.
     const parse = Effect.fnUntraced(function* (match: string) {
       const stat = yield* fsys.stat(match).pipe(Effect.option)
       if (Option.isNone(stat)) {
@@ -270,7 +282,10 @@ export const layer = Layer.effect(
       const size = Number(stat.value.size)
       const hit = parsed.get(match)
       if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit
-      const md = yield* Effect.tryPromise({ try: () => ConfigMarkdown.parse(match), catch: (err) => err }).pipe(
+      const md = yield* Effect.tryPromise({
+        try: () => ConfigMarkdown.parse(match),
+        catch: (err) => err,
+      }).pipe(
         Effect.map((value) => ({ data: value.data as Record<string, unknown>, content: value.content })),
         Effect.catch(
           Effect.fnUntraced(function* (err) {
@@ -299,6 +314,7 @@ export const layer = Layer.effect(
         }),
       ])
       if (previous && previous.key === key) return previous
+
       const skills: Record<string, Info> = {}
       const dirs = new Set<string>()
       discovered.matches.forEach((match, index) => {
@@ -308,19 +324,23 @@ export const layer = Layer.effect(
         if (!entry.md) return
         const frontmatter = Frontmatter.safeParse(entry.md.data)
         if (!frontmatter.success) return
+
         const isBundled = discovered.bundledRoots.some((root) => match.startsWith(root))
         const existing = skills[frontmatter.data.name]
         if (existing) {
+          // User overrides always win: bundled must not overwrite non-bundled
           if (isBundled && !existing.bundled) return
-          if (!isBundled && existing.bundled)
+          if (!isBundled && existing.bundled) {
             log.info("user skill overrides bundled", { name: frontmatter.data.name, location: match })
-          else
+          } else {
             log.warn("duplicate skill name", {
               name: frontmatter.data.name,
               existing: existing.location,
               duplicate: match,
             })
+          }
         }
+
         skills[frontmatter.data.name] = {
           name: frontmatter.data.name,
           description: frontmatter.data.description,
@@ -331,6 +351,7 @@ export const layer = Layer.effect(
           bundled: isBundled || undefined,
         }
       })
+
       log.info("snapshot", { count: Object.keys(skills).length })
       return { skills, dirs: Array.from(dirs), key } satisfies Snapshot
     })
@@ -342,7 +363,6 @@ export const layer = Layer.effect(
         return initial
       }),
     )
-
 
     // Single-flight per directory. Each call takes a ticket; it may only join a
     // scan that started after the ticket was issued, so a refresh always sees
@@ -413,9 +433,7 @@ export const layer = Layer.effect(
     })
 
     const reload = Effect.fn("Skill.reload")(function* () {
-      // Invalidate the builtin producer generation rather than a cached effect:
-      // a later caller re-extracts instead of joining the retired fiber.
-      yield* SynchronizedRef.update(stable, (current) => ({ generation: current.generation + 1 }))
+      yield* invalidateBuiltinRoot
       pulled.clear()
       parsed.clear()
       yield* refresh()

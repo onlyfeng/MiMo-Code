@@ -58,7 +58,7 @@ export const SkillTool = Tool.define(
                   `workflow({ operation: "run", name: "${params.name}", args: { ... } }). Do NOT use the skill tool for it.`,
               )
             }
-            // Use the same permission-filtered set as the per-turn system catalog,
+            // Use the same permission-filtered set as the catalog reminder,
             // so a near miss cannot reveal a skill the model is not allowed to see.
             const names = (yield* skill.modelInvocable({ ...agent, permission }))
               .map((item) => item.name)
