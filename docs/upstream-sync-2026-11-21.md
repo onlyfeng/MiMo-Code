@@ -10,11 +10,11 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime tip is `4973d6a8a222910ac58cf54e8926f6c5d147062e`: the merge of
-upstream plus the fallback correction for ambiguous schema-3 positions. This
-record covers local integration of `main` only: nothing was pushed and no pull
-request was opened. The `dev/compat` propagation is recorded in the same file on
-that branch.
+The runtime tip is `b922a55199da6338cf020b77b1bc449b40f6fafa`: the merge of
+upstream, the fallback correction for ambiguous schema-3 positions, and the
+review fix that keeps the structured-output instruction out of frozen
+prefixes. The `dev/compat` propagation is recorded in the same file on that
+branch.
 
 ## Capability inventory and results (1)
 
@@ -50,11 +50,14 @@ that branch.
   marker-substring test, so user quotations and loaded `<skill_content>`
   bodies still reach the model. Stored messages are never rewritten.
 - **Request-local structured output.** The structured-output instruction is
-  appended per request rather than frozen, so a session that switches to JSON
-  mode after its prefix was pinned still receives it and switching back drops
-  it, while the snapshot row stays byte-stable. Upstream computes system
-  additions only when no frozen prefix exists, which would silently lose that
-  instruction for a warm session.
+  appended per request and never contributes to a pinned prefix, in both
+  directions: a session that switches to JSON mode after its prefix was frozen
+  still receives it, and a prefix captured cold while already in JSON mode does
+  not carry it, so a later plain-text request on that prefix stops demanding
+  the then-unregistered `StructuredOutput` tool. The snapshot row stays
+  byte-stable across those transitions. Upstream computes system additions only
+  when no frozen prefix exists, which loses the instruction for a warm session
+  and freezes it for a cold structured one.
 
 ### Retired fork behavior
 
@@ -102,7 +105,7 @@ Catalog and skill surface, all passing:
 | `test/tool/skill-search.test.ts` | 6 pass |
 | `test/session/skill-catalog.test.ts` | 35 pass |
 | `test/session/skill-catalog-capture.test.ts` | 3 pass |
-| `test/session/skill-catalog-frozen-refresh.test.ts` | 1 pass |
+| `test/session/skill-catalog-frozen-refresh.test.ts` | 2 pass |
 | `test/session/skill-catalog-reopen.test.ts` | 1 pass |
 | `test/session/skill-catalog-system-tail.test.ts` | 4 pass |
 | `test/session/prompt-skill-command-multi.test.ts` | 12 pass |
@@ -115,6 +118,10 @@ Catalog and skill surface, all passing:
 | `test/command/loops.test.ts` | 2 pass |
 | `test/command/rebuild.test.ts` | 2 pass |
 | `test/installation/no-instance.test.ts` | 2 pass |
+
+Structured output, all passing: `structured-output` 25,
+`structured-output-integration` 1, `structured-output-retry` 3,
+`turn-queue-admission` 20.
 
 Compaction and checkpoint, all passing: `compaction-agent-scope` 3,
 `compaction-projection` 11, `compaction-reasoning-fallback` 10,
@@ -154,17 +161,62 @@ Compaction and checkpoint, all passing: `compaction-agent-scope` 3,
   window's first user message, outside the system prompt". These are the
   harness and Windows fixture cases described in
   [the 2026-11-19 record](upstream-sync-2026-11-19.md).
+- `test/session/codex-compact.test.ts`: 2 pass, 8 fail, identical names on
+  this change and at `origin/main`. The eight are the explicit-Codex harness
+  cases ("request-pinned actor" status/tool denial/permission denial,
+  "production wire retains control tools", the two "hidden direct MCP" cases,
+  "nested bash approval" and "nested view_image"). The ninth case, "warm
+  snapshots follow structured schema and text format changes", passes on both.
+- `test/actor/spawn.test.ts`: 77 pass, 3 fail, identical names at
+  `origin/main`: "exposes GPT orchestration and read tools to read-only GPT
+  subagents in explicit Codex mode", "a subagent's own window carries the
+  session environment reminder but not memory paths" and "resume preserves
+  the interrupted persistent actor user and frozen context".
+- `test/workflow/runtime.test.ts`: 28 pass, 1 fail, identical name at
+  `origin/main`: "settles without terminal notifications after its parent
+  generation reloads".
 
-The baseline worktree used for these reproductions was created from
-`origin/main`, installed with `bun ci`, and removed afterwards. Its first
-install produced an incomplete `drizzle-orm` tree whose module-resolution
-errors are not reproductions; the recorded results come from a clean
-reinstall.
+Baseline worktrees used for these reproductions were created from
+`origin/main`, installed with `bun ci`, and removed afterwards. A first install
+can produce an incomplete dependency tree (`drizzle-orm`,
+`@jridgewell/gen-mapping`) whose module-resolution errors are not
+reproductions; the recorded results come from a clean reinstall.
+
+## Review follow-up
+
+The automated review on the pull request reported one finding against
+`71cf0272`, confirmed and fixed:
+
+- **Structured-output instruction frozen by a cold capture.** The instruction
+  was still part of `currentAdditions`, which supplies the system tail only
+  when no prefix is frozen. `LLM.buildSystemArray` collapses that tail into one
+  string and `SessionPrefixSnapshot.pin` stores it, so a session whose first
+  request used `json_schema` kept telling the model to call `StructuredOutput`
+  on later plain-text requests, after the tool was gone. The request-local
+  guard compared whole array elements, so it never found the embedded copy and
+  that first request carried the instruction twice. The instruction now never
+  enters `currentAdditions`, and the guard tests substrings.
+  `codex-compact.test.ts` "warm snapshots follow structured schema and text
+  format changes" already asserted this and failed on `71cf0272` while passing
+  at `origin/main`; it passes again. A default-harness regression case in
+  `skill-catalog-frozen-refresh.test.ts` covers the cold JSON capture, the
+  single wire copy and the switch back to text; reverting the source fix makes
+  it fail. `packages/cli` typecheck passes and root lint reports 0 errors.
 
 ## Publication and CI
 
-Not yet pushed; CI not verified (尚未推送，未验证). Nothing was pushed, no pull request was opened and no
-workflow was dispatched, so there are no exact-SHA CI runs for these commits.
-Remote branch tips, CI acceptance and propagation into `dev/compat` all remain
-outstanding and are required before this synchronization can be called
-complete.
+Branch `sync/upstream-128adcb7-main` is pushed to `onlyfeng/MiMo-Code` and
+proposed as pull request #263 against `main`.
+
+CI is not verified and cannot be. GitHub Actions is disabled for
+`onlyfeng/MiMo-Code`: the pull request reports no checks, and dispatching
+`test.yml`, `lint.yml` and `typecheck.yml` each returns
+`HTTP 422: Actions has been disabled for this repository`. There are therefore
+no exact-SHA CI runs for these commits, and the only evidence is the local
+validation above. The same refusal was recorded for the previous
+synchronization.
+
+Propagation into `dev/compat` is prepared locally on
+`sync/upstream-128adcb7-compat` and is not pushed. It must be re-merged from
+`main` after this pull request lands, because the compat branch predates the
+`main` commits above.

@@ -1335,8 +1335,12 @@ own source list remains the complete watch surface.
   poison; reload invalidates its generation. Interrupted directory scans do
   not publish a partial snapshot and later callers retry.
   Frozen prefixes/profile keys and native tool contracts do not depend on live
-  skills. Existing schema-3 rows lose only their verified catalog range,
-  preserving adjacent format instructions and other frozen bytes. Legacy
+  skills. The structured-output instruction is request-owned in both
+  directions: it never enters a pinned prefix, including a cold capture made
+  while the request is already in `json_schema` mode, and a later plain-text
+  request on that prefix carries no copy of it. Existing schema-3 rows lose
+  only their verified catalog range, preserving adjacent format instructions
+  and other frozen bytes. Legacy
   system blocks are stripped with host-owned occurrences protected. Historical
   v2 and recognized generated user catalogs are suppressed in projection;
   stored history is never rewritten, quotations and loaded `<skill_content>`
@@ -1371,7 +1375,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `4973d6a8a222910ac58cf54e8926f6c5d147062e` (local, unpublished).
+  main behavior `b922a55199da6338cf020b77b1bc449b40f6fafa` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that
