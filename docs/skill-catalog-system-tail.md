@@ -15,8 +15,10 @@
 >   unchanged. The nullable `skill_catalog` column is read only.
 > - On the first read of a frozen prefix, `SessionPrefixSnapshot.getFrozen`
 >   removes the catalog once. A schema-3 row whose content version verifies has
->   exactly its recorded range removed; the adjacent caller-owned format
->   instruction is kept and the record is cleared. A row without a usable record
+>   exactly its recorded managed range removed, including the format prefix
+>   (the structured-output instruction a JSON-mode turn pinned there, which the
+>   request now appends only in JSON mode), and the record is cleared. A row
+>   without a usable record
 >   falls back to the generated block pattern, keeping any copies the
 >   host-supplied system contains. A schema-3 position that is ambiguous or
 >   stale also uses that strict block-pattern fallback.

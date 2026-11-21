@@ -1339,12 +1339,13 @@ own source list remains the complete watch surface.
   directions: it never enters a pinned prefix, including a cold capture made
   while the request is already in `json_schema` mode, and a later plain-text
   request on that prefix carries no copy of it. Existing schema-3 rows lose
-  only their verified catalog range, preserving adjacent format instructions
-  and other frozen bytes. Legacy
-  system blocks are stripped with host-owned occurrences protected. Historical
-  v2 and recognized generated user catalogs are suppressed in projection;
-  stored history is never rewritten, quotations and loaded `<skill_content>`
-  survive. Ambiguous schema-3 positions fail closed and remain a review item.
+  exactly their verified managed range, the catalog and its recorded format
+  prefix (the engine's structured-output instruction), and keep every other
+  frozen byte. Rows without a usable record, and schema-3 rows whose position
+  is ambiguous or stale, fall back to the strict generated block pattern with
+  host-owned occurrences protected. Historical v2 and recognized generated
+  user catalogs are suppressed in projection; stored history is never
+  rewritten, quotations and loaded `<skill_content>` survive.
 - Upstream relationship: adopts live scan and reminder/delta placement; retains
   stronger shared authorization, producer lifetime, historical recognition and
   schema-3 managed-range compatibility. The old system-tail POLICY-04 selection
@@ -1375,7 +1376,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `b922a55199da6338cf020b77b1bc449b40f6fafa` (pull request #263).
+  main behavior `cac9eecddb4c8b2e302eee52688e475e587d8e60` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that

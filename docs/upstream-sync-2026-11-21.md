@@ -10,10 +10,10 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime tip is `b922a55199da6338cf020b77b1bc449b40f6fafa`: the merge of
-upstream, the fallback correction for ambiguous schema-3 positions, and the
-review fix that keeps the structured-output instruction out of frozen
-prefixes. The `dev/compat` propagation is recorded in the same file on that
+The runtime tip is `cac9eecddb4c8b2e302eee52688e475e587d8e60`: the merge of
+upstream, the fallback correction for ambiguous schema-3 positions, and two
+review fixes that keep the structured-output instruction out of frozen
+prefixes, both new and historical. The `dev/compat` propagation is recorded in the same file on that
 branch.
 
 ## Capability inventory and results (1)
@@ -40,8 +40,10 @@ branch.
 - **Historical data.** The shipped
   `20260908000000_session_prefix_skill_catalog` migration is unchanged.
   `SessionPrefixSnapshot.getFrozen` removes a historical catalog once: a
-  schema-3 row whose content version verifies loses exactly its recorded range
-  and keeps the adjacent caller-owned format instruction; a row without a
+  schema-3 row whose content version verifies loses exactly its recorded
+  managed range, the catalog together with its format prefix (the engine's
+  structured-output instruction, which the request now appends only in JSON
+  mode); a row without a
   usable record falls back to the block pattern with host-supplied occurrences
   preserved. If a schema-3 position is ambiguous or stale, strict generated
   block-pattern removal is the fallback; host-supplied matching blocks remain.
@@ -185,7 +187,7 @@ reproductions; the recorded results come from a clean reinstall.
 ## Review follow-up
 
 The automated review on the pull request reported one finding against
-`71cf0272`, confirmed and fixed:
+`71cf0272` and one against `06bf5a2c`. Both were confirmed and fixed:
 
 - **Structured-output instruction frozen by a cold capture.** The instruction
   was still part of `currentAdditions`, which supplies the system tail only
@@ -201,7 +203,23 @@ The automated review on the pull request reported one finding against
   at `origin/main`; it passes again. A default-harness regression case in
   `skill-catalog-frozen-refresh.test.ts` covers the cold JSON capture, the
   single wire copy and the switch back to text; reverting the source fix makes
-  it fail. `packages/cli` typecheck passes and root lint reports 0 errors.
+  it fail. Fixed in `b922a551`.
+- **Structured-output instruction kept by schema-3 retirement.** A schema-3
+  row's managed range was its format prefix followed by the catalog, and that
+  prefix was only ever the engine's structured-output instruction. The retired
+  re-pinning code cleared it when a session returned to text mode. Retirement
+  on read removed the catalog but kept the prefix, then persisted the system
+  and cleared the record, so a session pinned in JSON mode kept demanding
+  `StructuredOutput` on every later plain-text request. The whole managed range
+  now goes, and the request appends the instruction whenever it is in JSON
+  mode. The schema-3 cases in `skill-catalog.test.ts`, `prefix-snapshot.test.ts`
+  and `prompt-skill-command-multi.test.ts` previously asserted that the prefix
+  stays. They now assert that it is removed and that the retired row equals
+  the pre-catalog bytes, and each fails when the old behavior is restored.
+  Fixed in `cac9eecd`.
+
+After both fixes, `packages/cli` typecheck passes and root lint reports 0
+errors.
 
 ## Publication and CI
 

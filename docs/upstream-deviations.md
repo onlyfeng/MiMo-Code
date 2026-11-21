@@ -18,7 +18,7 @@ renumbered to close gaps.
 - Upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
 - Prior reviewed upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
 - Review completion: local main integration adopts live skill scanning and user-turn catalog deltas with FC-005 permission and historical compatibility. Not yet pushed; CI not verified. Compat propagation is outside this local task. See [the synchronization record](upstream-sync-2026-11-21.md).
-- Main behavior (runtime/tests): `b922a55199da6338cf020b77b1bc449b40f6fafa` (pull request #263)
+- Main behavior (runtime/tests): `cac9eecddb4c8b2e302eee52688e475e587d8e60` (pull request #263)
 - Inherited compat behavior: `9771c91853c8650402eac6631ddf4b57a5927f51`
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
 - Prior fork `main` tip: `4b5dbb976b763f420ac6d34ea0284dda26362cf4`. Inherited compat behavior above is unchanged by this local `main` integration
