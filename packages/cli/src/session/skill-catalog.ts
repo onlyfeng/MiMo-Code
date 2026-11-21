@@ -156,11 +156,12 @@ export function stripLegacySkillCatalog(
 }
 
 /**
- * Strip exactly the range a schema-3 row recorded, keeping the adjacent
- * caller-owned format instruction. Returns undefined when there is no usable
- * record or its position is ambiguous or stale, so the caller falls back to
- * the generated block pattern. Leaving the block would show the catalog twice
- * once the entry reminder arrives; the pattern only matches the engine's own
+ * Strip exactly the managed range a schema-3 row recorded: its format prefix
+ * (the engine's structured-output instruction, when JSON mode pinned it) and
+ * the catalog. Returns undefined when there is no usable record or its
+ * position is ambiguous or stale, so the caller falls back to the generated
+ * block pattern. Leaving the block would show the catalog twice once the entry
+ * reminder arrives; the pattern only matches the engine's own
  * `Skills available in this session:` block, never arbitrary text.
  */
 function stripRecordedSkillCatalog(system: readonly string[], snapshot?: SkillCatalogSnapshot | null) {
@@ -181,10 +182,15 @@ function stripRecordedSkillCatalog(system: readonly string[], snapshot?: SkillCa
     system[slot.message].slice(slot.offset, slot.offset + managed.length) !== managed
   )
     return undefined
-  const offset = slot.offset + (snapshot.formatPrefix?.length ?? 0)
+  // The whole managed range goes, format prefix included. That prefix was only
+  // ever the engine's own structured-output instruction, kept refreshable
+  // inside the range by the retired re-pinning code. Leaving it frozen would
+  // outlive its request: a later plain-text turn on this prefix would still
+  // demand the then-unregistered StructuredOutput tool. The request-local
+  // assembly adds the instruction back whenever the request is in JSON mode.
   return system.flatMap((text, index) => {
     if (index !== slot.message) return [text]
-    const next = text.slice(0, offset) + text.slice(offset + snapshot.text.length)
+    const next = text.slice(0, slot.offset) + text.slice(slot.offset + managed.length)
     return next ? [next] : []
   })
 }
@@ -203,7 +209,8 @@ export type SkillCatalogSnapshot = {
   turnID: MessageID
   // Position in the frozen system, independent of the catalog content hash.
   systemSlot?: { message: number; offset: number }
-  // Caller-owned output-format instruction shares the managed range.
+  // Engine structured-output instruction stored inside the managed range;
+  // retired with the catalog because it is now appended per request.
   formatPrefix?: string
 }
 

@@ -527,9 +527,10 @@ describe("skill command with additional mentions", () => {
           yield* turn("second request")
 
           const second = (yield* llm.inputs)[1]
-          // The caller-owned format instruction survives; only the catalog goes.
+          // The pinned JSON-mode format prefix retires with the catalog, so this
+          // plain-text request carries neither; the original bytes stay.
           expect(systemOf(second).startsWith(original)).toBe(true)
-          expect(systemOf(second)).toContain("STALE_JSON_MODE")
+          expect(systemOf(second)).not.toContain("STALE_JSON_MODE")
           expect(systemOf(second)).not.toContain("Skills available in this session:")
           expect(usersOf(second)).not.toContain("Authoritative skills catalog snapshot v2:")
           expect(count(usersOf(second), ENTRY)).toBe(1)
@@ -537,6 +538,8 @@ describe("skill command with additional mentions", () => {
             db.select().from(SessionPrefixSnapshotTable).where(eq(SessionPrefixSnapshotTable.session_id, session.id)).get(),
           )
           expect(stored?.skill_catalog).toBeNull()
+          // Retirement restores the exact pre-catalog bytes, format prefix gone.
+          expect(stored?.system).toEqual(pinned[0].system)
           // History is not rewritten: the v2 part is still stored, only not sent.
           const parts = (yield* sessions.messages({ sessionID: session.id })).flatMap((message) => message.parts)
           expect(parts.some((part) => part.type === "text" && part.text === v2)).toBe(true)

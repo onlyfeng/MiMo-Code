@@ -246,10 +246,11 @@ export const replaceSystem = Effect.fn("SessionPrefixSnapshot.replaceSystem")(fu
  * lived in the system tail still carry it; strip it once and persist the
  * result, since the catalog now arrives as a user-turn reminder.
  *
- * FC-005: a schema-3 row strips exactly its recorded range (keeping the
- * caller-owned format instruction); an older row falls back to the legacy
- * block pattern. A schema-3 row whose range cannot be proven is left as is
- * rather than guessing, and its stale record is not cleared.
+ * FC-005: a schema-3 row strips exactly its recorded managed range, the
+ * catalog and the structured-output instruction stored as its format prefix,
+ * which the request now appends only in JSON mode. A row without a usable
+ * record, or whose recorded position is ambiguous or stale, falls back to the
+ * strict generated block pattern with host-supplied occurrences kept.
  */
 export const getFrozen = Effect.fn("SessionPrefixSnapshot.getFrozen")(function* (input: {
   sessionID: SessionID

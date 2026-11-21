@@ -224,8 +224,9 @@ describe("session prefix snapshot", () => {
         const retired = await AppRuntime.runPromise(
           SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey }),
         )
-        // Only the catalog range goes; the caller-owned format instruction stays.
-        expect(retired?.system).toEqual(["ENV", "JSON FORMAT\n\n", "INSTRUCTIONS"])
+        // The whole managed range goes, format prefix included; a system
+        // message left empty is dropped rather than sent blank.
+        expect(retired?.system).toEqual(["ENV", "INSTRUCTIONS"])
         expect(retired?.system_hash).toBe(SessionPrefixSnapshot.systemHash(retired!.system))
         expect(retired?.skill_catalog).toBeNull()
         expect(retired?.tools).toEqual(tools)

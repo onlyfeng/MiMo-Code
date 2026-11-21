@@ -207,10 +207,12 @@ describe("schema-3 frozen catalog strip", () => {
     ...extra,
   })
 
-  test("removes exactly the recorded range and keeps the caller-owned format instruction", () => {
+  test("removes exactly the recorded range, its format prefix included", () => {
+    // The format prefix is the engine's structured-output instruction; the
+    // request appends it per JSON request now, so a frozen copy must not stay.
     const system = ["ENV\nJSON FORMAT\n\ndirectory\nINSTRUCTIONS"]
     const snapshot = record("directory", { formatPrefix: "JSON FORMAT\n\n", systemSlot: { message: 0, offset: 4 } })
-    expect(Catalog.stripLegacySkillCatalog(system, "", snapshot)).toEqual(["ENV\nJSON FORMAT\n\n\nINSTRUCTIONS"])
+    expect(Catalog.stripLegacySkillCatalog(system, "", snapshot)).toEqual(["ENV\n\nINSTRUCTIONS"])
   })
 
   test("drops a catalog-only system message instead of leaving it empty", () => {
