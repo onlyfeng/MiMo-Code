@@ -3632,3 +3632,7 @@ Full live sync advances review from `c9c91d7b6fff20164629475218fa0a58e16d14b8` t
 ## 2026-11-18 memory test isolation
 
 The one-commit review advances from `c34db3645db4ffdf7f2b29a788bd76d9ec3be531` to `53e481145a6abedae20346ad2cdccdaee299a699`. C01 adopts the shared memory directory and FTS reset under FC-008 on main `51c508648582e50274ce7f46eb6464fc73ce2858` and compat `c813b0f05988b9cdb9d291d10ea29f17ae673eeb`. The local affected checks pass. Exact-SHA CI is blocked by GitHub Actions HTTP 422. See [the synchronization record](upstream-sync-2026-11-18.md).
+
+## 2026-11-22 brief session list and compat catalog propagation
+
+The review advances from `128adcb782a72ef3d10752ab9c14e4fdcb319099` (2026-11-21, pull request #263, which recorded its review only in the FD header) to `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`. C02 adopts the opt-in brief global session list on main `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`; C01, the live skill catalog, reaches compat `671bb78490a76405f8213fc8724bb596a74f2695`. No FD or FC entry changes. GitHub Actions dispatch remains blocked with HTTP 422. See [the synchronization record](upstream-sync-2026-11-22.md).
