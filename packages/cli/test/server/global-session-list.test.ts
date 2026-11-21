@@ -158,7 +158,8 @@ describe("session.listGlobal", () => {
   })
 
   test("route returns full sessions by default and brief sessions for view=brief", async () => {
-    await using tmp = await tmpdir({ git: true })
+    // FC-008: the route passes the InstanceMiddleware cwd containment check only for a fixture under cwd.
+    await using tmp = await tmpdir({ git: true, root: "cwd" })
     const system = "s".repeat(64 * 1024)
     const session = await Instance.provide({
       directory: tmp.path,
