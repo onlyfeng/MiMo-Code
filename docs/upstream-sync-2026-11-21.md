@@ -40,8 +40,9 @@ was opened and compat propagation is out of scope.
   schema-3 row whose content version verifies loses exactly its recorded range
   and keeps the adjacent caller-owned format instruction; a row without a
   usable record falls back to the block pattern with host-supplied occurrences
-  preserved. An ambiguous or stale schema-3 position removes nothing. In
-  history, generated v2 snapshots and recognized metadata-free legacy catalogs
+  preserved. If a schema-3 position is ambiguous or stale, strict generated
+  block-pattern removal is the fallback; host-supplied matching blocks remain.
+  In history, generated v2 snapshots and recognized metadata-free legacy catalogs
   are suppressed by the fork's strict recognizer rather than upstream's
   marker-substring test, so user quotations and loaded `<skill_content>`
   bodies still reach the model. Stored messages are never rewritten.

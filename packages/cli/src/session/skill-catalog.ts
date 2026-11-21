@@ -158,8 +158,10 @@ export function stripLegacySkillCatalog(
 /**
  * Strip exactly the range a schema-3 row recorded, keeping the adjacent
  * caller-owned format instruction. Returns undefined when there is no usable
- * record, so the caller falls back to the block pattern. An ambiguous or stale
- * position yields the system unchanged rather than guessing which text to cut.
+ * record or its position is ambiguous or stale, so the caller falls back to
+ * the generated block pattern. Leaving the block would show the catalog twice
+ * once the entry reminder arrives; the pattern only matches the engine's own
+ * `Skills available in this session:` block, never arbitrary text.
  */
 function stripRecordedSkillCatalog(system: readonly string[], snapshot?: SkillCatalogSnapshot | null) {
   if (snapshot?.schema !== 3 || !snapshot.text) return undefined
@@ -178,7 +180,7 @@ function stripRecordedSkillCatalog(system: readonly string[], snapshot?: SkillCa
     typeof system[slot.message] !== "string" ||
     system[slot.message].slice(slot.offset, slot.offset + managed.length) !== managed
   )
-    return [...system]
+    return undefined
   const offset = slot.offset + (snapshot.formatPrefix?.length ?? 0)
   return system.flatMap((text, index) => {
     if (index !== slot.message) return [text]

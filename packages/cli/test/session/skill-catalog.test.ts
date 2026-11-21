@@ -222,10 +222,13 @@ describe("schema-3 frozen catalog strip", () => {
     expect(Catalog.stripLegacySkillCatalog(["ENV directory PLUGIN"], "", record("directory"))).toEqual(["ENV  PLUGIN"])
   })
 
-  test("an ambiguous or stale position keeps every byte", () => {
-    expect(Catalog.stripLegacySkillCatalog(["old old"], "", record("old"))).toEqual(["old old"])
-    const stale = record("old", { systemSlot: { message: 0, offset: 1 } })
-    expect(Catalog.stripLegacySkillCatalog(["old"], "", stale)).toEqual(["old"])
+  test("an ambiguous or stale position falls back to the generated block pattern", () => {
+    const block = "Skills available in this session:\n<available_skills>\n  <skill>\n    <name>test</name>\n    <description>description</description>\n    <location>file:/tmp/example</location>\n  </skill>\n</available_skills>"
+    const system = [`base\n\n${block}\n\nplugin`, `another\n\n${block}`]
+    const expected = ["base\n\nplugin", "another"]
+    expect(Catalog.stripLegacySkillCatalog(system, "", record(block))).toEqual(expected)
+    const stale = record(block, { systemSlot: { message: 0, offset: 1 } })
+    expect(Catalog.stripLegacySkillCatalog(system, "", stale)).toEqual(expected)
   })
 
   test("a record whose content version does not match falls back to the block pattern", () => {

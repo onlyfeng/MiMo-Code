@@ -19,7 +19,7 @@
 >   instruction is kept and the record is cleared. A row without a usable record
 >   falls back to the generated block pattern, keeping any copies the
 >   host-supplied system contains. A schema-3 position that is ambiguous or
->   stale removes nothing.
+>   stale also uses that strict block-pattern fallback.
 > - In history, generated v2 snapshots and recognized metadata-free legacy
 >   catalogs are dropped from model input. Stored messages are never rewritten.
 >   User quotations, loaded `<skill_content>` bodies and tagged reminders still
