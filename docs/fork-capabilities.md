@@ -1371,7 +1371,7 @@ own source list remains the complete watch surface.
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `afc1d9da8d732bc86ec9b4fc73da18220341d2a9` (local, unpublished).
+  main behavior `4973d6a8a222910ac58cf54e8926f6c5d147062e` (local, unpublished).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that

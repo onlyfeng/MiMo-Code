@@ -10,8 +10,11 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime merge is `afc1d9da8d732bc86ec9b4fc73da18220341d2a9`. This record covers local integration only: nothing was pushed, no pull request
-was opened and compat propagation is out of scope.
+The runtime tip is `4973d6a8a222910ac58cf54e8926f6c5d147062e`: the merge of
+upstream plus the fallback correction for ambiguous schema-3 positions. This
+record covers local integration of `main` only: nothing was pushed and no pull
+request was opened. The `dev/compat` propagation is recorded in the same file on
+that branch.
 
 ## Capability inventory and results (1)
 
