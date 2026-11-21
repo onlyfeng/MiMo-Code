@@ -10,11 +10,13 @@ range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
 merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
 `packages/cli/migration/` are byte-identical to the starting fork.
 
-The runtime tip is `a99333128562389148af961df0ad70e4566b699b`: the merge of
-upstream, the fallback correction for ambiguous schema-3 positions, and three
-review fixes: two keep the structured-output instruction out of frozen
-prefixes, new and historical, and one anchors catalog delta replay on an
-entry. The `dev/compat` propagation is recorded in the same file on that
+The runtime tip is `0f29dc2bbc07a737d7df439526d844fafd3acbcc`: the merge of upstream, the
+entry-anchored catalog delta replay, and the takeover changes below, which
+restore FD-005's dropped regression test, keep `skill/index.ts` at upstream
+text plus the builtin producer, and return prefix rotation and the
+structured-output instruction to upstream's rule with a read-time cleanup of
+fork-written prefixes. The earlier review fixes `b922a551` and `cac9eecd` are
+superseded by that last change. The `dev/compat` propagation is recorded in the same file on that
 branch.
 
 ## Capability inventory and results (1)
@@ -28,39 +30,54 @@ branch.
 - **FC-005 authorization.** `SystemPrompt.skillCatalog` takes the same
   `canLoadSkills`/`canSearchSkills` gate as the tools, over effective
   `Agent.runtimePermission`, the agent tool allowlist and the owning user
-  message's tool toggles. Upstream gated the catalog on `permission.skill`
-  alone and dropped the per-call gate in both tools. The rescan-on-miss added
-  by upstream runs inside those gates and re-reads the authorized set, so it
-  cannot widen visibility.
+  message's tool toggles. Upstream gates the catalog on `permission.skill`
+  alone; its tools keep their per-call permission ask but never had the fork's
+  shared allowlist and tool-toggle gate. The rescan-on-miss added by upstream
+  runs inside those gates and re-reads the authorized set, so it cannot widen
+  visibility.
 - **Cancellation safety.** Builtin bundle extraction stays a producer forked
   into the layer scope, so a cancelled caller cannot turn a partial extraction
   into the process-wide answer; failure and interruption retire the generation
-  so the next caller retries. Upstream's `Effect.onInterrupt` invalidation is
-  not equivalent: it leaves a failed extraction cached for the process. Live
-  directory scans keep upstream's ticketed single-flight.
+  so the next caller retries. Upstream's `cachedInvalidateWithTTL` runs the
+  extraction in the first caller's fiber, so an interrupted first caller hands
+  its interruption to every concurrent waiter, and its `Effect.onInterrupt`
+  invalidation leaves a failed extraction cached for the process.
+  `skill/index.ts` differs from upstream only by this producer; live directory
+  scans keep upstream's ticketed single-flight.
 - **Historical data.** The shipped
   `20260908000000_session_prefix_skill_catalog` migration is unchanged.
-  `SessionPrefixSnapshot.getFrozen` removes a historical catalog once: a
-  schema-3 row whose content version verifies loses exactly its recorded
-  managed range, the catalog together with its format prefix (the engine's
-  structured-output instruction, which the request now appends only in JSON
-  mode); a row without a
-  usable record falls back to the block pattern with host-supplied occurrences
-  preserved. If a schema-3 position is ambiguous or stale, strict generated
-  block-pattern removal is the fallback; host-supplied matching blocks remain.
+  `SessionPrefixSnapshot.getFrozen` cleans a row written by an older engine
+  once, on read: upstream's generated block pattern removes the system-tail
+  catalog (host-supplied copies kept); the engine's structured-output
+  instruction is removed (host copies kept) when the row's own tools lack
+  StructuredOutput; a system message left blank is dropped; any schema-3
+  record is cleared. The recorded range is not needed: its catalog text is the
+  generated block and its format prefix is that instruction.
   In history, generated v2 snapshots and recognized metadata-free legacy catalogs
   are suppressed by the fork's strict recognizer rather than upstream's
   marker-substring test, so user quotations and loaded `<skill_content>`
   bodies still reach the model. Stored messages are never rewritten.
-- **Request-local structured output.** The structured-output instruction is
-  appended per request and never contributes to a pinned prefix, in both
-  directions: a session that switches to JSON mode after its prefix was frozen
-  still receives it, and a prefix captured cold while already in JSON mode does
-  not carry it, so a later plain-text request on that prefix stops demanding
-  the then-unregistered `StructuredOutput` tool. The snapshot row stays
-  byte-stable across those transitions. Upstream computes system additions only
-  when no frozen prefix exists, which loses the instruction for a warm session
-  and freezes it for a cold structured one.
+- **Pin race.** A cold pin that loses to a concurrent capture adopts the
+  winner's system only when the winner froze the same tools, so the row and
+  the request agree; otherwise it rotates to its own system and tools in the
+  same step, as any tools mismatch now does. Fork `main` rotated to the
+  winner's system with the new tools, a system-tail catalog rule from
+  `3e2fca0e` that would freeze a JSON-mode StructuredOutput tool without its
+  instruction. Upstream has no race handling: it sends its own system and
+  leaves the winner's row.
+
+### Adopted with upstream
+
+- **Prefix rotation and structured output.** A frozen prefix whose tools hash
+  differs is rebuilt from current additions and rotated, and the
+  structured-output instruction is one of those additions in `json_schema`
+  mode. JSON mode adds the StructuredOutput tool before the tools hash is
+  taken, so every switch between JSON and text rotates the prefix, and the
+  instruction is frozen exactly when its tool is. The fork had kept the frozen
+  system across tools-only rotations since `8ed2c580` (2026-09-08), so that the
+  system-tail catalog changed only at its own slot; with the catalog gone from
+  the system that rule has no purpose, and it was what forced the instruction
+  out of the prefix.
 
 ### Retired fork behavior
 
@@ -73,6 +90,11 @@ branch.
   The reader-side types and helpers stay for stored rows.
 - `SystemPrompt.skills` (returning catalog text) is replaced by
   `skillCatalog` plus `refreshSkills`.
+- Keeping the frozen system across tools-hash rotations (`8ed2c580`), and with
+  it the request-local structured-output append (`b922a551`) and the schema-3
+  exact-range retirement (`stripRecordedSkillCatalog`, `cac9eecd`) that this
+  PR had built on it. The `skillCatalog` parameters of `pin` and `rotate`,
+  which no caller passed any more, are removed.
 
 ## Local validation
 
@@ -206,7 +228,7 @@ and fixed:
   at `origin/main`; it passes again. A default-harness regression case in
   `skill-catalog-frozen-refresh.test.ts` covers the cold JSON capture, the
   single wire copy and the switch back to text; reverting the source fix makes
-  it fail. Fixed in `b922a551`.
+  it fail. Fixed in `b922a551`; superseded by `0f29dc2b` (see the takeover review below).
 - **Structured-output instruction kept by schema-3 retirement.** A schema-3
   row's managed range was its format prefix followed by the catalog, and that
   prefix was only ever the engine's structured-output instruction. The retired
@@ -219,7 +241,7 @@ and fixed:
   and `prompt-skill-command-multi.test.ts` previously asserted that the prefix
   stays. They now assert that it is removed and that the retired row equals
   the pre-catalog bytes, and each fails when the old behavior is restored.
-  Fixed in `cac9eecd`.
+  Fixed in `cac9eecd`; superseded by `0f29dc2b` (see the takeover review below).
 
 A third finding, against `9fc21241`, concerns behavior adopted unchanged from
 upstream. It was confirmed and fixed as a fork deviation:
@@ -240,6 +262,55 @@ upstream. It was confirmed and fixed as a fork deviation:
 
 After these fixes, `packages/cli` typecheck passes and root lint reports 0
 errors.
+
+### Takeover review
+
+A fourth automated finding, against `6fe5b0bb`, showed that a schema-3 row
+whose catalog text was empty but whose format prefix held the instruction was
+rejected by the exact-range guard, so its record was cleared while the
+instruction stayed. An adversarial review of the same head found that this was
+one case of a wider gap, and that the structure behind it was avoidable:
+
+- Legacy rows without a schema-3 record (`skill_catalog` NULL) that a JSON-mode
+  cold capture had pinned kept the instruction; fork `main` had retired it
+  through `legacyFormatPrefix`. The exact-range path also left a doubled
+  separator in the real single-string layout, and a record that stripped
+  nothing was never cleared.
+- The exact-range path, the request-local append and its second system message
+  in JSON mode all existed only because the fork still kept the frozen system
+  across tools rotations, a rule that belonged to the retired system-tail
+  catalog.
+- The merge had dropped FD-005's only regression test, "does not reuse a
+  pre-policy $harness prefix when profile inputs are unchanged", and had
+  reformatted upstream text in `skill/index.ts`.
+
+Resolution: the test is restored verbatim and fails when the policy component
+is removed from `profileKey`; `skill/index.ts` is rebuilt from upstream plus the
+producer; prefix rotation and structured-output placement follow upstream
+(see above), and `getFrozen` cleans legacy rows with upstream's pattern plus the
+tool-backed instruction rule, which covers the empty-catalog record, the NULL
+rows and the separator. `prefix-snapshot.test.ts`,
+`skill-catalog-frozen-refresh.test.ts` and `prompt-skill-command-multi.test.ts`
+assert the real layouts. The run-loop race case in
+`skill-catalog-capture.test.ts` now expects the loop to rotate to its own
+system when the winner froze other tools.
+
+Validation of the takeover tip on macOS (Bun 1.4.3, dependencies from
+`bun ci`, every ambient `MIMOCODE_*` variable cleared, one process per file,
+`--timeout 120000`): `packages/cli` typecheck passes and oxlint reports no new
+warning on the changed files. 99 affected test files (skill, tool, command,
+actor, catalog, prefix, structured output, compaction, checkpoint, prompt and
+instruction suites) were run; every failure also fails, with the same names, at
+`6fe5b0bb` on the same machine: `codex-compact` 8 (the explicit-Codex cases
+listed above), `prompt-effect` 4 (the three listed above plus "loop injects
+instruction files but not the dynamic environment block"), `tool/actor` 1 ("an
+agent's own variant on its configured model is not overridden") and
+`prompt-skill-command-multi` 1 ("pins system prompt and harness when the first
+user query is a command"). The last two `prompt-*` cases assert that the
+system ends with the project's instruction file, and this machine's real
+`~/.claude/CLAUDE.md` follows it through `os.homedir()`; both pass in the
+Windows run above. Each new rule was disabled in turn and a named case
+failed on its assertion, as listed in `0f29dc2b`'s commit message.
 
 ## Publication and CI
 

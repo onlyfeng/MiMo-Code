@@ -17,8 +17,8 @@ renumbered to close gaps.
 - Last reviewed: 2026-11-21
 - Upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
 - Prior reviewed upstream: `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`
-- Review completion: main integration adopts live skill scanning and user-turn catalog deltas with FC-005 permission and historical compatibility, plus three review fixes (structured-output ownership for new and schema-3 prefixes, and entry-anchored delta replay). Proposed as pull request #263; CI cannot run because GitHub Actions is disabled for the repository. Compat propagation follows after the pull request lands. See [the synchronization record](upstream-sync-2026-11-21.md).
-- Main behavior (runtime/tests): `a99333128562389148af961df0ad70e4566b699b` (pull request #263)
+- Review completion: main integration adopts live skill scanning, user-turn catalog deltas and upstream's prefix rotation (the structured-output instruction enters and leaves the frozen system with its tool), with FC-005 permission, historical compatibility, read-time cleanup of fork-written prefixes and entry-anchored delta replay. Proposed as pull request #263; CI cannot run because GitHub Actions is disabled for the repository. Compat propagation follows after the pull request lands. See [the synchronization record](upstream-sync-2026-11-21.md).
+- Main behavior (runtime/tests): `0f29dc2bbc07a737d7df439526d844fafd3acbcc` (pull request #263)
 - Inherited compat behavior: `9771c91853c8650402eac6631ddf4b57a5927f51`
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
 - Prior fork `main` tip: `4b5dbb976b763f420ac6d34ea0284dda26362cf4`. Inherited compat behavior above is unchanged by this local `main` integration
@@ -148,8 +148,12 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
   carrier. This existing code delta was made explicit by the 2026-09-15 audit.
 - 2026-11-21 synchronization: the catalog leaves the frozen system tail and
   arrives as user-turn reminders; FC-005 owns historical schema-3/v2 retirement.
-  Instruction files retain default-on delivery, disable event/payload parity,
-  frozen bytes and actor scope. POLICY-04's prior layout is historical; see
+  Instruction files retain default-on delivery, disable event/payload parity
+  and actor scope. Their bytes stay frozen in the prefix until a tools-hash
+  rotation rebuilds it, which is upstream's rule again: the fork had kept them
+  across rotations only for the system-tail catalog. Retries of one request
+  never rotate, so the immutable retry set is unchanged. POLICY-04's prior
+  layout is historical; see
   [historical layout and migration](skill-catalog-system-tail.md).
 - Watch surfaces: `packages/cli/src/cli/cmd/tui/app.tsx`,
   `packages/cli/src/session/instruction.ts`,

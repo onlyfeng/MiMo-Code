@@ -14,14 +14,15 @@
 > - The shipped `20260908000000_session_prefix_skill_catalog` migration is
 >   unchanged. The nullable `skill_catalog` column is read only.
 > - On the first read of a frozen prefix, `SessionPrefixSnapshot.getFrozen`
->   removes the catalog once. A schema-3 row whose content version verifies has
->   exactly its recorded managed range removed, including the format prefix
->   (the structured-output instruction a JSON-mode turn pinned there, which the
->   request now appends only in JSON mode), and the record is cleared. A row
->   without a usable record
->   falls back to the generated block pattern, keeping any copies the
->   host-supplied system contains. A schema-3 position that is ambiguous or
->   stale also uses that strict block-pattern fallback.
+>   removes the catalog once with upstream's generated block pattern, keeping
+>   any copies the host-supplied system contains. The recorded schema-3 range
+>   is not consulted: its catalog text is that generated block, and its format
+>   prefix is the engine's structured-output instruction, which is removed
+>   (host copies kept) when the row's own tools lack StructuredOutput. A system
+>   message left blank is dropped and the record is cleared.
+> - The rule below that kept environment, format and instruction bytes across
+>   tool-schema rotations is retired with the catalog: a tools-hash change now
+>   rebuilds the frozen system, as upstream does.
 > - In history, generated v2 snapshots and recognized metadata-free legacy
 >   catalogs are dropped from model input. Stored messages are never rewritten.
 >   User quotations, loaded `<skill_content>` bodies and tagged reminders still

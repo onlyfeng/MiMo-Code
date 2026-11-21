@@ -1338,23 +1338,32 @@ own source list remains the complete watch surface.
   poison; reload invalidates its generation. Interrupted directory scans do
   not publish a partial snapshot and later callers retry.
   Frozen prefixes/profile keys and native tool contracts do not depend on live
-  skills. The structured-output instruction is request-owned in both
-  directions: it never enters a pinned prefix, including a cold capture made
-  while the request is already in `json_schema` mode, and a later plain-text
-  request on that prefix carries no copy of it. Existing schema-3 rows lose
-  exactly their verified managed range, the catalog and its recorded format
-  prefix (the engine's structured-output instruction), and keep every other
-  frozen byte. Rows without a usable record, and schema-3 rows whose position
-  is ambiguous or stale, fall back to the strict generated block pattern with
-  host-owned occurrences protected. Historical v2 and recognized generated
+  skills. Prefix rotation is upstream's: a tools-hash change rebuilds the
+  system from current additions (environment, the structured-output
+  instruction in `json_schema` mode, instruction files) and rotates the row.
+  StructuredOutput is part of that hash, so the instruction enters and leaves
+  a frozen system together with its tool. A cold pin that loses a race keeps
+  the winner's system only when the winner froze the same tools, and otherwise
+  rotates to its own.
+  Rows written by older engines are cleaned once on read
+  (`SessionPrefixSnapshot.getFrozen`): upstream's generated block pattern
+  removes a system-tail catalog with host-owned copies kept; the engine's
+  structured-output instruction is removed, again with host copies kept, when
+  the row's own tools lack StructuredOutput (an older JSON-mode cold capture,
+  or a schema-3 range carried across tools-only rotations); a system message
+  left blank by either removal is dropped; and any schema-3 record is cleared,
+  including one whose catalog text was empty. Every other frozen byte stays.
+  Historical v2 and recognized generated
   user catalogs are suppressed in projection; stored history is never
   rewritten, quotations and loaded `<skill_content>` survive.
-- Upstream relationship: adopts live scan and reminder/delta placement; retains
-  stronger shared authorization, producer lifetime, historical recognition and
-  schema-3 managed-range compatibility. Deviates from upstream's replay rule,
+- Upstream relationship: adopts live scan, reminder/delta placement, prefix
+  rotation and structured-output placement; retains stronger shared
+  authorization, producer lifetime and historical recognition, and adds the
+  read-time cleanup of fork-written rows. Deviates from upstream's replay rule,
   which accepts any reminder metadata as announced state, by requiring an
-  entry in the window before a delta counts. The old system-tail POLICY-04 selection
-  is historical, superseded by this synchronization.
+  entry in the window before a delta counts. The old system-tail POLICY-04
+  selection, including its frozen-system-across-rotation rule from
+  `8ed2c580`, is historical, superseded by this synchronization.
 - Watch surfaces: `packages/cli/src/skill/index.ts`,
   `packages/cli/src/skill/search-access.ts`,
   `packages/cli/src/session/skill-catalog.ts`,
@@ -1373,15 +1382,20 @@ own source list remains the complete watch surface.
   [2026-11-21 validation](upstream-sync-2026-11-21.md). Skill/tool/system suites
   guard authorization parity; `prompt-skill-command-multi.test.ts` covers
   entry/delta, turn timing, legacy/schema-3 retirement and full-context writers.
-  `skill-catalog.test.ts`, `message-v2.test.ts` and `prefix-snapshot.test.ts`
-  cover historical recognition and managed ranges. The capture, frozen-refresh,
-  reopen and system-tail suites now test the reminder architecture while keeping
-  native tool, cold-capture race, frozen-byte, restart and no-tool compaction
-  assertions. `test/storage/prefix-skill-catalog-migration.test.ts` exercises the
+  `skill-catalog.test.ts` and `message-v2.test.ts` cover historical
+  recognition; `prefix-snapshot.test.ts` ("retires legacy catalogs and unbacked
+  format instructions on read") covers the read-time cleanup of fork-written
+  layouts. `skill-catalog-frozen-refresh.test.ts` covers skill changes that
+  leave the prefix alone, a tools rotation that rebuilds it, and the
+  structured-output instruction entering and leaving with its tool;
+  `codex-compact.test.ts` "warm snapshots follow structured schema and text
+  format changes" checks the same on the Codex wire. The capture, reopen and
+  system-tail suites test the reminder architecture while keeping native tool,
+  cold-capture race, restart and no-tool compaction assertions. `test/storage/prefix-skill-catalog-migration.test.ts` exercises the
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `a99333128562389148af961df0ad70e4566b699b` (pull request #263).
+  main behavior `0f29dc2bbc07a737d7df439526d844fafd3acbcc` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that
