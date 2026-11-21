@@ -713,10 +713,11 @@ own source list remains the complete watch surface.
   separately for both writer modes, including independently frozen native
   Actor input contracts in warm and cold capture; explicit non-fork writers
   also retain their own resolved model identity when no warm prefix exists.
-- POLICY-04 carrier review: cold capture pins a complete catalog/system/history
-  pair; warm capture reuses the stored layout. Full-context Actors and writers
-  inherit that copied pair, including legacy layout, without rereading a live
-  catalog or expanding frozen native-tool authority. FC-005 owns migration.
+- 2026-11-21 synchronization: catalog generation retires from cold/warm frozen
+  prefixes. Capture and compaction use `getFrozen` for one-time historical
+  catalog removal; full-context Actors/writers inherit user reminder metadata
+  and complete frozen native-tool authority. FC-005 owns historical migration;
+  fail-closed capture admission and pin-winner/native-tool contracts remain.
 - Upstream relationship: fork extension plus adapted request construction.
 - Watch surfaces: `packages/cli/src/session/checkpoint.ts`,
   `packages/cli/src/session/checkpoint-paths.ts`,
@@ -1311,71 +1312,109 @@ own source list remains the complete watch surface.
 
 ## FC-005 — permission-consistent skill discovery and invocation
 
-- 2026-10-26 synchronization: upstream `18adffc9` replaces binary-presence gating of bundled skill extraction (`REQUIRED_COMMANDS`, `isBuiltinSkillInstalled`) with `AGENT_CLI_SKILL_NAMES` and `shouldExtractBuiltinSkill`: `claude-code`, `codex` and `grok-build` extract only when `MIMOCODE_ENABLE_AGENT_CLI_SKILLS` is true, and `MIMOCODE_DISABLE_OFFICIAL_SKILLS` still removes the office/media set. This changes only the extracted set; listing, search, loading and the frozen catalog keep their shared permission gates. An isolated `debug skill` run lists the three skills only with the selector set. Evidence: `test/skill/builtin.test.ts`, `test/skill/bundle-discovery.test.ts`.
-
+- 2026-11-21 synchronization: adopt upstream `128adcb7` live discovery and
+  persisted user-turn catalog reminders (entry plus fingerprinted delta).
+  System-tail generation and schema-3 catalog freezing retire. The shipped
+  `20260908000000_session_prefix_skill_catalog` migration is unchanged; its
+  column and type remain historical readers. See [the synchronization
+  record](upstream-sync-2026-11-21.md) and [historical layout and migration](skill-catalog-system-tail.md).
 - Status: active
 - Canonical owner: fork `main` skill/session runtime
-- Observable contract: skill listing, reminders, search, and loading use the
-  same effective permission, agent allowlist, and user tool toggles. Stable
-  global discovery runs in a scoped producer that one caller cannot cancel;
-  failures remain retryable and reload invalidates the generation. The
-  authorized catalog is a frozen system-tail block after environment/format
-  and before instruction files. An internal schema-3 snapshot stores canonical
-  text, its SHA-256 content version, and originating user turn ID. Within the
-  same authorized prefix profile, tool continuations, retries, recovery and
-  synthetic continuations reuse that catalog; a later direct user turn may
-  refresh it, including to an explicitly empty catalog. Advancing the message
-  watermark does not change catalog ownership. Loaded skill bodies remain in
-  their existing messages and tool results.
-  Legacy SQL NULL means the old system/messages pair, not an empty catalog.
-  Continuing that old turn preserves its pair; a new direct turn migrates it.
-  New-layout projection suppresses only strictly recognized generated catalog
-  parts, without deleting or rewriting stored history or user quotations.
-  Codex routes skill/search invocation through exec with the same validators
-  and permission gates. Completed nested skill loads identifiable in retained
-  validated records protect the containing exec result from pruning.
-- POLICY-01 carrier review: skill/custom registry entries and definition hooks
-  cannot acquire canonical Actor/plan authority by name or expand the frozen
-  native Actor contract. FD-006 owns this control boundary; skill matching,
-  catalog placement and activation policy are unchanged by this selection.
-- POLICY-04 adoption: selects the system-tail placement from release
-  `2a0eb706e95a77cba34a319e9f11f33f26d4450c` and upstream snapshot
-  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`, while retaining the fork's frozen
-  prefix, permission and legacy-pair boundaries. N=1; the overall upstream
-  baseline is unchanged. See [skill catalog layout](skill-catalog-system-tail.md).
-- Upstream relationship: upstream discovery and catalog placement are retained
-  with stronger shared permission, producer-lifetime and frozen-pair gates.
+- Observable contract: catalog visibility, skill search and loading use
+  `canLoadSkills`/`canSearchSkills`, effective `Agent.runtimePermission`, agent
+  tool allowlists and the owning user's tool toggles. A disabled surface cannot
+  be restored by a rescan. The catalog is announced only before a user turn's
+  first assistant step. Each context window receives one full entry followed
+  by deltas for added, changed and removed skills; unchanged states emit
+  nothing. Full-context writers inherit announced metadata without a second
+  entry; compaction starts a new announcement window. A delta counts as
+  announced only on top of an entry in the same window, so a user turn that
+  overflow compaction replays with only its delta gets a full entry again
+  rather than leaving unchanged skills invisible. Loaded skill bodies stay
+  in existing messages/tool results.
+  Discovery refreshes at user-turn boundaries, command lookup/listing, the
+  skill route and tool misses. Stat-keyed parsing reuses unchanged files.
+  Command listing does not wait for MCP servers; once background collection
+  adds MCP prompt commands, `command.updated` is published and the TUI
+  refetches its cached list, so late prompts reach slash completion; a
+  response that resolves after a directory or workspace switch is dropped.
+  Builtin extraction remains a scoped producer that caller cancellation cannot
+  poison; reload invalidates its generation and always rebuilds the snapshot,
+  even when every file keeps its path, mtime and size (a parse that failed for
+  an unreadable file can succeed after chmod). Interrupted directory scans do
+  not publish a partial snapshot and later callers retry.
+  Frozen prefixes/profile keys and native tool contracts do not depend on live
+  skills. Prefix rotation is upstream's: a tools-hash change rebuilds the
+  system from current additions (environment, the structured-output
+  instruction in `json_schema` mode, instruction files) and rotates the row.
+  StructuredOutput is part of that hash, so the instruction enters and leaves
+  a frozen system together with its tool. A cold pin that loses a race keeps
+  the winner's system only when the winner froze the same tools, and otherwise
+  rotates to its own.
+  Rows written by older engines are cleaned once on read
+  (`SessionPrefixSnapshot.getFrozen`): upstream's generated block pattern
+  removes a system-tail catalog with host-owned copies kept; the engine's
+  structured-output instruction is removed, again with host copies kept, when
+  the row's own tools lack StructuredOutput (an older JSON-mode cold capture,
+  or a schema-3 range carried across tools-only rotations); a system message
+  left blank by either removal is dropped; and any schema-3 record is cleared,
+  including one whose catalog text was empty. Every other frozen byte stays.
+  Historical v2 and recognized generated
+  user catalogs are suppressed in projection; stored history is never
+  rewritten, quotations and loaded `<skill_content>` survive.
+- Upstream relationship: adopts live scan, reminder/delta placement, prefix
+  rotation and structured-output placement; retains stronger shared
+  authorization, producer lifetime and historical recognition, and adds the
+  read-time cleanup of fork-written rows. Deviates from upstream's replay rule,
+  which accepts any reminder metadata as announced state, by requiring an
+  entry in the window before a delta counts, from upstream's snapshot reuse
+  by rebuilding on an explicit reload, and by announcing late MCP prompt
+  commands to clients that cached the listing. The old system-tail POLICY-04
+  selection, including its frozen-system-across-rotation rule from
+  `8ed2c580`, is historical, superseded by this synchronization.
 - Watch surfaces: `packages/cli/src/skill/index.ts`,
   `packages/cli/src/skill/search-access.ts`,
   `packages/cli/src/session/skill-catalog.ts`,
+  `packages/cli/src/session/skill-reminder.ts`,
   `packages/cli/src/session/message-v2.ts`,
-  `packages/cli/src/session/llm-request-prefix.ts`,
   `packages/cli/src/session/prefix-snapshot.ts`,
+  `packages/cli/src/session/llm-request-prefix.ts`,
   `packages/cli/src/session/session.sql.ts`,
   `packages/cli/migration/20260908000000_session_prefix_skill_catalog/migration.sql`,
-  `packages/cli/src/tool/skill.ts`,
-  `packages/cli/src/tool/skill-search.ts`,
-  `packages/cli/src/session/observed-tool-parts.ts`,
-  `packages/cli/src/session/compaction.ts`,
-  `packages/cli/src/session/system.ts`, and
-  `packages/cli/src/session/prompt.ts`.
-- Tests/evidence: skill search/description/discovery and tool skill/search
-  suites retain the permission contract. `skill-catalog-system-tail.test.ts`
-  checks actual provider recovery, next-direct-turn migration, same-turn tool
-  continuation, cold capture and compaction; `skill-catalog-capture.test.ts`
-  covers capture freezing. `skill-catalog.test.ts`, `message-v2.test.ts` and
-  `prompt-skill-command-multi.test.ts` cover historical recognition, loaded
-  bodies and filtered system placement. `prefix-snapshot.test.ts` and
-  `test/storage/prefix-skill-catalog-migration.test.ts` cover metadata and real
-  old-database migration. Session tests are under `packages/cli/test/session/`.
-  Local evidence does not assert publication, exact-head CI or compat acceptance.
-- Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
-  main behavior `0b665c7e681e44cac6f1a6acf18732015fb2bf86`.
-- Retirement condition: upstream uses one effective permission/tool decision
-  across discovery and invocation and provides equivalent retryable,
-  generation-aware producer behavior plus versioned system-tail snapshots,
-  same-turn freezing and lossless legacy-pair migration without rewriting
-  history; FD-006 remains the tool-authority owner.
+  `packages/cli/src/session/prompt.ts`, `packages/cli/src/session/system.ts`,
+  `packages/cli/src/session/compaction.ts`, `packages/cli/src/session/tail-digest.ts`,
+  `packages/cli/src/command/index.ts`,
+  `packages/cli/src/cli/cmd/tui/context/sync.tsx`, `packages/cli/src/tool/skill.ts`,
+  `packages/cli/src/tool/skill-search.ts` and
+  `packages/cli/src/session/observed-tool-parts.ts`.
+- Tests/evidence: per-file counts and baseline reproductions are recorded in
+  [2026-11-21 validation](upstream-sync-2026-11-21.md). Skill/tool/system suites
+  guard authorization parity; `prompt-skill-command-multi.test.ts` covers
+  entry/delta, turn timing, legacy/schema-3 retirement and full-context writers.
+  `skill-catalog.test.ts` and `message-v2.test.ts` cover historical
+  recognition; `prefix-snapshot.test.ts` ("retires legacy catalogs and unbacked
+  format instructions on read") covers the read-time cleanup of fork-written
+  layouts. `skill-catalog-frozen-refresh.test.ts` covers skill changes that
+  leave the prefix alone, a tools rotation that rebuilds it, and the
+  structured-output instruction entering and leaving with its tool;
+  `codex-compact.test.ts` "warm snapshots follow structured schema and text
+  format changes" checks the same on the Codex wire. The capture, reopen and
+  system-tail suites test the reminder architecture while keeping native tool,
+  cold-capture race, restart and no-tool compaction assertions.
+  `test/skill/skill.test.ts` "reload recovers a SKILL.md that became readable
+  without changing", `test/command/command-live.test.ts` "announces MCP prompt
+  commands that arrive after the listing" and `test/cli/tui/command-refresh.test.tsx`
+  cover the reload and late-command deviations.
+  `test/storage/prefix-skill-catalog-migration.test.ts` exercises the
+  unchanged migration against a real old database. Local evidence does not
+  establish publication, exact-head CI or compat propagation.
+- Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
+  main behavior `d6604ceef828ef6c9ae30536933517a13b46eb8f` (pull request #263).
+- Retirement condition: upstream shares one effective permission/tool decision
+  across catalog, search and invocation, equivalent cancellation/retry and
+  generation invalidation, and lossless historical migration/projection that
+  protects host content, quotations, loaded bodies and frozen native tools.
+  FD-006 remains the tool-authority owner.
 
 ## FC-006 — instance-local plugin memory-write decision
 
@@ -2401,11 +2440,11 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   post-insert, failure, cross-actor and interruption paths, including a second
   compaction while a cancelled resource remains unresolved. No additional tool
   authority or compat preflight policy is introduced.
-- POLICY-04 carrier review: compaction is the third frozen-prefix consumer.
-  Its history projection uses the layout paired with the selected frozen
-  system, preserving legacy catalog messages or suppressing known generated
-  catalog parts for schema 3. It reuses the stored catalog despite live skill
-  changes; the ratio-only trigger and no-tool summary boundary remain intact.
+- 2026-11-21 synchronization: compaction is the third `getFrozen` consumer.
+  Its projection suppresses historical generated catalogs and preserves current
+  reminder metadata; its system excludes the retired catalog. The next context
+  window receives an entry reminder. Ratio-only triggering, bounded projection,
+  summary recovery/retry and `toolChoice: "none"` remain intact (FD-010/011/012).
 - Upstream relationship: adopts upstream's max-context controls and ratio-only
   trigger. The retained fork adaptations concern bounded projection, frozen
   request identity, and no-tool summaries, not extra trigger headroom.

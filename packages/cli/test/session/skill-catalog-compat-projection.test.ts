@@ -2,7 +2,8 @@ import { createHash } from "node:crypto"
 import { expect, test } from "bun:test"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { isGeneratedSkillCatalog } from "../../src/session/skill-catalog"
+import { diffSkillCatalog, isGeneratedSkillCatalog, stripLegacySkillCatalog } from "../../src/session/skill-catalog"
+import { renderSkillCatalogReminder } from "../../src/session/skill-reminder"
 import { capUtf8TextByBytes, MODEL_VISIBLE_TEXT_CAP_BYTES } from "../../src/util/text-truncate"
 import { ProviderTest } from "../fake/provider"
 
@@ -39,19 +40,14 @@ const messages: MessageV2.WithParts[] = [
   },
 ]
 
-test("compat actual capped v2 catalog migrates out of both full and preflight current-turn messages", async () => {
+test("compat capped v2 catalog leaves both the full and the preflight current-turn projections", async () => {
   expect(catalog).not.toContain("</available_skills>")
   expect(catalog).toContain("bytes of available skills truncated before model injection")
   expect(isGeneratedSkillCatalog(generated)).toBe(true)
-  const converted = await MessageV2.toModelMessagesWithCurrentTurn(messages, model, userID, {
-    skillCatalogInSystem: true,
-  })
+  const converted = await MessageV2.toModelMessagesWithCurrentTurn(messages, model, userID)
   expect(converted.currentTurnMessages).toEqual(converted.messages)
   expect(JSON.stringify(converted.messages)).not.toContain("Skills available in this session:")
   expect(JSON.stringify(converted.currentTurnMessages)).toContain("CURRENT_DIRECT_INPUT")
-  const legacy = await MessageV2.toModelMessagesWithCurrentTurn(messages, model, userID)
-  expect(JSON.stringify(legacy.messages)).toContain("Skills available in this session:")
-  expect(legacy.currentTurnMessages).toEqual(legacy.messages)
 })
 
 function withCatalog(text: string): MessageV2.TextPart {
@@ -69,23 +65,54 @@ test.each(["目录😀", "😀", "目录", "<skill_content>"])("compat recognize
   expect(isGeneratedSkillCatalog(withCatalog(`Skills available in this session:\n${capped}`))).toBe(true)
 })
 
-test.each([
-  ["unrecognized marker", catalog.replace("before model injection", "after some other operation")],
-  ["impossible omitted budget", catalog.replace(/\d+ bytes of available skills/, "1 bytes of available skills")],
-  [
-    "short forged directory",
-    "Skills available in this session:\n<available_skills>\n  <skill>\n    <name>tiny</name>\n    <description>tiny\n\n... 90000 bytes of available skills truncated before model injection ...",
-  ],
-  ["wrong producer prefix length", catalog.replace("Large description.", "x")],
-  ["modified description without original producer budget", catalog.replace("Large description.", '<skill_content name="loaded">')],
-])("compat does not remove %s even with a matching v2 hash", (_name, text) => {
-  expect(isGeneratedSkillCatalog(withCatalog(text))).toBe(false)
+// The pre-reminder compat producer froze `capAvailableSkills(Skill.fmt(list))`
+// in the system tail, so a large catalog ends at the truncation marker instead
+// of `</available_skills>`.
+const cappedSystemBlock = `Skills available in this session:\n${capUtf8TextByBytes(body, MODEL_VISIBLE_TEXT_CAP_BYTES, "available skills")}`
+
+test("compat strips its capped system-tail catalog from a frozen system", () => {
+  expect(cappedSystemBlock).not.toContain("</available_skills>")
+  expect(stripLegacySkillCatalog([`BASE\n\nENV\n\n${cappedSystemBlock}\n\nINSTRUCTIONS`])).toEqual([
+    "BASE\n\nENV\n\nINSTRUCTIONS",
+  ])
+  // The strip stops at the producer's own marker: later text that merely
+  // mentions the closing tag is instruction content and stays.
+  const later = "INSTRUCTIONS quoting </available_skills> verbatim"
+  expect(stripLegacySkillCatalog([`BASE\n\n${cappedSystemBlock}\n\n${later}`])).toEqual([`BASE\n\n${later}`])
+  // A host-supplied copy is host content and stays; the engine's tail copy goes.
+  const host = `HOST\n\n${cappedSystemBlock}`
+  expect(stripLegacySkillCatalog([`${host}\n\nMIDDLE\n\n${cappedSystemBlock}`], host)).toEqual([`${host}\n\nMIDDLE`])
 })
 
-test("compat truncated layout still requires a generated part and original verified metadata", () => {
-  expect(isGeneratedSkillCatalog({ ...generated, synthetic: false })).toBe(false)
-  expect(isGeneratedSkillCatalog({ ...generated, metadata: undefined })).toBe(false)
-  expect(
-    isGeneratedSkillCatalog({ ...generated, metadata: { skillCatalog: { schema: 2, version: "0".repeat(64) } } }),
-  ).toBe(false)
+const large = (name: string, words: number) => ({
+  name,
+  description: `${name} ${"目录😀 description ".repeat(words)}`,
+  location: `/tmp/example/skills/${name}/SKILL.md`,
+})
+
+test("compat caps the catalog entry and update reminders at the model-visible budget", () => {
+  const skills = Array.from({ length: 8 }, (_, index) => large(`skill-${index}`, 1000))
+  const entry = diffSkillCatalog({ announced: undefined, current: skills })
+  if (entry?.kind !== "entry") throw new Error("Expected a catalog entry")
+  const entryText = renderSkillCatalogReminder(entry)
+  expect(entryText.startsWith("<system-reminder>\nSkill catalog for this conversation.")).toBe(true)
+  expect(entryText.endsWith("\n</system-reminder>")).toBe(true)
+  expect(entryText).toContain("bytes of available skills truncated before model injection")
+  expect(entryText).toContain("Entries are summaries; a skill's instructions apply only after it is loaded.")
+  expect(Buffer.byteLength(entryText)).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES + 512)
+  // The announced state still covers every skill, as the frozen catalog did.
+  expect(Object.keys(entry.meta.skills)).toHaveLength(8)
+
+  const changed = skills.map((skill) => ({ ...skill, description: `${skill.description} changed` }))
+  const delta = diffSkillCatalog({ announced: entry.meta.skills, current: changed.slice(1) })
+  if (delta?.kind !== "delta") throw new Error("Expected a catalog update")
+  const deltaText = renderSkillCatalogReminder(delta)
+  expect(deltaText).toContain("bytes of available skills truncated before model injection")
+  expect(deltaText).toContain("Removed skills (no longer available; do not load or follow them): skill-0")
+  expect(deltaText.endsWith("\n</system-reminder>")).toBe(true)
+  expect(Buffer.byteLength(deltaText)).toBeLessThanOrEqual(MODEL_VISIBLE_TEXT_CAP_BYTES + 512)
+
+  const small = renderSkillCatalogReminder({ ...entry, skills: [large("small", 1)] })
+  expect(small).not.toContain("truncated before model injection")
+  expect(small).toContain("</available_skills>")
 })

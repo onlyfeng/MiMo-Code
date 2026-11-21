@@ -1,4 +1,34 @@
-# Frozen skill catalog layout
+# Frozen skill catalog layout (historical)
+
+> **Superseded on 2026-11-21.** Upstream `128adcb7` moved the catalog to
+> persisted user-turn reminders (one entry per context window, then
+> fingerprinted deltas) and made discovery a live rescan. The system prompt no
+> longer carries a catalog and new prefixes record no schema-3 catalog. This
+> page describes the layout older sessions were written with, so they can still
+> be read. The current contract is FC-005 in
+> [fork-capabilities.md](fork-capabilities.md); the change is recorded in
+> [the 2026-11-21 synchronization](upstream-sync-2026-11-21.md).
+>
+> What still applies to stored data:
+>
+> - The shipped `20260908000000_session_prefix_skill_catalog` migration is
+>   unchanged. The nullable `skill_catalog` column is read only.
+> - On the first read of a frozen prefix, `SessionPrefixSnapshot.getFrozen`
+>   removes the catalog once with upstream's generated block pattern, keeping
+>   any copies the host-supplied system contains. The recorded schema-3 range
+>   is not consulted: its catalog text is that generated block, and its format
+>   prefix is the engine's structured-output instruction, which is removed
+>   (host copies kept) when the row's own tools lack StructuredOutput. A system
+>   message left blank is dropped and the record is cleared.
+> - The rule below that kept environment, format and instruction bytes across
+>   tool-schema rotations is retired with the catalog: a tools-hash change now
+>   rebuilds the frozen system, as upstream does.
+> - In history, generated v2 snapshots and recognized metadata-free legacy
+>   catalogs are dropped from model input. Stored messages are never rewritten.
+>   User quotations, loaded `<skill_content>` bodies and tagged reminders still
+>   reach the model.
+>
+> The rest of this page is the original description, kept for reference.
 
 The model receives the authorized skill catalog in the system tail, after the
 environment and structured-output blocks and before instruction files. Loading

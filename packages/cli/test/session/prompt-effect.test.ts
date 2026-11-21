@@ -292,12 +292,20 @@ function wireTool(tools: Array<Record<string, unknown>>, name: string) {
   return tools.find((item) => wireToolName(item) === name)
 }
 
-/** The last user message of a request (Chat `messages` or Responses `input`), where the deferred MCP tool reminder is attached. */
+/**
+ * The last user message of a request (Chat `messages` or Responses `input`),
+ * where the deferred MCP tool reminder is attached. The skill catalog reminder
+ * lands there too; it is excluded so MCP assertions see only MCP reminders.
+ */
 function lastUserText(request: Record<string, unknown>) {
-  const user = ((request.messages ?? request.input) as Array<{ role: string; content: unknown }>).findLast(
+  const content = ((request.messages ?? request.input) as Array<{ role: string; content: unknown }>).findLast(
     (message) => message.role === "user",
+  )?.content
+  return JSON.stringify(
+    Array.isArray(content)
+      ? content.filter((item: { type?: string; text?: string }) => !item.text?.startsWith("<system-reminder>\nSkill catalog"))
+      : content,
   )
-  return JSON.stringify(user?.content)
 }
 
 function mcpLayer(
@@ -2660,6 +2668,113 @@ it.live("persists auto as its own harness mode", () =>
   ),
 )
 
+// [skill-catalog-live S2.2] Compaction drops earlier catalog reminders from the
+// window, so the next user turn carries a full catalog entry again.
+it.live("re-announces the full skill catalog after compaction", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, ".mimocode", "skill", "window-skill", "SKILL.md"),
+          "---\nname: window-skill\ndescription: Survives compaction.\n---\n\n# window-skill\n",
+        ),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({ title: "Skill catalog compaction" })
+      const entry = "Skill catalog for this conversation."
+      const turn = (text: string) =>
+        prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text }] })
+
+      yield* turn("first query")
+      yield* llm.text("first answer")
+      yield* prompt.loop({ sessionID: chat.id })
+      expect(JSON.stringify((yield* llm.inputs)[0])).toContain(entry)
+
+      yield* compaction.create({ sessionID: chat.id, agent: "compaction", model: ref, auto: false })
+      const snapshot = yield* sessions.messages({ sessionID: chat.id })
+      yield* llm.text("summary")
+      yield* compaction.process({ parentID: snapshot.at(-1)!.info.id, messages: snapshot, sessionID: chat.id, auto: false })
+
+      yield* turn("after compaction")
+      yield* llm.text("continued")
+      yield* prompt.loop({ sessionID: chat.id })
+
+      const after = JSON.stringify((yield* llm.inputs).at(-1))
+      expect(after).not.toContain("first query")
+      expect(after.split(entry).length - 1).toBe(1)
+      expect(after).toContain("<name>window-skill</name>")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+// Overflow compaction replays the latest user turn past the boundary. When
+// that turn carries only a catalog delta, its entry stays behind; the window
+// must announce a full entry again rather than trust the delta's metadata,
+// whose text lists only the changed skill.
+it.live("re-announces a full skill catalog when overflow replay carries only a delta", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const write = (name: string, description: string) =>
+        Effect.promise(() =>
+          Bun.write(
+            path.join(dir, ".mimocode", "skill", name, "SKILL.md"),
+            `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
+          ),
+        )
+      yield* write("steady-skill", "Unchanged across the delta.")
+      yield* write("edited-skill", "Original description.")
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({ title: "Skill delta overflow replay" })
+      const entry = "Skill catalog for this conversation."
+      const delta = "Skill catalog update."
+      const turn = (text: string) =>
+        prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text }] })
+
+      yield* turn("first query")
+      yield* llm.text("first answer")
+      yield* prompt.loop({ sessionID: chat.id })
+      expect(JSON.stringify((yield* llm.inputs)[0])).toContain(entry)
+
+      yield* write("edited-skill", "Edited description.")
+      yield* turn("second query")
+      yield* llm.text("second answer")
+      yield* prompt.loop({ sessionID: chat.id })
+      // The second turn gets a delta; the only entry is still the first turn's.
+      const second = JSON.stringify((yield* llm.inputs)[1])
+      expect(second).toContain(delta)
+      expect(second.split(entry).length - 1).toBe(1)
+
+      // Overflow replays the second turn, the one holding the delta; the first
+      // turn and its entry stay behind the boundary.
+      yield* compaction.create({ sessionID: chat.id, agent: "build", model: ref, auto: true, overflow: true })
+      const snapshot = yield* sessions.messages({ sessionID: chat.id })
+      yield* llm.text("overflow summary")
+      expect(
+        yield* compaction.process({
+          parentID: snapshot.at(-1)!.info.id,
+          messages: snapshot,
+          sessionID: chat.id,
+          auto: true,
+          overflow: true,
+        }),
+      ).toBe("continue")
+
+      yield* llm.text("continued")
+      yield* prompt.loop({ sessionID: chat.id })
+      const after = JSON.stringify((yield* llm.inputs).at(-1))
+      expect(after.split(entry).length - 1).toBe(1)
+      expect(after).toContain("<name>steady-skill</name>")
+      expect(after).toContain("Edited description.")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 for (const harness of ["codex", "auto"] as const) {
   it.live(`uses the frozen system and appends the compaction prompt to the existing conversation with ${harness}`, () =>
     provideTmpdirServer(
@@ -4751,14 +4866,11 @@ it.live(
             )
             .join("\n")
           expect(system).not.toContain("Working directory:")
-          expect(system).toContain(marker)
-          expect(system).toContain("Skills available in this session:")
-          expect(system.indexOf("Skills available in this session:")).toBeLessThan(system.indexOf(marker))
-          const conversation = ((inputs[0].messages ?? []) as { role: string; content: unknown }[]).filter(
-            (message) => message.role !== "system",
-          )
-          expect(JSON.stringify(conversation)).not.toContain("Skills available in this session:")
-          expect(JSON.stringify(inputs)).not.toContain("Authoritative skills catalog snapshot v2:")
+          // [skill-catalog-live S2.3] The skill catalog is a user-turn reminder, not system text.
+          expect(system).not.toContain("Skills available in this session:")
+          expect(system).not.toContain("<available_skills>")
+          expect(system.trim().endsWith(marker)).toBe(true)
+          expect(JSON.stringify(inputs[0].messages)).toContain("<system-reminder>\\nSkill catalog for this conversation.")
         }),
         { git: true, config: providerCfg },
       ),
@@ -4830,21 +4942,15 @@ it.live(
                 .all(),
             ),
           )
-          const messages = yield* sessions.messages({ sessionID: chat.id })
-          const lastAssistant = messages.findLast((message) => message.info.role === "assistant")
           expect(snapshots).toHaveLength(1)
           expect(firstSnapshot?.revision).toBe(1)
-          expect(snapshots[0].skill_catalog?.turnID).not.toBe(firstSnapshot?.skill_catalog?.turnID)
-          expect(snapshots[0]).toMatchObject({
-            revision: 2,
-            watermark_message_id: lastAssistant?.info.id,
-            skill_catalog: {
-              schema: 3,
-              turnID: messages.findLast((message) => message.info.role === "user")?.info.id,
-              text: firstSnapshot?.skill_catalog?.text,
-              version: firstSnapshot?.skill_catalog?.version,
-            },
-          })
+          // The catalog left the system tail, so a new direct turn no longer
+          // re-pins the prefix: the system bytes and the snapshot row are kept,
+          // and no catalog record is written.
+          if (!firstSnapshot) throw new Error("Missing first snapshot")
+          expect(snapshots[0].system).toEqual(firstSnapshot.system)
+          expect(snapshots[0].system_hash).toBe(firstSnapshot.system_hash)
+          expect(snapshots[0].skill_catalog).toBeNull()
         }),
         { git: true, config: providerCfg },
       ),

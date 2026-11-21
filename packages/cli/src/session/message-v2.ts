@@ -35,7 +35,7 @@ import {
   toolAttachmentFilename,
   toolAttachmentPlaceholder,
 } from "./tool-attachment"
-import { isGeneratedSkillCatalog, isLegacySkillCatalogReminder, isSkillCatalogSnapshot } from "./skill-catalog"
+import { isLegacySkillCatalogPart } from "./skill-catalog"
 import { collapseCheckpointTail } from "./tail-digest"
 import { isDeepStrictEqual } from "node:util"
 
@@ -1137,13 +1137,10 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
    * When true, messages after the latest rebuild checkpoint are collapsed into
    * a single activity-log user message (see tail-digest.ts). Off by default so
    * checkpoint writers / compaction / title generation keep full fidelity.
-   * skillCatalogInSystem is internal: enable only when the paired frozen system
-   * already owns the catalog, including an explicitly empty catalog.
    */
   options?: {
     stripMedia?: boolean
     collapseCheckpointTail?: boolean
-    skillCatalogInSystem?: boolean
     languageProvider?: string
   },
 ) {
@@ -1160,7 +1157,6 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
     )
     .at(-1)
   let currentTurnUIIndex: number | undefined
-  let legacySkillCatalogSeen = false
 
   const toModelOutput = (options: { toolCallId: string; input: unknown; output: unknown }) => {
     const output = options.output
@@ -1262,23 +1258,14 @@ const toModelMessagesWithCurrentTurnInternalEffect = Effect.fnUntraced(function*
         parts: [],
       }
       result.push(userMessage)
-      const parts = options?.skillCatalogInSystem
-        ? msg.parts
-        : msg.parts.toSorted((a, b) => {
-            const aSnapshot = a.type === "text" && a.synthetic === true && isSkillCatalogSnapshot(a.text)
-            const bSnapshot = b.type === "text" && b.synthetic === true && isSkillCatalogSnapshot(b.text)
-            if (aSnapshot !== bSnapshot) return Number(bSnapshot) - Number(aSnapshot)
-            const aLegacy = a.type === "text" && a.synthetic === true && isLegacySkillCatalogReminder(a.text)
-            const bLegacy = b.type === "text" && b.synthetic === true && isLegacySkillCatalogReminder(b.text)
-            return Number(aLegacy) - Number(bLegacy)
-          })
-      for (const part of parts) {
+      for (const part of msg.parts) {
         if (part.type === "text") {
-          if (options?.skillCatalogInSystem && isGeneratedSkillCatalog(part)) continue
-          if (!options?.skillCatalogInSystem && part.synthetic && isLegacySkillCatalogReminder(part.text)) {
-            if (legacySkillCatalogSeen || part.ignored) continue
-            legacySkillCatalogSeen = true
-          }
+          // Older engines persisted user-side catalogs without reminder metadata
+          // (legacy text and v2 snapshots). The current catalog is a
+          // metadata-tagged reminder, so legacy copies would duplicate it. Only
+          // strictly recognized generated catalogs are dropped: user quotations
+          // and loaded <skill_content> bodies stay (FC-005).
+          if (isLegacySkillCatalogPart(part)) continue
           if (!part.ignored)
             userMessage.parts.push({
               type: "text",
@@ -1571,7 +1558,6 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   options?: {
     stripMedia?: boolean
     collapseCheckpointTail?: boolean
-    skillCatalogInSystem?: boolean
     languageProvider?: string
   },
 ) {
@@ -1585,7 +1571,6 @@ export const toModelMessagesWithCurrentTurnEffect = Effect.fnUntraced(function* 
   options?: {
     stripMedia?: boolean
     collapseCheckpointTail?: boolean
-    skillCatalogInSystem?: boolean
     languageProvider?: string
   },
 ) {
@@ -1598,7 +1583,6 @@ export function toModelMessages(
   options?: {
     stripMedia?: boolean
     collapseCheckpointTail?: boolean
-    skillCatalogInSystem?: boolean
     languageProvider?: string
   },
 ): Promise<ModelMessage[]> {
@@ -1612,7 +1596,6 @@ export function toModelMessagesWithCurrentTurn(
   options?: {
     stripMedia?: boolean
     collapseCheckpointTail?: boolean
-    skillCatalogInSystem?: boolean
     languageProvider?: string
   },
 ) {

@@ -65,14 +65,12 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   /** Resolved deferral mode; absent never defers. Deferral itself is decided here, as in the live path. */
   mcpToolSearch?: McpToolSearchMode
   /**
-   * Caller-built system-tail parts. Currently environment/format, skill reminder,
-   * then instruction files. Caller is responsible for the ordering and content.
+   * Caller-built system-tail parts. Currently environment/format, then
+   * instruction files. Caller is responsible for the ordering and content.
    */
   additions: string[]
   /** Frozen Session/Fork system; bypasses all system regeneration when present. */
   prebuiltSystem?: string[]
-  /** True only when this system already carries the frozen catalog. */
-  skillCatalogInSystem?: boolean
   prompt?: PromptConfig
   /**
    * Collapse the tail of a legacy rebuild boundary (one stamped before the
@@ -98,7 +96,6 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     input.currentUserID ?? lastUserMsg.info.id,
     {
       collapseCheckpointTail: input.collapseCheckpointTail,
-      skillCatalogInSystem: input.skillCatalogInSystem,
       languageProvider: input.languageProvider,
     },
   )

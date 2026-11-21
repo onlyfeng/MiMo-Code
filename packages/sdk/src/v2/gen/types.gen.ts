@@ -913,6 +913,13 @@ export type EventCommandExecuted = {
   }
 }
 
+export type EventCommandUpdated = {
+  type: "command.updated"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
 export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
@@ -1947,6 +1954,7 @@ export type GlobalEvent = {
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
     | EventCommandExecuted
+    | EventCommandUpdated
     | EventSessionCompacted
     | EventWorktreeReady
     | EventWorktreeFailed
@@ -3710,6 +3718,7 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
+  | EventCommandUpdated
   | EventSessionCompacted
   | EventWorktreeReady
   | EventWorktreeFailed
@@ -5086,6 +5095,10 @@ export type ExperimentalSessionListData = {
      * Include archived sessions (default false)
      */
     archived?: boolean
+    /**
+     * Response detail (default full). `brief` omits prompt, permission, revert and summary.diffs from every session
+     */
+    view?: "full" | "brief"
   }
   url: "/experimental/session"
 }

@@ -36,11 +36,17 @@ export const SkillTool = Tool.define(
             })
           )
             throw new Error("Skill tool is not available in this context.")
-          const available = yield* skill.available({
-            ...agent,
-            permission,
+          // Authorization decides the set; a name the current snapshot lacks may
+          // be a skill created since this turn's rescan, so look once more
+          // before reporting it missing. The rescan never widens the set.
+          const authorized = Effect.fnUntraced(function* () {
+            return yield* skill.available({ ...agent, permission })
           })
-          const info = available.find((item) => item.name === params.name)
+          let info = (yield* authorized()).find((item) => item.name === params.name)
+          if (!info) {
+            yield* skill.refresh()
+            info = (yield* authorized()).find((item) => item.name === params.name)
+          }
           if (!info) {
             // A common miss: the name is a built-in WORKFLOW, not a skill (e.g.
             // the user said "run the naming workflow"). Redirect instead of
@@ -52,7 +58,7 @@ export const SkillTool = Tool.define(
                   `workflow({ operation: "run", name: "${params.name}", args: { ... } }). Do NOT use the skill tool for it.`,
               )
             }
-            // Use the same permission-filtered set as the per-turn system catalog,
+            // Use the same permission-filtered set as the catalog reminder,
             // so a near miss cannot reveal a skill the model is not allowed to see.
             const names = (yield* skill.modelInvocable({ ...agent, permission }))
               .map((item) => item.name)

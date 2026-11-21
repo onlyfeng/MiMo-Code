@@ -483,7 +483,11 @@ export const layer: Layer.Layer<
         system: promptConfig.system ?? "",
         permission: Agent.runtimePermission(parentAgent, parentSession.permission),
       })
-      const frozen = yield* SessionPrefixSnapshot.get(input.sessionID, profileKey)
+      const frozen = yield* SessionPrefixSnapshot.getFrozen({
+        sessionID: input.sessionID,
+        profileKey,
+        hostSystem: promptConfig.system,
+      })
       const frozenActiveTools = frozen?.tools
         ? SessionPrefixSnapshot.restoreActiveTools(frozen.tools, frozen.active_tools)
         : undefined
@@ -515,7 +519,6 @@ export const layer: Layer.Layer<
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
         ...(input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true }),
-        skillCatalogInSystem: Boolean(frozen?.skill_catalog),
         languageProvider: (yield* provider.getLanguage(model)).provider,
       })
       const ctx = yield* InstanceState.context
