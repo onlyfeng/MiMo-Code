@@ -913,6 +913,13 @@ export type EventCommandExecuted = {
   }
 }
 
+export type EventCommandUpdated = {
+  type: "command.updated"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
 export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
@@ -1947,6 +1954,7 @@ export type GlobalEvent = {
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
     | EventCommandExecuted
+    | EventCommandUpdated
     | EventSessionCompacted
     | EventWorktreeReady
     | EventWorktreeFailed
@@ -3627,6 +3635,7 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
+  | EventCommandUpdated
   | EventSessionCompacted
   | EventWorktreeReady
   | EventWorktreeFailed

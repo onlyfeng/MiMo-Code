@@ -847,6 +847,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
+        // FC-005: MCP prompt commands can settle after the bootstrap listing.
+        case "command.updated": {
+          const workspace = project.workspace.current()
+          void sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? [])))
+          break
+        }
+
         case "vcs.branch.updated": {
           setStore("vcs", { branch: event.properties.branch })
           break

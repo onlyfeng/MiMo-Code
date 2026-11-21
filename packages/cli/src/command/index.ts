@@ -1,3 +1,4 @@
+import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect"
 import { EffectBridge } from "@/effect"
@@ -32,6 +33,9 @@ export const Event = {
       messageID: MessageID.zod,
     }),
   ),
+  // FC-005: MCP prompt commands can arrive after a client cached the listing
+  // (listing never waits for MCP). Clients refetch on this event.
+  Updated: BusEvent.define("command.updated", z.object({})),
 }
 
 export const Info = z
@@ -107,6 +111,7 @@ export const layer = Layer.effect(
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const skill = yield* Skill.Service
+    const bus = yield* Bus.Service
 
     const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
       const cfg = yield* config.get()
@@ -275,6 +280,9 @@ export const layer = Layer.effect(
         }),
         Effect.catchCause((cause) => Effect.sync(() => log.warn("failed to collect MCP prompt commands", { cause }))),
         Effect.ensuring(Deferred.succeed(mcpReady, undefined)),
+        Effect.andThen(() =>
+          Object.keys(mcpCommands).length > 0 ? bus.publish(Event.Updated, {}).pipe(Effect.ignore) : Effect.void,
+        ),
         Effect.forkScoped,
       )
 
@@ -337,6 +345,7 @@ export const layer = Layer.effect(
 export const appLayer = layer.pipe(
   Layer.provide(Config.defaultLayer),
   Layer.provide(Skill.defaultLayer),
+  Layer.provide(Bus.layer),
 )
 
 export const defaultLayer = appLayer.pipe(Layer.provide(MCP.defaultLayer))
