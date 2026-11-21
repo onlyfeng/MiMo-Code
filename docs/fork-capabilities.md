@@ -1334,6 +1334,9 @@ own source list remains the complete watch surface.
   in existing messages/tool results.
   Discovery refreshes at user-turn boundaries, command lookup/listing, the
   skill route and tool misses. Stat-keyed parsing reuses unchanged files.
+  Command listing does not wait for MCP servers; once background collection
+  adds MCP prompt commands, `command.updated` is published and the TUI
+  refetches its cached list, so late prompts reach slash completion.
   Builtin extraction remains a scoped producer that caller cancellation cannot
   poison; reload invalidates its generation and always rebuilds the snapshot,
   even when every file keeps its path, mtime and size (a parse that failed for
@@ -1363,8 +1366,9 @@ own source list remains the complete watch surface.
   authorization, producer lifetime and historical recognition, and adds the
   read-time cleanup of fork-written rows. Deviates from upstream's replay rule,
   which accepts any reminder metadata as announced state, by requiring an
-  entry in the window before a delta counts, and from upstream's snapshot
-  reuse by rebuilding on an explicit reload. The old system-tail POLICY-04
+  entry in the window before a delta counts, from upstream's snapshot reuse
+  by rebuilding on an explicit reload, and by announcing late MCP prompt
+  commands to clients that cached the listing. The old system-tail POLICY-04
   selection, including its frozen-system-across-rotation rule from
   `8ed2c580`, is historical, superseded by this synchronization.
 - Watch surfaces: `packages/cli/src/skill/index.ts`,
@@ -1378,7 +1382,8 @@ own source list remains the complete watch surface.
   `packages/cli/migration/20260908000000_session_prefix_skill_catalog/migration.sql`,
   `packages/cli/src/session/prompt.ts`, `packages/cli/src/session/system.ts`,
   `packages/cli/src/session/compaction.ts`, `packages/cli/src/session/tail-digest.ts`,
-  `packages/cli/src/command/index.ts`, `packages/cli/src/tool/skill.ts`,
+  `packages/cli/src/command/index.ts`,
+  `packages/cli/src/cli/cmd/tui/context/sync.tsx`, `packages/cli/src/tool/skill.ts`,
   `packages/cli/src/tool/skill-search.ts` and
   `packages/cli/src/session/observed-tool-parts.ts`.
 - Tests/evidence: per-file counts and baseline reproductions are recorded in
@@ -1394,11 +1399,16 @@ own source list remains the complete watch surface.
   `codex-compact.test.ts` "warm snapshots follow structured schema and text
   format changes" checks the same on the Codex wire. The capture, reopen and
   system-tail suites test the reminder architecture while keeping native tool,
-  cold-capture race, restart and no-tool compaction assertions. `test/storage/prefix-skill-catalog-migration.test.ts` exercises the
+  cold-capture race, restart and no-tool compaction assertions.
+  `test/skill/skill.test.ts` "reload recovers a SKILL.md that became readable
+  without changing", `test/command/command-live.test.ts` "announces MCP prompt
+  commands that arrive after the listing" and `test/cli/tui/command-refresh.test.tsx`
+  cover the reload and late-command deviations.
+  `test/storage/prefix-skill-catalog-migration.test.ts` exercises the
   unchanged migration against a real old database. Local evidence does not
   establish publication, exact-head CI or compat propagation.
 - Review basis: upstream `128adcb782a72ef3d10752ab9c14e4fdcb319099`;
-  main behavior `d3a9d4339ed04f776ed12ebc3bbccfba9d251c80` (pull request #263).
+  main behavior `227f195d76411a64f73bca0f113f45e3413814c7` (pull request #263).
 - Retirement condition: upstream shares one effective permission/tool decision
   across catalog, search and invocation, equivalent cancellation/retry and
   generation invalidation, and lossless historical migration/projection that

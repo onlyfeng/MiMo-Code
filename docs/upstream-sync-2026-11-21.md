@@ -7,15 +7,17 @@ fork `main`, starting from the previous review at
 `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`. The starting fork `main` tip was
 `4b5dbb976b763f420ac6d34ea0284dda26362cf4`. Upstream added one commit in this
 range. A dedicated worktree on branch `sync/upstream-128adcb7-main` housed the
-merge; `dev/compat` and its checkout were not touched. `bun.lock`, the SDK and
-`packages/cli/migration/` are byte-identical to the starting fork.
+merge; `dev/compat` and its checkout were not touched. `bun.lock` and
+`packages/cli/migration/` are byte-identical to the starting fork; the SDK
+differs only by the regenerated `command.updated` event type.
 
-The runtime tip is `d3a9d4339ed04f776ed12ebc3bbccfba9d251c80`: the merge of upstream, the
+The runtime tip is `227f195d76411a64f73bca0f113f45e3413814c7`: the merge of upstream, the
 entry-anchored catalog delta replay, and the takeover changes below, which
 restore FD-005's dropped regression test, keep `skill/index.ts` at upstream
 text plus the builtin producer, return prefix rotation and the
 structured-output instruction to upstream's rule with a read-time cleanup of
-fork-written prefixes, and rebuild the skill snapshot on an explicit reload. The earlier review fixes `b922a551` and `cac9eecd` are
+fork-written prefixes, rebuild the skill snapshot on an explicit reload, and
+announce MCP prompt commands that settle after the listing. The earlier review fixes `b922a551` and `cac9eecd` are
 superseded by that last change. The `dev/compat` propagation is recorded in the same file on that
 branch.
 
@@ -325,6 +327,18 @@ so the stale snapshot was reused. Upstream `128adcb7` has the same code; fork
 counting reloads into the snapshot key; "reload recovers a SKILL.md that
 became readable without changing" in `test/skill/skill.test.ts` fails without
 it, and the skill, tool, registry, command and catalog suites pass.
+
+A sixth automated finding, against `9222e285`, showed that the TUI never saw
+MCP prompt commands whose server was still connecting at bootstrap: upstream
+made listing stop waiting for MCP, the TUI fetches the list once, and typing
+such a command then submitted plain text. Fork `main` had blocked the listing
+on MCP. Fixed in `227f195d`: the background collection publishes
+`command.updated` once it adds commands, the TUI refetches on it as it does for
+`lsp.updated`, and the SDK is regenerated for the event (no other SDK drift).
+`test/command/command-live.test.ts` "announces MCP prompt commands that arrive
+after the listing" uses a real stdio MCP server that answers `initialize` only
+after a gate opens; `test/cli/tui/command-refresh.test.tsx` drives the TUI
+store. Each fails without its half of the change.
 
 ## Publication and CI
 
