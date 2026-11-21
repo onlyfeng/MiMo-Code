@@ -112,8 +112,8 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
  * later; only exact positions describe the interval. Missing or reversed
  * endpoints fail closed without dropping anything.
  *
- * User-role messages are never dropped: the last user is where insertReminders
- * persists skill-catalog / auto-worktree gates, and a file-only or
+ * User-role messages are never dropped: the last user is where turn-boundary
+ * reminders (skill catalog, MCP, auto-worktree gates) are persisted, and a file-only or
  * synthetic-only user turn is still an instruction the provider must see.
  * Collapsing it would mark the reminder "already sent" while the provider
  * never receives it.

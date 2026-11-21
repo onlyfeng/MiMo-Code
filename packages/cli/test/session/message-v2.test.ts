@@ -310,7 +310,7 @@ describe("session.message-v2.toModelMessage", () => {
       expect(messages).toEqual([{ role: "user", content: [{ type: "file", data: "file:///fixture/media", filename: "media", mediaType: mime }] }])
     }
   })
-  test("keeps one legacy skills catalog in its historical model position", async () => {
+  test("keeps unproven marker-only synthetic narratives in their stored order", async () => {
     const input: MessageV2.WithParts[] = [
       {
         info: userInfo("m-skills-first"),
@@ -348,19 +348,24 @@ describe("session.message-v2.toModelMessage", () => {
       {
         role: "user",
         content: [
+          { type: "text", text: "<system-reminder>\nSkills available in this session:\nFIRST\n</system-reminder>" },
           { type: "text", text: "hello" },
           { type: "text", text: "<system-reminder>other</system-reminder>" },
-          {
-            type: "text",
-            text: "<system-reminder>\nSkills available in this session:\nFIRST\n</system-reminder>",
-          },
         ],
       },
-      { role: "user", content: [{ type: "text", text: "continue" }] },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "<system-reminder>\nSkills available in this session:\nSECOND\n</system-reminder>" },
+          { type: "text", text: "continue" },
+        ],
+      },
     ])
   })
 
-  test("system catalog projection removes only proven generated catalogs and preserves loaded text order", async () => {
+  // FC-005: projection drops only proven generated catalogs. A loaded
+  // <skill_content> body and an ordinary synthetic reference are not catalogs.
+  test("projection removes only proven generated catalogs and preserves loaded text order", async () => {
     const catalog = "Skills available in this session:\nNo skills are currently available."
     const generated = `<system-reminder>\nAuthoritative skills catalog snapshot v2:\nWhen multiple snapshots exist, the last one is authoritative.\n${catalog}\n</system-reminder>`
     const loaded = '<skill_content name="workflow">Skills available in this session: quoted instructions</skill_content>'
@@ -377,14 +382,39 @@ describe("session.message-v2.toModelMessage", () => {
         ...(index === 2 ? { metadata: { skillCatalog: { schema: 2, version: createHash("sha256").update(catalog).digest("hex") } } } : {}),
       })),
     }]
-    expect(await MessageV2.toModelMessages(input, model, { skillCatalogInSystem: true })).toEqual([{
+    expect(await MessageV2.toModelMessages(input, model)).toEqual([{
       role: "user",
       content: ["query", loaded, quoted, loaded, generated].map((text) => ({ type: "text", text })),
     }])
     expect(input[0].parts).toHaveLength(7)
   })
 
-  test("keeps every authoritative skills snapshot before its user query", async () => {
+  // [skill-catalog-live S2.4] Current catalogs are metadata-tagged reminders and
+  // always reach the model, even if their text mentions the legacy marker.
+  test("delivers metadata-tagged skill catalog reminders", async () => {
+    const text = "<system-reminder>\nSkill catalog for this conversation.\nSkills available in this session:\n</system-reminder>"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("m-skill-reminder"),
+        parts: [
+          { ...basePart("m-skill-reminder", "p-user"), type: "text", text: "hello" },
+          {
+            ...basePart("m-skill-reminder", "p-catalog"),
+            type: "text",
+            text,
+            synthetic: true,
+            metadata: { skillReminder: { kind: "entry", skills: { demo: "0123456789abcdef" } } },
+          },
+        ],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }, { type: "text", text }] },
+    ])
+  })
+
+  test("suppresses persisted legacy skill snapshots", async () => {
     const firstSnapshot = [
       "<system-reminder>",
       "Authoritative skills catalog snapshot v2:",
@@ -412,20 +442,8 @@ describe("session.message-v2.toModelMessage", () => {
     ]
 
     expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
-      {
-        role: "user",
-        content: [
-          { type: "text", text: firstSnapshot },
-          { type: "text", text: "hello" },
-        ],
-      },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: secondSnapshot },
-          { type: "text", text: "continue" },
-        ],
-      },
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+      { role: "user", content: [{ type: "text", text: "continue" }] },
     ])
   })
 

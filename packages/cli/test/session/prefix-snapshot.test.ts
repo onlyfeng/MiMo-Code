@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { jsonSchema, tool } from "ai"
 import { Instance } from "../../src/project/instance"
 import { Session as SessionNs } from "../../src/session"
@@ -176,23 +177,24 @@ describe("session prefix snapshot", () => {
     })
   })
 
-  test("persists skill catalog metadata with native schemas across pin, rotation, and watermark advance", async () => {
+  // FC-005: the schema-3 column is retired for writing. An existing row must
+  // still parse, and reading the prefix must retire it exactly once while every
+  // non-catalog byte, the native tool pair and the watermark stay as pinned.
+  test("retires a stored schema-3 catalog on read without touching other frozen bytes", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const session = await AppRuntime.runPromise(SessionNs.Service.use((service) => service.create({})))
+        const text = "Skills available in this session:\nNo skills are currently available."
         const catalog = {
           schema: 3 as const,
-          text: "<available_skills>\n<skill>部署与 review</skill>\n</available_skills>",
-          version: "a".repeat(64),
+          text,
+          version: createHash("sha256").update(text).digest("hex"),
           turnID: MessageID.ascending(),
-        }
-        const replacement = {
-          ...catalog,
-          text: "<available_skills />",
-          version: "b".repeat(64),
-          turnID: MessageID.ascending(),
+          // The slot marks the start of the managed range (format prefix + catalog).
+          systemSlot: { message: 1, offset: 0 },
+          formatPrefix: "JSON FORMAT\n\n",
         }
         const native = { type: "object" as const, properties: { action: { enum: ["spawn", "resume"] } } }
         const actor = {
@@ -203,146 +205,39 @@ describe("session prefix snapshot", () => {
           nativeInputSchema: native,
         }
         const tools = await SessionPrefixSnapshot.snapshotTools({ actor }, ["actor"])
-        const input = {
-          sessionID: session.id,
-          profileKey: "catalog-roundtrip",
-          system: ["stable prefix", catalog.text],
-          toolsHash: "native-tools",
-          tools,
-          loadedMcpTools: ["mcp_hidden"],
-          watermarkMessageID: MessageID.ascending(),
-        }
-        const first = await AppRuntime.runPromise(SessionPrefixSnapshot.pin({ ...input, skillCatalog: catalog }))
-        expect(first.skill_catalog).toEqual(catalog)
-        expect(first.tools?.[0].native_input_schema).toEqual(native)
-        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.pin({ ...input, skillCatalog: replacement }))).toEqual(
-          first,
-        )
-
-        const rotated = await AppRuntime.runPromise(
-          SessionPrefixSnapshot.rotate({ ...input, skillCatalog: replacement }),
-        )
-        expect(rotated.skill_catalog).toEqual(replacement)
-        expect(rotated.revision).toBe(2)
-        // Older callers rotate tools/system without knowing this new metadata.
-        const legacyRotation = await AppRuntime.runPromise(SessionPrefixSnapshot.rotate(input))
-        expect(legacyRotation.skill_catalog).toEqual(replacement)
-        expect(legacyRotation.revision).toBe(3)
-        expect(legacyRotation.created_at).toBe(first.created_at)
-        const watermark = MessageID.ascending()
-        await AppRuntime.runPromise(
-          SessionPrefixSnapshot.advance({
-            sessionID: session.id,
-            profileKey: input.profileKey,
-            revision: 2,
-            watermarkMessageID: watermark,
-          }),
-        )
-        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, input.profileKey))).toEqual(
-          legacyRotation,
-        )
-        await AppRuntime.runPromise(
-          SessionPrefixSnapshot.advance({
-            sessionID: session.id,
-            profileKey: input.profileKey,
-            revision: 3,
-            watermarkMessageID: watermark,
-          }),
-        )
-        const restored = await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, input.profileKey))
-        expect(restored).toMatchObject({
-          skill_catalog: replacement,
-          tools,
-          loaded_mcp_tools: ["mcp_hidden"],
-          revision: 3,
-          watermark_message_id: watermark,
-        })
-        expect(SessionPrefixSnapshot.restoreTools(restored!.tools!).actor).toHaveProperty("nativeInputSchema", native)
-        expect(
-          (
-            await AppRuntime.runPromise(
-              SessionPrefixSnapshot.rotate({
-                ...input,
-                profileKey: "rotate-without-existing-row",
-                skillCatalog: catalog,
-              }),
-            )
-          ).skill_catalog,
-        ).toEqual(catalog)
-      },
-    })
-  })
-
-  test.each([
-    {
-      modelID: "claude-test",
-      modelFamily: "claude",
-      harness: "default",
-      legacyKey: "9fe9bb2c6ae00b0a1b76781f03a20df5a847efabbae09ffb4960254af33bc6fd",
-    },
-    {
-      modelID: "gpt-5-test",
-      modelFamily: "gpt",
-      harness: "codex",
-      legacyKey: "65d148a287a9102d1b16475c9d094efe472cca941b046317a0371e0d991756a8",
-    },
-  ])("does not reuse a pre-policy $harness prefix when profile inputs are unchanged", async (entry) => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await AppRuntime.runPromise(SessionNs.Service.use((service) => service.create({})))
-        const profile = {
-          providerID: "test",
-          modelID: entry.modelID,
-          modelAPIID: "responses",
-          modelFamily: entry.modelFamily,
-          agent: "build",
-          agentID: "main",
-          harness: entry.harness,
-          systemMode: "append",
-          system: "",
-          permission: [],
-        }
-        // Fixed keys produced by the unversioned profile hash before the policy change.
-        const legacy = await AppRuntime.runPromise(
+        const watermarkMessageID = MessageID.ascending()
+        const profileKey = "catalog-retirement"
+        const pinned = await AppRuntime.runPromise(
           SessionPrefixSnapshot.pin({
             sessionID: session.id,
-            profileKey: entry.legacyKey,
-            system: ["legacy model-specific prompt"],
-            toolsHash: "legacy-tools",
-            tools: [{ name: "exec", input_schema: { type: "object" } }],
-            loadedMcpTools: ["mcp_legacy"],
-            watermarkMessageID: MessageID.ascending(),
+            profileKey,
+            system: ["ENV", `JSON FORMAT\n\n${text}`, "INSTRUCTIONS"],
+            toolsHash: "native-tools",
+            tools,
+            loadedMcpTools: ["mcp_hidden"],
+            skillCatalog: catalog,
+            watermarkMessageID,
           }),
         )
-        const key = SessionPrefixSnapshot.profileKey(profile)
-        expect(key).not.toBe(entry.legacyKey)
-        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, key))).toBeUndefined()
-        const current = await AppRuntime.runPromise(
-          SessionPrefixSnapshot.pin({
-            sessionID: session.id,
-            profileKey: key,
-            system: ["current unified harness prompt"],
-            toolsHash: "current-tools",
-            tools: [{ name: "read", input_schema: { type: "object" } }],
-            loadedMcpTools: [],
-            watermarkMessageID: MessageID.ascending(),
-          }),
+        expect(pinned.skill_catalog).toEqual(catalog)
+
+        const retired = await AppRuntime.runPromise(
+          SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey }),
         )
-        expect(current).toMatchObject({
-          system: ["current unified harness prompt"],
-          tools_hash: "current-tools",
-          tools: [{ name: "read", input_schema: { type: "object" } }],
-          loaded_mcp_tools: [],
-          revision: 1,
-        })
-        expect(
-          await AppRuntime.runPromise(
-            SessionPrefixSnapshot.get(session.id, SessionPrefixSnapshot.profileKey({ ...profile })),
-          ),
-        ).toEqual(current)
-        expect(await AppRuntime.runPromise(SessionPrefixSnapshot.get(session.id, entry.legacyKey))).toEqual(legacy)
+        // Only the catalog range goes; the caller-owned format instruction stays.
+        expect(retired?.system).toEqual(["ENV", "JSON FORMAT\n\n", "INSTRUCTIONS"])
+        expect(retired?.system_hash).toBe(SessionPrefixSnapshot.systemHash(retired!.system))
+        expect(retired?.skill_catalog).toBeNull()
+        expect(retired?.tools).toEqual(tools)
+        expect(retired?.loaded_mcp_tools).toEqual(["mcp_hidden"])
+        expect(retired?.watermark_message_id).toBe(watermarkMessageID)
+        expect(retired?.revision).toBe(pinned.revision)
+
+        // Idempotent: a second read neither rewrites nor re-strips.
+        const again = await AppRuntime.runPromise(
+          SessionPrefixSnapshot.getFrozen({ sessionID: session.id, profileKey }),
+        )
+        expect(again).toEqual(retired)
       },
     })
   })

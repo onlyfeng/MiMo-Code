@@ -108,7 +108,7 @@ const capture = (sessionID: Session.Info["id"]) =>
   })
 
 it.live(
-  "legacy NULL prefix recovers its catalog pair then migrates only on a new direct user",
+  "legacy NULL prefix is reused verbatim and its v2 history copy is never replayed",
   () =>
     provideTmpdirServer(
       ({ dir, llm }) =>
@@ -181,8 +181,8 @@ it.live(
           const continued = (yield* llm.inputs)[1]
           expect(wire(continued, "system")).toContain("LEGACY_FROZEN_SYSTEM_WITHOUT_CATALOG")
           expect(wire(continued, "system")).not.toContain(OLD)
-          expect(wire(continued, "conversation")).toContain(OLD)
-          expect(wire(continued, "conversation").split(OLD)).toHaveLength(2)
+          // The stored v2 snapshot is suppressed rather than replayed.
+          expect(wire(continued, "conversation")).not.toContain("Authoritative skills catalog snapshot v2:")
           yield* writeSkill(dir, NEW)
           yield* (yield* ToolRegistry.Service).reload()
           const candidates = yield* prompt.recovery({ sessionID: session.id })
@@ -193,8 +193,11 @@ it.live(
           yield* prompt.resume({ sessionID: session.id, assistantMessageID: candidates[0].assistantMessageID })
           const resumed = (yield* llm.inputs)[2]
           expect(wire(resumed, "system")).toContain("LEGACY_FROZEN_SYSTEM_WITHOUT_CATALOG")
-          expect(wire(resumed, "conversation")).toContain(OLD)
-          expect(wire(resumed, "conversation")).not.toContain(NEW)
+          // Resuming an interrupted turn re-reaches the user-turn boundary (the
+          // failed assistant is no longer the tail), so a skill change pending
+          // since the interruption is announced once as a delta. The frozen
+          // system is still reused byte-for-byte.
+          expect(wire(resumed, "conversation").split(NEW)).toHaveLength(2)
           expect(
             (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.info.role === "user"),
           ).toHaveLength(1)
@@ -207,21 +210,20 @@ it.live(
             parts: [{ type: "text", text: "A genuinely new direct user query" }],
           })
           const next = (yield* llm.inputs)[3]
+          // The frozen system is reused byte-for-byte. Announced reminders are
+          // history: the window keeps its entry (OLD) and the delta (NEW) that
+          // superseded it, and the change is not announced again. The v2 copy
+          // stays suppressed.
           expect(wire(next, "system")).toContain("LEGACY_FROZEN_SYSTEM_WITHOUT_CATALOG")
-          expect(wire(next, "system")).toContain(NEW)
-          expect(wire(next, "system").split(NEW)).toHaveLength(2)
-          expect(wire(next, "conversation")).not.toContain(OLD)
-          expect(wire(next, "conversation")).not.toContain(NEW)
+          expect(wire(next, "system")).not.toContain(NEW)
+          expect(wire(next, "conversation").split(NEW)).toHaveLength(2)
+          expect(wire(next, "conversation")).not.toContain("Authoritative skills catalog snapshot v2:")
           const persisted = (yield* sessions.messages({ sessionID: session.id })).flatMap((message) => message.parts)
           expect(persisted.find((part) => part.id === originalPart.id)).toEqual(originalPart)
           expect(persisted.filter((part) => part.type === "text" && part.metadata?.skillCatalog)).toHaveLength(1)
           const migrated = (yield* rows(session.id))[0]
-          const nextUser = (yield* sessions.messages({ sessionID: session.id })).findLast(
-            (message) => message.info.role === "user",
-          )
-          expect(migrated.skill_catalog).toMatchObject({ schema: 3, turnID: nextUser?.info.id })
-          expect(migrated.skill_catalog?.text).toContain(NEW)
-          expect(migrated.skill_catalog?.version).toMatch(/^[a-f0-9]{64}$/)
+          expect(migrated.system).toEqual(["LEGACY_FROZEN_SYSTEM_WITHOUT_CATALOG"])
+          expect(migrated.skill_catalog).toBeNull()
           expect(yield* llm.misses).toEqual([])
         }),
       { git: true, config },
@@ -230,7 +232,7 @@ it.live(
 )
 
 it.live(
-  "provider tool continuation freezes catalog within a real turn then updates next turn",
+  "a mid-turn skill change is not announced until the next user turn",
   () =>
     provideTmpdirServer(
       ({ dir, llm }) =>
@@ -255,8 +257,8 @@ it.live(
             .pipe(Effect.forkScoped)
           try {
             yield* llm.wait(1).pipe(Effect.timeout("10 seconds"))
-            const frozen = (yield* rows(session.id))[0].skill_catalog
-            expect(frozen).toMatchObject({ schema: 3 })
+            const frozen = (yield* rows(session.id))[0]
+            expect(frozen.skill_catalog).toBeNull()
             yield* writeSkill(dir, NEW)
             yield* registry.reload()
             gate.resolve()
@@ -264,13 +266,14 @@ it.live(
             const requests = yield* llm.inputs
             expect(requests).toHaveLength(2)
             for (const request of requests) {
-              expect(wire(request, "system")).toContain(OLD)
+              expect(wire(request, "system")).not.toContain(OLD)
               expect(wire(request, "system")).not.toContain(NEW)
-              expect(wire(request, "conversation")).not.toContain(CATALOG_MARKER)
+              expect(wire(request, "conversation")).toContain(OLD)
+              expect(wire(request, "conversation")).not.toContain(NEW)
             }
             expect(wire(requests[1], "system")).toEqual(wire(requests[0], "system"))
             expect(wire(requests[1], "conversation")).toContain(BODY)
-            expect((yield* rows(session.id))[0].skill_catalog).toEqual(frozen)
+            expect((yield* rows(session.id))[0].system).toEqual(frozen.system)
             yield* llm.text("new turn complete")
             yield* prompt.prompt({
               sessionID: session.id,
@@ -278,7 +281,8 @@ it.live(
               model,
               parts: [{ type: "text", text: "New direct turn" }],
             })
-            expect(wire((yield* llm.inputs)[2], "system")).toContain(NEW)
+            expect(wire((yield* llm.inputs)[2], "conversation")).toContain(NEW)
+            expect(wire((yield* llm.inputs)[2], "system")).not.toContain(NEW)
             expect(yield* llm.misses).toEqual([])
           } finally {
             gate.resolve()
@@ -291,7 +295,7 @@ it.live(
 )
 
 it.live(
-  "cold capture includes catalog system tail and retains native Actor contract",
+  "cold capture excludes the catalog and retains the native Actor contract",
   () =>
     provideTmpdirServer(
       ({ dir }) =>
@@ -310,9 +314,8 @@ it.live(
           })
           expect(yield* rows(session.id)).toEqual([])
           const prefix = yield* capture(session.id)
-          expect(prefix.system.join("\n")).toContain(OLD)
-          expect(prefix.system.join("\n").split(OLD)).toHaveLength(2)
-          expect(JSON.stringify(prefix.inheritedMessages)).not.toContain(CATALOG_MARKER)
+          expect(prefix.system.join("\n")).not.toContain(OLD)
+          expect(prefix.system.join("\n")).not.toContain(CATALOG_MARKER)
           const tools = yield* Effect.promise(() =>
             SessionPrefixSnapshot.snapshotTools(prefix.tools, [...(prefix.activeTools ?? Object.keys(prefix.tools))]),
           )
@@ -324,7 +327,7 @@ it.live(
 )
 
 it.live(
-  "compaction third profile consumer uses frozen catalog despite live directory changes",
+  "compaction reuses the frozen catalog-free prefix despite live directory changes",
   () =>
     provideTmpdirServer(
       ({ dir, llm }) =>
@@ -360,9 +363,9 @@ it.live(
           ).toBe("continue")
           const summary = (yield* llm.inputs)[3]
           expect(wire(summary, "system")).toEqual(wire(before, "system"))
-          expect(wire(summary, "system")).toContain(OLD)
+          expect(wire(summary, "system")).not.toContain(OLD)
           expect(wire(summary, "system")).not.toContain(NEW)
-          expect(wire(summary, "conversation")).not.toContain(CATALOG_MARKER)
+          expect(wire(summary, "conversation")).not.toContain(NEW)
           expect(summary.tools).toEqual(before.tools)
           // Load-bearing literal, not a snapshot of current behavior: the
           // processor throws on any tool call from a summary message, which
@@ -370,7 +373,8 @@ it.live(
           // carries the same throw. See FD-011.
           expect(summary.tool_choice).toBe("none")
           expect(yield* llm.misses).toEqual([])
-          expect((yield* rows(session.id))[0].skill_catalog).toEqual(frozen[0].skill_catalog)
+          expect((yield* rows(session.id))[0].system).toEqual(frozen[0].system)
+          expect((yield* rows(session.id))[0].skill_catalog).toBeNull()
         }),
       { git: true, config },
     ),

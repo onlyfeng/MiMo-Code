@@ -9,6 +9,7 @@ import type { Permission } from "@/permission"
 import type { MessageID, SessionID } from "./schema"
 import type { SkillCatalogSnapshot } from "./skill-catalog"
 import { SessionPrefixSnapshotTable, type SessionPrefixToolSnapshot } from "./session.sql"
+import { stripLegacySkillCatalog } from "./skill-catalog"
 import { GitStatusPrompt } from "./git-status"
 import { Log } from "@/util"
 
@@ -204,6 +205,64 @@ export const rotate = Effect.fn("SessionPrefixSnapshot.rotate")(function* (input
   const snapshot = yield* get(input.sessionID, input.profileKey)
   if (!snapshot) return yield* Effect.die(new Error("Failed to read rotated session prefix snapshot"))
   return snapshot
+})
+
+/**
+ * Replace only the frozen system; tools and watermark stay as pinned. The
+ * retired schema-3 catalog record is cleared with it: once its range is gone
+ * from the system, the record would describe text that no longer exists.
+ */
+export const replaceSystem = Effect.fn("SessionPrefixSnapshot.replaceSystem")(function* (input: {
+  sessionID: SessionID
+  profileKey: string
+  system: string[]
+}) {
+  yield* Effect.sync(() =>
+    Database.use((db) =>
+      db
+        .update(SessionPrefixSnapshotTable)
+        .set({
+          system: input.system,
+          system_hash: systemHash(input.system),
+          skill_catalog: null,
+          updated_at: Date.now(),
+        })
+        .where(
+          and(
+            eq(SessionPrefixSnapshotTable.session_id, input.sessionID),
+            eq(SessionPrefixSnapshotTable.profile_key, input.profileKey),
+          ),
+        )
+        .run(),
+    ),
+  )
+  const snapshot = yield* get(input.sessionID, input.profileKey)
+  if (!snapshot) return yield* Effect.die(new Error("Failed to read session prefix snapshot after system replace"))
+  return snapshot
+})
+
+/**
+ * The frozen prefix for a profile. Prefixes pinned while the skill catalog
+ * lived in the system tail still carry it; strip it once and persist the
+ * result, since the catalog now arrives as a user-turn reminder.
+ *
+ * FC-005: a schema-3 row strips exactly its recorded range (keeping the
+ * caller-owned format instruction); an older row falls back to the legacy
+ * block pattern. A schema-3 row whose range cannot be proven is left as is
+ * rather than guessing, and its stale record is not cleared.
+ */
+export const getFrozen = Effect.fn("SessionPrefixSnapshot.getFrozen")(function* (input: {
+  sessionID: SessionID
+  profileKey: string
+  hostSystem?: string
+}) {
+  const frozen = yield* get(input.sessionID, input.profileKey)
+  if (!frozen) return frozen
+  const system = stripLegacySkillCatalog(frozen.system, input.hostSystem, frozen.skill_catalog)
+  const unchanged = system.length === frozen.system.length && system.every((part, index) => part === frozen.system[index])
+  // An empty schema-3 catalog owned no text; retire the record without rotating.
+  if (unchanged && !(frozen.skill_catalog && !frozen.skill_catalog.text)) return frozen
+  return yield* replaceSystem({ sessionID: input.sessionID, profileKey: input.profileKey, system })
 })
 
 export const advance = Effect.fn("SessionPrefixSnapshot.advance")(function* (input: {

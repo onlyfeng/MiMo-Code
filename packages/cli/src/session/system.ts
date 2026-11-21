@@ -30,13 +30,20 @@ export function agent(agent: Agent.Info, model: Provider.Model, harness?: Harnes
 
 export interface Interface {
   readonly environment: (model: Provider.Model, now?: number, harness?: HarnessMode) => Effect.Effect<string[]>
-  readonly skills: (
+  /**
+   * Model-visible skills for the catalog reminder. Empty unless the effective
+   * permission, agent allowlist and user tool toggles allow loading or
+   * searching skills (FC-005).
+   */
+  readonly skillCatalog: (
     agent: Agent.Info,
     input?: {
       permission?: Permission.Ruleset
       tools?: Record<string, boolean>
     },
-  ) => Effect.Effect<string | undefined>
+  ) => Effect.Effect<Skill.Info[]>
+  /** Rescan skill roots for the current directory. */
+  readonly refreshSkills: () => Effect.Effect<void>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Skill.Info[]>
   readonly all: () => Effect.Effect<Skill.Info[]>
 }
@@ -103,7 +110,10 @@ export const layer = Layer.effect(
         return base
       }),
 
-      skills: Effect.fn("SystemPrompt.skills")(function* (
+      // The catalog reminder is model-facing, so it uses the same gates as the
+      // skill and skill_search tools: an agent that can neither load nor search
+      // skills is announced nothing (FC-005).
+      skillCatalog: Effect.fn("SystemPrompt.skillCatalog")(function* (
         agent: Agent.Info,
         input?: {
           permission?: Permission.Ruleset
@@ -111,26 +121,13 @@ export const layer = Layer.effect(
         },
       ) {
         const permission = input?.permission ?? agent.permission
-        const load = canLoadSkills({
-          permission,
-          toolAllowlist: agent.toolAllowlist,
-          tools: input?.tools,
-        })
-        const search = canSearchSkills({
-          permission,
-          toolAllowlist: agent.toolAllowlist,
-          tools: input?.tools,
-        })
-        if (!load && !search) return
+        const access = { permission, toolAllowlist: agent.toolAllowlist, tools: input?.tools }
+        if (!canLoadSkills(access) && !canSearchSkills(access)) return []
+        return yield* skill.modelInvocable({ ...agent, permission })
+      }),
 
-        const list = yield* skill.modelInvocable({ ...agent, permission })
-
-        return [
-          "Skills available in this session:",
-          // The prefix freezes the permission-filtered catalog in its system tail;
-          // the skill tool schema is deliberately static for cache stability.
-          Skill.fmt(list, { verbose: true }),
-        ].join("\n")
+      refreshSkills: Effect.fn("SystemPrompt.refreshSkills")(function* () {
+        yield* skill.refresh()
       }),
 
       // The user surface: authorization-filtered but NOT model-reachability

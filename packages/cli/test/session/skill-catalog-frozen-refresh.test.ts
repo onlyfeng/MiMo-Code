@@ -67,7 +67,7 @@ const rows = (sessionID: Session.Info["id"]) =>
     ),
   )
 // Five real provider turns include plugin loading and Git snapshot work.
-it.live("catalog refresh and tool rotation preserve every non-catalog frozen byte", () =>
+it.live("skill changes and tool rotation preserve every frozen byte", () =>
   Effect.gen(function* () {
     const key = "catalog-frozen-plugin-generation"
     Reflect.set(globalThis, key, "PLUGIN_OLD")
@@ -105,25 +105,9 @@ it.live("catalog refresh and tool rotation preserve every non-catalog frozen byt
           const before = (yield* rows(session.id))[0]
           expect(before.system.join("\n")).toContain("FROZEN_AGENTS_OLD")
           expect(before.system.join("\n")).toContain("PLUGIN_OLD")
-          if (!before.skill_catalog) throw new Error("Missing catalog")
-          expect(before.skill_catalog.systemSlot).toBeDefined()
-          // Real persisted schema3 rows from PR87 have no slot. Recover one only
-          // from the unique complete catalog text, preserving their frozen tail.
-          const legacyCatalog = {
-            schema: 3 as const,
-            text: before.skill_catalog.text,
-            version: before.skill_catalog.version,
-            turnID: before.skill_catalog.turnID,
-          }
-          yield* Effect.sync(() =>
-            Database.use((db) =>
-              db
-                .update(SessionPrefixSnapshotTable)
-                .set({ skill_catalog: legacyCatalog })
-                .where(eq(SessionPrefixSnapshotTable.session_id, session.id))
-                .run(),
-            ),
-          )
+          // The catalog is no longer part of the frozen system.
+          expect(before.skill_catalog).toBeNull()
+          expect(before.system.join("\n")).not.toContain(OLD)
           yield* writeSkill(dir, NEW)
           yield* Effect.promise(() => Bun.write(path.join(dir, "AGENTS.md"), "MUTATED_AGENTS_NEW"))
           Reflect.set(globalThis, key, "PLUGIN_NEW")
@@ -136,13 +120,13 @@ it.live("catalog refresh and tool rotation preserve every non-catalog frozen byt
             parts: [{ type: "text", text: "Second direct query" }],
           })
           const after = (yield* rows(session.id))[0]
-          if (!after.skill_catalog) throw new Error("Missing refreshed catalog")
-          expect(after.skill_catalog.text).toContain(NEW)
-          expect(after.skill_catalog.systemSlot).toBeDefined()
-          expect(after.system).toEqual(
-            before.system.map((text) => text.replace(before.skill_catalog!.text, after.skill_catalog!.text)),
-          )
+          // A changed skill set leaves the frozen prefix untouched; it is
+          // announced as a user-turn delta instead.
+          expect(after.system).toEqual(before.system)
+          expect(after.revision).toBe(before.revision)
           expect(wire((yield* llm.inputs)[1], "system")).not.toContain("PLUGIN_NEW")
+          expect(wire((yield* llm.inputs)[1], "system")).not.toContain(NEW)
+          expect(wire((yield* llm.inputs)[1], "conversation")).toContain(NEW)
           yield* Effect.sync(() =>
             Database.use((db) =>
               db

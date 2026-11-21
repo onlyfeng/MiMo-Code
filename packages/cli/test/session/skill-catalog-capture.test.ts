@@ -11,7 +11,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { PartID } from "../../src/session/schema"
 import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
-import { bindSkillCatalog, captureSkillCatalog, newSkillCatalogSlot } from "../../src/session/skill-catalog"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
 import { Database, eq } from "../../src/storage"
 import { ToolRegistry } from "../../src/tool"
@@ -70,7 +69,7 @@ const capture = (sessionID: Session.Info["id"]) =>
   })
 
 it.live(
-  "cold capture pins catalog and native tools across repeated captures of the same noReply user",
+  "cold capture pins native tools and a catalog-free system across repeated captures of the same noReply user",
   () =>
     provideTmpdirServer(
       ({ dir, llm }) =>
@@ -90,16 +89,12 @@ it.live(
           })
           expect(yield* rows(session.id)).toEqual([])
           const first = yield* capture(session.id)
-          expect(first.system.join("\n")).toContain(OLD)
+          // The catalog is a user-turn reminder now, so it never enters the
+          // frozen system and no catalog record is pinned.
+          expect(first.system.join("\n")).not.toContain(OLD)
           const pinned = (yield* rows(session.id))[0]
-          if (!pinned?.skill_catalog || !pinned.tools || !first.tools.actor)
-            throw new Error("Missing pinned catalog or actual Actor tool")
-          expect(pinned.skill_catalog.schema).toBe(3)
-          expect(pinned.skill_catalog.turnID).toBe(user.info.id)
-          expect(pinned.skill_catalog.text).toContain(OLD)
-          expect(pinned.skill_catalog.version).toBe(
-            createHash("sha256").update(pinned.skill_catalog.text).digest("hex"),
-          )
+          if (!pinned?.tools || !first.tools.actor) throw new Error("Missing pinned prefix or actual Actor tool")
+          expect(pinned.skill_catalog).toBeNull()
           expect(pinned.system).toEqual(first.system)
           const native = SessionPrefixSnapshot.nativeSchema(first.tools.actor)
           expect(native).toBeDefined()
@@ -234,11 +229,12 @@ it.live(
             expect(winner.skill_catalog).toBeNull()
             expect(captured.system).toEqual(winner.system)
             expect(captured.system.join("\n")).not.toContain(NEW)
+            // The v2 user-side snapshot stays stored but is no longer projected.
             expect(
               captured.inheritedMessages.some(
                 (message) => message.role === "user" && JSON.stringify(message.content).includes(OLD),
               ),
-            ).toBe(true)
+            ).toBe(false)
             expect(Object.keys(captured.tools)).toEqual(["actor"])
             expect(
               yield* Effect.promise(() =>
@@ -258,9 +254,8 @@ it.live(
   30000,
 )
 
-for (const layout of ["legacy", "managed format"] as const) it.live(
-  `runLoop uses a competing pin winner system and ${layout} layout while retaining executable tools`,
-  () =>
+it.live(
+  "runLoop uses a competing pin winner system while retaining executable tools",
     Effect.gen(function* () {
       const key = `runloop-capture-gate-${randomUUID()}`
       const gate = { armed: false, hit: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() }
@@ -349,16 +344,11 @@ for (const layout of ["legacy", "managed format"] as const) it.live(
             // A competing legacy pin has different advertised tools. The live loop may
             // rotate that pool, but must retain the winning system/catalog and execute closures.
             const tools = [{ ...actor, active: true }]
-            const token = newSkillCatalogSlot()
-            const bound = layout === "managed format"
-              ? bindSkillCatalog([`RUNLOOP_PIN_WINNER_SYSTEM\n\n${token}`], captureSkillCatalog(legacy, user.info.id), token, "STALE_JSON_MODE\n\n")
-              : undefined
-            const expectedSystem = bound ? [`RUNLOOP_PIN_WINNER_SYSTEM\n\n${legacy}`] : ["RUNLOOP_PIN_WINNER_SYSTEM"]
-            const winner = yield* SessionPrefixSnapshot.pin({
+            const expectedSystem = ["RUNLOOP_PIN_WINNER_SYSTEM"]
+            yield* SessionPrefixSnapshot.pin({
               sessionID: session.id,
               profileKey: baseline.profile_key,
-              system: bound?.system ?? expectedSystem,
-              skillCatalog: bound?.catalog,
+              system: expectedSystem,
               toolsHash: SessionPrefixSnapshot.toolsHash(SessionPrefixSnapshot.restoreTools(tools), ["actor"]),
               tools,
               loadedMcpTools: [],
@@ -373,8 +363,10 @@ for (const layout of ["legacy", "managed format"] as const) it.live(
               const system = request.messages.filter((message) => message.role === "system")
               const conversation = request.messages.filter((message) => message.role !== "system")
               expect(system).toEqual([{ role: "system", content: expectedSystem.join("\n\n") }])
-              expect(JSON.stringify(conversation).includes(OLD)).toBe(layout === "legacy")
-              expect(JSON.stringify(conversation)).not.toContain(NEW)
+              // The stored v2 snapshot is suppressed; the live catalog arrives as
+              // a reminder on the user turn instead.
+              expect(JSON.stringify(conversation)).not.toContain(OLD)
+              expect(JSON.stringify(conversation)).toContain(NEW)
             }
             if (!Array.isArray(requests[1].messages)) throw new Error("Expected actual tool-result messages")
             expect(requests[1].messages.filter((message) => message.role === "tool")).toEqual([
@@ -382,12 +374,7 @@ for (const layout of ["legacy", "managed format"] as const) it.live(
             ])
             const stored = (yield* rows(session.id))[0]
             expect(stored.system).toEqual(expectedSystem)
-            if (layout === "legacy") expect(stored.skill_catalog).toBeNull()
-            else {
-              expect(stored.skill_catalog?.text).toBe(legacy)
-              expect(stored.skill_catalog?.formatPrefix).toBeUndefined()
-              expect(stored.skill_catalog?.version).toBe(winner.skill_catalog?.version)
-            }
+            expect(stored.skill_catalog).toBeNull()
             expect(stored.tools?.some((tool) => tool.name === "exec" && tool.active !== false)).toBe(true)
             expect(stored.tools?.find((tool) => tool.name === "actor")?.native_input_schema).toEqual(
               actor.native_input_schema,
