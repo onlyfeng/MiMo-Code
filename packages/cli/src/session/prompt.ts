@@ -6945,11 +6945,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       yield* bus.publish(TuiEvent.InstructionsLoaded, { files }).pipe(Effect.ignore)
                     }
                   }
-                  return [
-                    ...env,
-                    ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
-                    ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content),
-                  ]
+                  // The structured-output instruction is deliberately absent: it
+                  // belongs to the request, not to the prefix. Including it here
+                  // would let a cold capture in json_schema mode freeze it into
+                  // the snapshot, so a later plain-text request on the same
+                  // prefix would still demand the (now unregistered)
+                  // StructuredOutput tool. It is appended per request below.
+                  return [...env, ...(Flag.MIMOCODE_DISABLE_INSTRUCTIONS ? [] : instructions.content)]
                 })
                 // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
                 // intentionally don't use it here — the `tools` variable from `resolveTools`
@@ -7033,9 +7035,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 // request, not of the frozen prefix: a session that switches to
                 // JSON mode after its prefix was pinned must still receive it,
                 // and switching back must not leave it behind. The snapshot row
-                // stays byte-stable across those transitions.
+                // stays byte-stable across those transitions, because
+                // `currentAdditions` never contributes this instruction.
+                // The guard tests substrings, not array membership:
+                // buildSystemArray collapses its parts into one string, so an
+                // element-wise check would never match and would append a
+                // second copy whenever the text is already present (a host
+                // system or plugin may supply it).
                 const prebuiltSystem =
-                  format.type === "json_schema" && !resolvedPrefix.prefix.system.includes(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+                  format.type === "json_schema" &&
+                  !resolvedPrefix.prefix.system.some((part) => part.includes(STRUCTURED_OUTPUT_SYSTEM_PROMPT))
                     ? [...resolvedPrefix.prefix.system, STRUCTURED_OUTPUT_SYSTEM_PROMPT]
                     : resolvedPrefix.prefix.system
                 const modelMsgs = resolvedPrefix.prefix.inheritedMessages

@@ -172,9 +172,61 @@ it.live("skill changes and tool rotation preserve every frozen byte", () =>
           })
           expect((yield* rows(session.id))[0].system).toEqual(rotated.system)
           expect(wire((yield* llm.inputs)[4], "system")).not.toContain("The user has requested structured output")
+          // The instruction is request-owned, so it never reaches the stored row.
+          expect((yield* rows(session.id))[0].system.join("\n")).not.toContain(
+            "The user has requested structured output",
+          )
         }),
       { git: true, config: (url) => ({ ...config(url), plugin: [pathToFileURL(plugin).href] }) },
     )
   }),
+  15_000,
+)
+
+// The opposite direction of the case above: the prefix is captured cold while
+// the request is already in json_schema mode. The instruction must stay out of
+// the pinned row, or every later plain-text request on that prefix would keep
+// demanding the then-unregistered StructuredOutput tool.
+it.live("a cold capture in structured mode does not freeze the format instruction", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          Promise.all([Global.Path.config, path.join(dir, ".mimocode")].map(prepareConfigDependencies)),
+        )
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* sessions.create({ title: "Cold structured capture" })
+        yield* llm.tool("StructuredOutput", { ok: true })
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model,
+          format: {
+            type: "json_schema",
+            retryCount: 0,
+            schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+          },
+          parts: [{ type: "text", text: "First query is already structured" }],
+        })
+        const pinned = (yield* rows(session.id))[0]
+        expect(pinned.system.join("\n")).not.toContain("The user has requested structured output")
+        // Exactly one copy on the wire: the request-local append, not a second
+        // one from a frozen duplicate.
+        const first = wire((yield* llm.inputs)[0], "system")
+        expect(first.split("The user has requested structured output").length - 1).toBe(1)
+        yield* llm.text("plain answer")
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model,
+          format: { type: "text" },
+          parts: [{ type: "text", text: "Now answer as ordinary text" }],
+        })
+        expect(wire((yield* llm.inputs)[1], "system")).not.toContain("The user has requested structured output")
+        expect((yield* rows(session.id))[0].system).toEqual(pinned.system)
+      }),
+    { git: true, config },
+  ),
   15_000,
 )
