@@ -274,6 +274,8 @@ describe("inbox delivery across processes", () => {
     let first: number | undefined
     let claimedAt: number | undefined
     kick.mockImplementation((lane) => {
+      // Every session shares this scheduler. Only this lane measures the retry.
+      if (lane.sessionID !== session.id || lane.agentID !== "main") return Effect.void
       const now = Date.now()
       first ??= now
       if (now - first < 1_000) return Effect.void
@@ -301,7 +303,8 @@ describe("inbox delivery across processes", () => {
     yield* tq.accept({ ...input(session.id), adoptReceiver: false })
     // Kicks that start together form one round.
     const rounds: number[] = []
-    kick.mockImplementation(() => Effect.sync(() => {
+    kick.mockImplementation((lane) => Effect.sync(() => {
+      if (lane.sessionID !== session.id || lane.agentID !== "main") return
       const now = Date.now()
       if (rounds.length === 0 || now - rounds[rounds.length - 1]! > 500) rounds.push(now)
     }))
