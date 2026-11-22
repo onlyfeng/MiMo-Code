@@ -1211,7 +1211,7 @@ own source list remains the complete watch surface.
 - Upstream relationship: upstream spawns the writer on the parent's model. Fork
   addition; `dev/compat` inherits it.
 - Watch surfaces: `tryStartCheckpointWriter` and the no-fork `buildPrefix` call
-  in `checkpoint.ts`; `registerPrefixCapture`/`registerAgentModelResolver` in
+  in `checkpoint.ts`; scoped bindings for `prefixCaptureRef` and `agentModelRef` in
   `SessionPrompt.layer`; `Agent` config merge of `model`/`modelRef`;
   `Provider.resolveModelRef`.
 - Tests/evidence: `packages/cli/test/session/checkpoint-fork-mode.test.ts`
@@ -2776,7 +2776,7 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 
 - Status: active
 - Canonical owner: fork `main` user-message model resolution in
-  `packages/cli/src/session/prompt.ts` (`continuedVariant`, `createUserMessage`,
+  `packages/cli/src/session/model-selection.ts` and `packages/cli/src/session/prompt.ts` (`continuedVariant`, `createUserMessage`,
   `shell` and `command`)
 - Observable contract:
   - A prompt that names no model, for an agent without one, takes the last
@@ -2806,8 +2806,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   only at `max` held 344 cron and 98 inbox user messages without a variant, and
   every turn one session delegated to another ran at the default.
 - Upstream relationship: upstream `7bc7dc3a` resolves the variant the same way.
-  Fork fix of shared code. `dev/compat` applies the same rule in its shared
-  model-selection resolver (DC-TUI-001).
+  Fork fix of shared code. Both branches use the `main` resolver. The
+  `dev/compat` model-selection preview calls it too (DC-TUI-001).
 - 2026-11-02: rebuild boundaries kept the model but dropped the variant. After
   every checkpoint rebuild, inbox deliveries copied the boundary's model and ran
   at the default, and reopening the session showed no variant. In one
@@ -3446,20 +3446,15 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 
 ## FC-050 — old oversized environment prefixes are rebuilt
 
-- 2026-11-13 synchronization: adopt the unified environment from `e3592f0e`, which no longer renders Claude-specific git status or recent commits. The production status-generation deviation retires. Keep `GitStatusPrompt.oversized` and `SessionPrefixSnapshot.get` recovery for historical persisted prefixes until such data no longer needs to be read. The helper's caps remain testable legacy behavior, not a promise that new requests include git status.
+- 2026-11-13 synchronization: adopt the unified environment from `e3592f0e`, which no longer renders Claude-specific git status or recent commits. The production status-generation deviation retires. Keep `GitStatusPrompt.oversized` and `SessionPrefixSnapshot.get` recovery for historical persisted prefixes until such data no longer needs to be read.
 
 - Status: active
 - Canonical owner: fork `main` — historical environment recognition in
   `packages/cli/src/session/git-status.ts` and its use in
   `SessionPrefixSnapshot.get` (`packages/cli/src/session/prefix-snapshot.ts`)
 - Observable contract:
-  - The retired Claude environment ran `git status --short --untracked-files=normal`:
-    an untracked directory is one `?? dir/` line, not one line per file.
-  - Its legacy helper caps status at `MAX_LINES` (200) lines and `MAX_CHARS` (10,000)
-    characters; when anything is left out, the last line gives the number of
-    entries omitted and points to `git status` for the full list.
   - `SessionPrefixSnapshot.get` drops a frozen prefix whose environment status
-    section is longer than `MAX_CHARS` (one pinned before the cap) and returns
+    section exceeds the historical 10,000-character limit and returns
     nothing, so the caller pins a freshly rendered prefix. The log line is
     `dropped a frozen prefix with an oversized git status`. Prefixes without an
     environment block are untouched.
@@ -3476,12 +3471,9 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   `SessionPrefixSnapshot.get`/`pin`/`rotate` and their callers
   in `prompt.ts` and `compaction.ts`; the `Status:`/`Recent commits:` labels
   `oversized` locates.
-- Tests/evidence: `packages/cli/test/session/git-status-prompt.test.ts` "an
-  untracked directory is listed once, not file by file" and "a long status is
-  capped and says how much it left out" render the environment on real git; "is
-  dropped on read so the caller pins a fresh one, and a capped one is kept"
-  reads a legacy row. Listing all untracked files, removing the cap, or never
-  treating a prefix as oversized each fails a case.
+- Tests/evidence: `packages/cli/test/session/git-status-prompt.test.ts` reads persisted
+  rows with oversized, capped, and exactly-at-limit status sections and with a plain
+  prompt. It verifies that a fresh prefix can be pinned after the old one is dropped.
 - Retirement condition: the fork no longer reads frozen prefixes rendered
   before the bounded/unified environment policy.
 
@@ -3683,7 +3675,10 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Known limits: the stalled record itself may be lost or written late. A
   healthy write slower than `writeTimeout` also replaces its stream; later
   records still reach the same file. FC-008's isolation of `bus-integration`
-  remains, so CI avoids the known trigger.
+  remains, so CI avoids the known trigger. A Linux CI check put the suite back in the
+  same Bun process as `lsp/client` (run 45021920193). All 162 files finished
+  in 208 seconds, but the shared log queue exceeded its one-second flush budget
+  during the bus tests. The regular shards keep the isolated suite.
 - Upstream relationship: fork hardening of shared upstream code; `dev/compat`
   inherits it.
 - Watch surfaces: `append`, `open`, `close`, `rotate` and `closeCurrent` in

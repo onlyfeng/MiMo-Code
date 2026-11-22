@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Effect, Exit, Layer, Scope } from "effect"
+import { agentModelRef } from "../../src/session/agent-model-ref"
 import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { SessionPrompt } from "../../src/session/prompt"
 import { testEffect } from "../lib/effect"
@@ -15,7 +16,7 @@ const open = Effect.gen(function* () {
   const close = Scope.close(scope, Exit.void)
   yield* Effect.addFinalizer(() => close)
   yield* Layer.buildWithMemoMap(SessionPrompt.defaultLayer, yield* Layer.makeMemoMap, scope)
-  return { capture: prefixCaptureRef.current, close }
+  return { capture: prefixCaptureRef.current, resolveModel: agentModelRef.current, close }
 })
 
 describe("prefix capture registration", () => {
@@ -23,13 +24,18 @@ describe("prefix capture registration", () => {
     Effect.gen(function* () {
       const outer = yield* open
       expect(outer.capture).toBeDefined()
+      expect(outer.resolveModel).toBeDefined()
       const inner = yield* open
       expect(inner.capture).toBeDefined()
       expect(inner.capture).not.toBe(outer.capture)
+      expect(inner.resolveModel).toBeDefined()
+      expect(inner.resolveModel).not.toBe(outer.resolveModel)
       yield* inner.close
       expect(prefixCaptureRef.current).toBe(outer.capture)
+      expect(agentModelRef.current).toBe(outer.resolveModel)
       yield* outer.close
       expect(prefixCaptureRef.current).not.toBe(outer.capture)
+      expect(agentModelRef.current).not.toBe(outer.resolveModel)
     }), 60_000)
 
   it.live("disposal out of order never reinstates a disposed layer's captor", () =>
@@ -38,8 +44,11 @@ describe("prefix capture registration", () => {
       const second = yield* open
       yield* first.close
       expect(prefixCaptureRef.current).toBe(second.capture)
+      expect(agentModelRef.current).toBe(second.resolveModel)
       yield* second.close
       expect(prefixCaptureRef.current).not.toBe(first.capture)
+      expect(agentModelRef.current).not.toBe(first.resolveModel)
       expect(prefixCaptureRef.current).not.toBe(second.capture)
+      expect(agentModelRef.current).not.toBe(second.resolveModel)
     }), 60_000)
 })

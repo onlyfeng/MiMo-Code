@@ -5,6 +5,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import z from "zod"
 import { NamedError } from "@mimo-ai/shared/util/error"
 import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
+import { compareMessageOrder as compareOrder } from "./message-order"
 import {
   APICallError,
   convertToModelMessages,
@@ -687,10 +688,7 @@ export const Info = z.discriminatedUnion("role", [User, Assistant]).meta({
 })
 export type Info = z.infer<typeof Info>
 
-export function compareOrder(left: Pick<Info, "id" | "time">, right: Pick<Info, "id" | "time">) {
-  if (left.time.created !== right.time.created) return left.time.created - right.time.created
-  return compareUtf8Bytes(left.id, right.id)
-}
+export { compareOrder }
 
 export const Event = {
   Updated: SyncEvent.define({

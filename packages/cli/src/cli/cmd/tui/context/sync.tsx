@@ -30,7 +30,7 @@ import { useProject } from "@tui/context/project"
 import { useEvent } from "@tui/context/event"
 import { useSDK } from "@tui/context/sdk"
 import { Binary } from "@mimo-ai/shared/util/binary"
-import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
+import { compareMessageOrder } from "@/session/message-order"
 import { createSimpleContext } from "./helper"
 import type { Snapshot } from "@/snapshot"
 import { useExit } from "./exit"
@@ -162,10 +162,7 @@ type RevertView<M> = {
   globalAfter: M[]
 }
 
-export function compareMessageOrder(left: OrderedMessage, right: OrderedMessage) {
-  if (left.time.created !== right.time.created) return left.time.created - right.time.created
-  return compareUtf8Bytes(left.id, right.id)
-}
+export { compareMessageOrder }
 
 export function messageIndex(messages: readonly Pick<Message, "id">[], id: string) {
   return messages.findIndex((message) => message.id === id)

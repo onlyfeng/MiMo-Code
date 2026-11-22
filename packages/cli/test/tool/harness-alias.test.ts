@@ -12,7 +12,6 @@ import { SystemPrompt } from "../../src/session/system"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { Agent } from "../../src/agent/agent"
 import { ToolRegistry } from "../../src/tool"
-import { mcpToolSearchMode, resolveHarnessMode, usesGPTToolset } from "../../src/tool/gpt"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ProviderTest } from "../fake/provider"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -62,35 +61,12 @@ describe("legacy GPT harness aliases with explicit harness selection", () => {
     }
   })
 
-  test("keeps legacy aliases on the default prompt, tools and MCP until the session opts in", () => {
-    const input = {
-      modelID: "deployment",
-      modelAPIID: "vendor-slot-17",
-      modelFamily: "opaque",
-      harnessModel: "gpt-5.6-sol",
-    }
-    expect(resolveHarnessMode(input)).toBe("default")
-    expect(usesGPTToolset(input.modelID, undefined, input.modelAPIID, input.modelFamily, input.harnessModel)).toBe(false)
-    expect(
-      mcpToolSearchMode(
-        { type: "never" },
-        undefined,
-        input.modelID,
-        input.modelAPIID,
-        input.modelFamily,
-        input.harnessModel,
-      ),
-    ).toEqual({ type: "never" })
-    expect(resolveHarnessMode({ ...input, harness: "codex" })).toBe("codex")
-    expect(usesGPTToolset(input.modelID, "codex", input.modelAPIID, input.modelFamily, input.harnessModel)).toBe(true)
-    expect(
-      mcpToolSearchMode({ type: "never" }, "codex", input.modelID, input.modelAPIID, input.modelFamily, input.harnessModel),
-    ).toEqual({ type: "always" })
+  test("keeps legacy aliases on the default prompt until the session opts in", () => {
     const model = ProviderTest.model({
-      id: ModelID.make(input.modelID),
-      api: { id: input.modelAPIID } as never,
-      family: input.modelFamily,
-      harness_model: input.harnessModel,
+      id: ModelID.make("deployment"),
+      api: { ...ProviderTest.model().api, id: "vendor-slot-17" },
+      family: "opaque",
+      harness_model: "gpt-5.6-sol",
     })
     expect(SystemPrompt.provider(model)[0]).not.toContain("You are Codex")
     expect(SystemPrompt.provider(model, "codex")[0]).toContain("You are Codex")
@@ -101,54 +77,11 @@ describe("legacy GPT harness aliases with explicit harness selection", () => {
     )
   })
 
-  test("session and process choices apply independently of legacy alias metadata", () => {
-    const input = { modelID: "opaque", harnessModel: "gpt-5.6-sol" }
-    expect(resolveHarnessMode({ ...input, harness: "default" })).toBe("default")
-    process.env.MIMOCODE_CODEX_MODE = "false"
-    expect(resolveHarnessMode(input)).toBe("default")
-    expect(resolveHarnessMode({ ...input, harness: "codex" })).toBe("codex")
-    process.env.MIMOCODE_CODEX_MODE = "true"
-    expect(resolveHarnessMode({ ...input, harness: "default" })).toBe("default")
-    expect(resolveHarnessMode({ modelID: "mimo-v2.6", harnessModel: "gpt-5" })).toBe("codex")
-    expect(
-      mcpToolSearchMode({ type: "always" }, "default", "opaque", undefined, undefined, input.harnessModel),
-    ).toEqual({ type: "always" })
-    expect(
-      mcpToolSearchMode({ type: "never" }, "default", "opaque", undefined, undefined, input.harnessModel),
-    ).toEqual({ type: "never" })
-  })
-
-  test("model identities neither enable Codex by default nor veto explicit session selection", () => {
-    for (const field of ["modelID", "modelAPIID", "modelFamily"] as const) {
-      for (const identity of [
-        "gpt-5.6-sol",
-        "gpt-6-astra",
-        "mimo-v2.5",
-        "vendor/mimo-v2.6-ptc",
-        "mimo:latest",
-        "vendor.mimo-v2.6",
-        "vendor:mimo-v2.6",
-        "gpt-4o",
-        "gpt-4.1",
-        "gpt-oss-120b",
-        "gpt-oss:20b",
-        "oss:20b",
-        "oss",
-      ]) {
-        const input = {
-          modelID: "gpt-5.6-sol",
-          modelAPIID: "opaque",
-          modelFamily: "opaque",
-          harnessModel: "gpt-6-astra",
-          [field]: identity,
-        }
-        expect(resolveHarnessMode(input)).toBe("default")
-        expect(resolveHarnessMode({ ...input, harness: "codex" })).toBe("codex")
-      }
-    }
-    expect(resolveHarnessMode({ modelID: "opaque", modelAPIID: "gpt-5.6-sol", modelFamily: "gpt" })).toBe("default")
-    for (const harnessModel of ["gpt-4o", "gpt-oss-120b", "mimo-v2.6", "gpt-5*", "GPT-5"]) {
-      expect(resolveHarnessMode({ modelID: "opaque", harnessModel })).toBe("default")
+  test("model identity cannot enable or veto the session harness", () => {
+    for (const id of ["gpt-5.6-sol", "mimo-v2.6", "gpt-oss-120b"]) {
+      const model = ProviderTest.model({ id: ModelID.make(id), family: id })
+      expect(SystemPrompt.provider(model)[0]).not.toContain("You are Codex")
+      expect(SystemPrompt.provider(model, "codex")[0]).toContain("You are Codex")
     }
   })
 
@@ -195,17 +128,19 @@ describe("legacy GPT harness aliases with explicit harness selection", () => {
             const input = {
               providerID: model.providerID,
               modelID: model.id,
-              modelAPIID: model.api.id,
-              modelFamily: model.family,
-              harnessModel: model.harness_model,
               agent,
             }
             const tools = (yield* registry.tools(input)).map((tool) => tool.id)
             expect(tools).toContain("edit")
             expect(tools).toContain("read")
             expect(tools).not.toContain("apply_patch")
+            process.env.MIMOCODE_CODEX_MODE = "true"
+            const fromProcess = (yield* registry.tools(input)).map((tool) => tool.id)
+            expect(fromProcess).toContain("exec")
+            expect(fromProcess).not.toContain("edit")
             const defaults = (yield* registry.tools({ ...input, harness: "default" })).map((tool) => tool.id)
             expect(defaults).toEqual(tools)
+            process.env.MIMOCODE_CODEX_MODE = "false"
             const codex = { ...input, harness: "codex" as const }
             const compact = (yield* registry.tools(codex)).map((tool) => tool.id)
             expect(compact).toContain("exec")

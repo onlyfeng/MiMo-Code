@@ -83,9 +83,6 @@ async function getAvailableTools(agent: Agent.Info) {
       return yield* registry.tools({
         providerID: model.providerID,
         modelID: model.id,
-        modelAPIID: model.api.id,
-        modelFamily: model.family,
-        harnessModel: model.harness_model,
         agent,
       })
     }),
