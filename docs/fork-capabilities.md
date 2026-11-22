@@ -31,7 +31,7 @@ authority.
 the runtime/test tree the last upstream review covered; bundled guidance has a
 separate content snapshot. Pure registry/history commits advance neither
 reference, and neither do fork pull requests merged between synchronizations
-(FC-044 through FC-053 and later corrections to existing entries): each such
+(FC-044 through FC-054 and later corrections to existing entries): each such
 entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
@@ -97,6 +97,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-051 | Revert and prompt admission exclude each other per session; TUI undo awaits its revert              | Fork fix of upstream revert/prompt ordering                      | A turn admitted during a revert is never hidden and later deleted                        |
 | FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
 | FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
+| FC-054 | Log sink writes, opens and closes in `util/log.ts` | Fork hardening of the upstream log queue | A sink that stops answering is abandoned after `writeTimeout`; the queue, flush and shutdown never wait on it forever |
 
 Grouped sections: [Actor and inbox](#actor-and-inbox) holds FC-001, FC-024, FC-031, FC-037, FC-038 and FC-043; [Checkpoint writer and ladder](#checkpoint-writer-and-ladder) holds FC-002, FC-021, FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047. Every other entry keeps its own section in numeric order. Retired identifiers FC-003 (2026-09-15) and FC-018 (2026-09-24) are not reused; their entries moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization).
 
@@ -3650,3 +3651,46 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   through an equivalent fallback or a declared per-provider API choice, and
   honors declared reasoning capabilities for compatible models without relying
   solely on model names. The regression cases stay in either case.
+
+## FC-054 — a log sink that stops answering cannot hold the log queue
+
+- Status: active
+- Canonical owner: fork `main` — `append`, `open` and `close` in
+  `packages/cli/src/util/log.ts`
+- Base: upstream serializes every log operation on one promise queue. Each
+  `append` waits for `stream.write`'s callback; `open` waits for the stream's
+  `open` or `error` event, and rotation, reinitialization and `Log.shutdown`
+  wait for `close`. None of these waits is bounded.
+- Observable contract: a write, open or close that has not settled within
+  `writeTimeout` (5 s by default; `Log.init` option) stops holding the queue.
+  A stalled write abandons its stream and keeps appending to the same file
+  through a new one. A stalled close destroys the stream and continues. A
+  stalled open counts as a failed sink, which drops records as an unusable log
+  directory does. Writes that settle in time behave exactly as upstream's.
+- Evidence: on Linux CI an instrumented dispatch (run 44972702047) caught
+  `append` waiting on a `stream.write` callback that never arrived. The stream
+  was open, with 76 bytes buffered and no drain pending, and about 26,000
+  operations were queued behind it until `lsp/client`'s `Log.init` hit its
+  120-second hook timeout. Repeating the triggering busy-SSE disposal 100
+  times in isolated processes (run 44991169360) never stalled, so the trigger
+  depends on earlier work in the same process. The mechanism inside Bun's
+  file stream is not identified. Upstream `33943835` records the same stall as
+  an unknown follow-up and notes that production `Log.shutdown` waits on that
+  queue.
+- Known limits: the stalled record itself may be lost or written late. A
+  healthy write slower than `writeTimeout` also replaces its stream; later
+  records still reach the same file. FC-008's isolation of `bus-integration`
+  remains, so CI avoids the known trigger.
+- Upstream relationship: fork hardening of shared upstream code; `dev/compat`
+  inherits it.
+- Watch surfaces: `append`, `open`, `close`, `rotate` and `closeCurrent` in
+  `packages/cli/src/util/log.ts`, and the flush budget in
+  `packages/cli/test/lib/effect.ts`.
+- Tests/evidence: `packages/cli/test/util/log.test.ts` "a write whose callback
+  never arrives does not hold the queue" withholds one callback and requires
+  the queue, later records and the reopened file to proceed. "a stream that
+  never closes does not hold reinitialization or shutdown" covers close.
+  With the write bound disabled, the first case fails on its assertion.
+- Exit condition: retire when upstream bounds the sink, or when Bun's file
+  stream is shown to deliver every callback, demonstrated by shard-level CI
+  with the bound removed and `bus-integration` back in its hash shard.

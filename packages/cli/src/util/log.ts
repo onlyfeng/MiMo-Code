@@ -54,7 +54,15 @@ export interface Options {
   // Defaults to enabled. When false, the active log file grows in place and is
   // never archived to <name>.log.<stamp> on reaching MAX_FILE_SIZE.
   rotate?: boolean
+  // Longest wait, in milliseconds, for one file write, open or close (FC-054).
+  writeTimeout?: number
 }
+
+// FC-054: a log write was seen on Linux whose callback never arrived. Every later
+// record, flush and shutdown queues behind the one in progress, so a sink that
+// stops answering is abandoned after this long instead of holding the queue.
+const WRITE_TIMEOUT = 5_000
+let writeTimeout = WRITE_TIMEOUT
 
 let logpath = ""
 export function file() {
@@ -77,6 +85,7 @@ export async function init(options: Options) {
     if (options.level) level = options.level
     rotation = options.rotate ?? !Flag.MIMOCODE_DISABLE_LOG_ROTATION
     printing = options.print
+    writeTimeout = options.writeTimeout ?? WRITE_TIMEOUT
     const role = (process.env.MIMOCODE_PROCESS_ROLE ?? "main").replace(/[^a-zA-Z0-9._-]/g, "-")
     await cleanup(Global.Path.log, { pid: process.pid, role })
     if (options.print) {
@@ -120,10 +129,24 @@ async function append(msg: string) {
     if (printing) process.stderr.write(msg)
     return
   }
-  await new Promise<void>((resolve, reject) => {
-    target.write(msg, (error) => (error ? reject(error) : resolve()))
+  const settled = await new Promise<boolean>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(false), writeTimeout)
+    target.write(msg, (error) => {
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(true)
+    })
   })
-  written += size
+  if (settled) {
+    written += size
+    return
+  }
+  // The callback never came: give up on this stream and keep appending to the
+  // same file through a new one.
+  if (stream !== target) return
+  stream = undefined
+  target.destroy()
+  await open(logpath)
 }
 
 async function rotate() {
@@ -146,10 +169,19 @@ async function open(targetPath: string) {
   stream = target
   target.on("error", swallow)
   const opened = await new Promise<boolean>((resolve) => {
-    target.once("open", () => resolve(true))
-    target.once("error", () => resolve(false))
+    const timer = setTimeout(() => resolve(false), writeTimeout)
+    target.once("open", () => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+    target.once("error", () => {
+      clearTimeout(timer)
+      resolve(false)
+    })
   })
-  if (!opened && stream === target) stream = undefined
+  if (opened) return
+  if (stream === target) stream = undefined
+  target.destroy()
 }
 
 async function move(source: string, target: string) {
@@ -178,7 +210,14 @@ async function move(source: string, target: string) {
 function close(target: ReturnType<typeof createWriteStream>) {
   return new Promise<void>((resolve) => {
     if (target.closed) return resolve()
-    target.once("close", resolve)
+    const timer = setTimeout(() => {
+      target.destroy()
+      resolve()
+    }, writeTimeout)
+    target.once("close", () => {
+      clearTimeout(timer)
+      resolve()
+    })
     target.end()
   })
 }
