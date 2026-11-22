@@ -3636,3 +3636,5 @@ The one-commit review advances from `c34db3645db4ffdf7f2b29a788bd76d9ec3be531` t
 ## 2026-11-22 brief session list and compat catalog propagation
 
 The review advances from `128adcb782a72ef3d10752ab9c14e4fdcb319099` (2026-11-21, pull request #263, which recorded its review only in the FD header) to `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`. C02 adopts the opt-in brief global session list on main `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`; C01, the live skill catalog, reaches compat `671bb78490a76405f8213fc8724bb596a74f2695`. No FD or FC entry changes. GitHub Actions dispatch remains blocked with HTTP 422. See [the synchronization record](upstream-sync-2026-11-22.md).
+
+- 2026-11-22 CI follow-up: with Actions restored, pull request #264 (`e641c74d`) migrates fork-only tests to upstream's opt-in Codex mode and declared effort levels (regressions from `ff3e8974`), and isolates `bus-integration` for the shared log-queue stall (FC-008). Pull request #265 (`17cfc99a`) carries it to compat with the compat typecheck and DC-ACTOR-002 fixture fixes. Exact-SHA push CI on `e641c74d` is green.

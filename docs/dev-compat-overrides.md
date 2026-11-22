@@ -14,11 +14,11 @@ registry/history commit does not advance either behavior reference below.
 
 - Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-22.md).
 
-- Starting main: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Starting compat: `7723f83da65184447892c4c81a1171e8ad4e5008`. Main runtime snapshot: `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`. Compat runtime snapshot: `671bb78490a76405f8213fc8724bb596a74f2695`.
+- Starting main: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Starting compat: `7723f83da65184447892c4c81a1171e8ad4e5008`. Main runtime snapshot: `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`). Compat runtime snapshot: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`).
 
 - Result: inherit the user-turn skill catalog and the opt-in brief session list. DC-CONTEXT-001 keeps the 50 KiB catalog cap at the reminder renderer and strips capped system-tail catalogs from old frozen rows; its strict capped-v2 recognizer and the `skillCatalogInSystem` projection retire. Pin-winner selection follows `main` with compat's loaded-MCP tools hash and current-turn projection (DC-MODEL-001, DC-ACTOR-001). All other DC owners are unchanged.
 
-- Validation: CLI typecheck, lint and SDK regeneration pass. The CI-equivalent four-shard run fails the same tests as the starting compat tip apart from two shared-process intermittents, as recorded in the shared review. GitHub rejected workflow dispatch with HTTP 422.
+- Validation: CLI typecheck, lint and SDK regeneration pass. After Actions was restored, the first exact-SHA runs exposed the compat capture test's typecheck error and the fork-wide CI regressions described in [the shared record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored); pull request #265 carries the fixes and DC-ACTOR-002's fixture levels. Push CI on `17cfc99a` passed lint, typecheck and test, including Windows runtime (runs 44975311656, 44975311702, 44975311723).
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 

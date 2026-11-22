@@ -130,6 +130,11 @@ on both. The nineteen failures common to both trees:
   recorded before.
 - `experiments/tool-schema-runner` (1): experiment model defaults.
 
+Correction: only the `provider-event-timeout` and `collapse` cases are local.
+The other fifteen also failed in CI once Actions was restored; they are
+regressions from the 2026-11-13 synchronization, fixed in pull request #264.
+See [CI after Actions was restored](#ci-after-actions-was-restored).
+
 `main` fails seventeen of these (its `tool/actor` file has one of the three
 variant cases; the other two are compat's DC-ACTOR-002 tests) plus
 `prompt-effect` "full-context MCP dispatcher rejects changed frozen schemas".
@@ -153,3 +158,39 @@ in the two previous synchronizations; the last GitHub Actions runs on the
 fork date from 2026-11-06. The local runs above are the only evidence for
 these commits until Actions is restored, after which lint, typecheck and test
 (compat with `windows_runtime=true`) should be dispatched on both branch tips.
+
+### CI after Actions was restored
+
+The owner re-enabled GitHub Actions on 2026-11-22. The first exact-SHA runs
+on the published tips passed lint on both branches and typecheck on `main`
+(runs 44963791505, 44963813960, 44963818489). The other three failed:
+
+- **compat typecheck** (44963821472): the compat capture test introduced by
+  this synchronization read `currentTurnMessages`, which `PrefixCaptureResult`
+  does not declare. Local typecheck had run before that test was edited and
+  was not repeated. Fixed in pull request #265.
+- **unit shards 1, 3 and 4 on both branches, and compat Windows**
+  (44963816316, 44963824024): fork-only tests that had never been migrated
+  to two upstream changes adopted on 2026-11-13 (`ff3e8974`). Upstream
+  `e3592f0e` makes Codex mode opt-in, and `c9c91d7b` offers exactly the
+  declared effort levels. `f0a02f23` passes these tests and `ff3e8974` fails
+  them. That synchronization, and the 2026-11-19 and 2026-11-21 records, had
+  only local evidence and called them harness or environment cases. Pull
+  request #264 selects `harness: "codex"` where the tests exercise Codex, as
+  upstream did, and declares the fixture levels. Pull request #265 does the
+  same for compat's two DC-ACTOR-002 cases.
+- **unit shard 3 timeout**: upstream's unexplained log-queue stall. An
+  instrumented dispatch (run 44972702047) caught the logger's `append` waiting
+  on a `stream.write` callback that never arrived. The stall began when
+  `bus/bus-integration.test.ts` finished its busy-SSE disposal cases. Every
+  later bounded flush then paid its 1-second budget, and `lsp/client`'s
+  `Log.init` timed out at 120 seconds. Pull request #264 runs that file in
+  its own process (FC-008). An earlier commit wrongly isolated
+  `npm-symlink-cache` and is reverted in the same pull request.
+
+Pull request #264 merged as `e641c74d` after a green dispatched test run on
+its head `2a522587` (44973772897). Push CI on `e641c74d` passed lint,
+typecheck and test (44974452743, 44974452747, 44974452732). Pull request #265
+merged into compat as `17cfc99a` after a green dispatched test run on
+`84858551`, including Windows runtime (44974595191). Compat push CI is
+recorded in the compat review record.
