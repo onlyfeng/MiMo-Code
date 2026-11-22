@@ -18,9 +18,9 @@ authority.
 - Last reviewed: 2026-11-22
 - Upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`
 - Prior reviewed upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099` (2026-11-21, recorded in [upstream-deviations.md](upstream-deviations.md) and its synchronization record; this header still named `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`)
-- Review completion: `main` adopts the opt-in brief view of the global session list under FC-008's fixture convention and FC-035's full-view revert; `dev/compat` inherits FC-005's user-turn catalog from pull request #263. GitHub Actions HTTP 422 blocks exact-SHA CI. See [the synchronization record](upstream-sync-2026-11-22.md).
-- Main behavior (runtime/tests): `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`
-- Inherited compat behavior: `671bb78490a76405f8213fc8724bb596a74f2695`
+- Review completion: `main` adopts the opt-in brief view of the global session list under FC-008's fixture convention and FC-035's full-view revert; `dev/compat` inherits FC-005's user-turn catalog from pull request #263. After Actions was restored, pull request #264 fixed the CI regressions left by the 2026-11-13 synchronization and isolated `bus-integration` (FC-008). See [the synchronization record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).
+- Main behavior (runtime/tests): `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`)
+- Inherited compat behavior: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
 - Prior fork `main` tip: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Prior fork `dev/compat` tip: `7723f83da65184447892c4c81a1171e8ad4e5008`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
