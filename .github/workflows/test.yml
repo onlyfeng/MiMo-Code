@@ -62,6 +62,10 @@ jobs:
       # these tests. It runs in the dedicated job below.
       # Resume negatives run separately: upstream traced shared log-queue stalls
       # to detached work from this suite. Other recovery suites stay in shards.
+      # Bus integration runs separately for the same stall: on Linux, its busy-SSE
+      # disposal cases leave a log write whose callback never arrives, so every
+      # later bounded flush costs its full budget and Log.init never returns
+      # (lsp/client, which shares this file's hash shard).
       # Provider refresh suites check process-wide instance idleness, so each runs
       # in its own process away from session fixtures that leave detached
       # notification/wake work alive.
@@ -108,6 +112,7 @@ jobs:
           has_mcp_mocks=0
           has_provider_refresh=0
           has_resume_negatives=0
+          has_bus_integration=0
           files=()
           reported_files=()
 
@@ -135,6 +140,10 @@ jobs:
             fi
             if [[ "$f" == test/actor/subagent-resume-negatives.test.ts ]]; then
               has_resume_negatives=1
+              continue
+            fi
+            if [[ "$f" == test/bus/bus-integration.test.ts ]]; then
+              has_bus_integration=1
               continue
             fi
             case "$f" in
@@ -165,8 +174,8 @@ jobs:
             fi
           done
 
-          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 || !has_resume_negatives )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh resume_negatives=$has_resume_negatives"
+          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 || !has_resume_negatives || !has_bus_integration )); then
+            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh resume_negatives=$has_resume_negatives bus_integration=$has_bus_integration"
             exit 1
           fi
 
@@ -336,6 +345,38 @@ jobs:
         with:
           name: junit-resume-negatives
           path: packages/cli/.artifacts/resume-negatives/junit.xml
+          if-no-files-found: error
+
+  bus-integration:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Run bus integration in an independent process
+        shell: bash
+        working-directory: packages/cli
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/bus-integration
+          report=.artifacts/bus-integration/junit.xml
+          file=test/bus/bus-integration.test.ts
+          rm -f -- "$report"
+          bun test "$file" --timeout 120000 --reporter=junit --reporter-outfile="$report"
+          test -s "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-bus-integration
+          path: packages/cli/.artifacts/bus-integration/junit.xml
           if-no-files-found: error
 
   windows-runtime:
