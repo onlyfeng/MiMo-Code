@@ -136,7 +136,7 @@ return await tools.actor({ operation: { action: "status", actor_id: "general-1" 
 } catch (error) { return error.message; }` })
         yield* llm.text("actor composition finished")
         yield* prompt.prompt({
-          sessionID: session.id, agent: "build", model,
+          sessionID: session.id, agent: "build", model, harness: "codex",
           ...(restriction === "tool" ? { tools: { actor: false } } : {}),
           parts: [{ type: "text", text: "Send the receiver a message and inspect its status" }],
         })
@@ -194,6 +194,7 @@ it.live(
           sessionID: session.id,
           agent: "build",
           model,
+          harness: "codex",
           format: {
             type: "json_schema",
             retryCount: 0,
@@ -206,6 +207,7 @@ it.live(
           sessionID: session.id,
           agent: "build",
           model,
+          harness: "codex",
           format: {
             type: "json_schema",
             retryCount: 0,
@@ -218,6 +220,7 @@ it.live(
           sessionID: session.id,
           agent: "build",
           model,
+          harness: "codex",
           format: { type: "text" },
           parts: [{ type: "text", text: "Return an ordinary text answer" }],
         })
@@ -266,6 +269,7 @@ it.live("Codex compact production wire retains control tools and nests ordinary 
         sessionID: session.id,
         agent: "build",
         model,
+        harness: "codex",
         parts: [{ type: "text", text: "Inspect compact tool visibility" }],
       })
       const tools = wireTools((yield* llm.inputs)[0])
@@ -338,6 +342,7 @@ for (const deny of [false, true]) {
             sessionID: session.id,
             agent: "build",
             model,
+            harness: "codex",
             parts: [{ type: "text", text: "Call the known compact probe" }],
           })
           const names = wireTools((yield* llm.inputs)[0]).map((tool) => tool.name)
@@ -385,6 +390,7 @@ it.live(
           sessionID: session.id,
           agent: "build",
           model,
+          harness: "codex",
           noReply: true,
           parts: [{ type: "text", text: "Request approval before writing" }],
         })
@@ -433,6 +439,7 @@ it.live("Codex compact nested view_image reaches the next model request as an im
         sessionID: session.id,
         agent: "build",
         model,
+        harness: "codex",
         parts: [{ type: "text", text: "Inspect the pixel image" }],
       })
       const requests = yield* llm.inputs
