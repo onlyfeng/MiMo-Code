@@ -264,12 +264,16 @@ process.env["MIMOCODE_MODELS_PATH"] = path.join(import.meta.dir, "tool", "fixtur
 
 // Set test home directory to isolate tests from user's actual home directory.
 // This prevents tests from picking up real user configs/skills from ~/.claude/skills.
-// Production code reads HOME/USERPROFILE directly (not os.homedir()) because Bun
-// caches os.homedir() at process start, so mutating it here would be a no-op.
+// Global.Path.home reads HOME/USERPROFILE directly because Bun caches os.homedir()
+// at process start, but about 30 production call sites still use os.homedir()
+// (instruction.ts adds the real ~/.claude/CLAUDE.md to every system prompt), so
+// point it at the isolated home too (FC-008). A named `import { homedir }` keeps
+// Bun's original binding; only cron/loop-file.ts uses one.
 const testHome = path.join(dir, "home")
 await fs.mkdir(testHome, { recursive: true })
 process.env["HOME"] = testHome
 process.env["USERPROFILE"] = testHome
+os.homedir = () => testHome
 
 // Set test managed config directory to isolate tests from system managed settings
 const testManagedConfigDir = path.join(dir, "managed")

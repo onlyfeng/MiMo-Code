@@ -30,3 +30,14 @@ describe("default fixture root", () => {
     })
   })
 })
+
+describe("isolated home", () => {
+  // Bun caches os.homedir() when the process starts, so the HOME the preload sets
+  // never reached it: production code calling os.homedir() read the developer's
+  // real home, e.g. ~/.claude/CLAUDE.md into every test system prompt.
+  test("os.homedir() follows the preload's isolated HOME", () => {
+    const os = require("os") as typeof import("os")
+    expect(process.env["HOME"]).toBeTruthy()
+    expect(os.homedir()).toBe(process.env["HOME"]!)
+  })
+})

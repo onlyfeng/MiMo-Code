@@ -5167,7 +5167,12 @@ for (const changed of [false, true]) {
         const sessions = yield* Session.Service
         const actors = yield* Effect.serviceOption(Actor.Service)
         if (actors._tag === "None") throw new Error("real Actor service was not provided")
-        const parent = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+        // An explicit title keeps the parent's title request from racing the
+        // actor for the scripted tool call below.
+        const parent = yield* sessions.create({
+          title: "Frozen MCP dispatch",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
         yield* prompt.prompt({
           sessionID: parent.id, model: ref, harness: "default", noReply: true,
           parts: [{ type: "text", text: "capture deferred MCP authority" }],
