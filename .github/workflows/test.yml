@@ -91,113 +91,7 @@ jobs:
         timeout-minutes: 12
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          shard='${{ matrix.shard }}'
-          idx="${shard%/*}"
-          n="${shard#*/}"
-
-          mapfile -d '' discovered < <(
-            find test -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 | sort -z
-          )
-          zero_case_files=(
-            test/config/plugin.test.ts
-            test/provider/gitlab-duo.test.ts
-            test/pty/pty-shell.test.ts
-          )
-
-          has_tsx=0
-          has_runtime=0
-          has_stdio=0
-          has_mcp_mocks=0
-          has_provider_refresh=0
-          has_resume_negatives=0
-          has_bus_integration=0
-          files=()
-          reported_files=()
-
-          for f in "${zero_case_files[@]}"; do
-            found=0
-            for candidate in "${discovered[@]}"; do
-              if [[ "$candidate" == "$f" ]]; then
-                found=1
-                break
-              fi
-            done
-            if (( !found )); then
-              echo "::error::zero-case allowlist entry is not discoverable: $f"
-              exit 1
-            fi
-          done
-
-          for f in "${discovered[@]}"; do
-            [[ "$f" == *.test.tsx ]] && has_tsx=1
-            [[ "$f" == test/workflow/runtime-worktree.test.ts ]] && has_runtime=1
-
-            if [[ "$f" == test/mcp/stdio-exit-observe.test.ts ]]; then
-              has_stdio=1
-              continue
-            fi
-            if [[ "$f" == test/actor/subagent-resume-negatives.test.ts ]]; then
-              has_resume_negatives=1
-              continue
-            fi
-            if [[ "$f" == test/bus/bus-integration.test.ts ]]; then
-              has_bus_integration=1
-              continue
-            fi
-            case "$f" in
-              test/mcp/lifecycle.test.ts | \
-              test/mcp/headers.test.ts | \
-              test/mcp/oauth-auto-connect.test.ts | \
-              test/mcp/oauth-browser.test.ts)
-                has_mcp_mocks=$((has_mcp_mocks + 1))
-                continue
-                ;;
-              test/provider/refresh.test.ts | \
-              test/provider/refresh-boundaries.test.ts | \
-              test/provider/refresh-harness.test.ts)
-                has_provider_refresh=$((has_provider_refresh + 1))
-                continue
-                ;;
-            esac
-
-            h="$(printf '%s' "$f" | cksum | awk '{print $1}')"
-            if (( h % n == idx - 1 )); then
-              files+=("$f")
-              case "$f" in
-                test/config/plugin.test.ts | \
-                test/provider/gitlab-duo.test.ts | \
-                test/pty/pty-shell.test.ts) ;;
-                *) reported_files+=("$f") ;;
-              esac
-            fi
-          done
-
-          if (( !has_tsx || !has_runtime || !has_stdio || has_mcp_mocks != 4 || has_provider_refresh != 3 || !has_resume_negatives || !has_bus_integration )); then
-            echo "::error::discovery contract lost: tsx=$has_tsx runtime=$has_runtime stdio=$has_stdio mcp_mocks=$has_mcp_mocks provider_refresh=$has_provider_refresh resume_negatives=$has_resume_negatives bus_integration=$has_bus_integration"
-            exit 1
-          fi
-
-          if (( ${#files[@]} == 0 )); then
-            echo "::error::shard $shard received zero files"
-            exit 1
-          fi
-          if (( ${#reported_files[@]} == 0 )); then
-            echo "::error::shard $shard expects zero JUnit suites"
-            exit 1
-          fi
-
-          mkdir -p .artifacts/unit
-          report=.artifacts/unit/junit.xml
-          rm -f -- "$report"
-          bun test "${files[@]}" \
-            --timeout 120000 \
-            --reporter=junit \
-            --reporter-outfile="$report"
-          test -s "$report"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
-            "$report" "${reported_files[@]}"
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" shard '${{ matrix.shard }}'
 
       - name: Upload JUnit
         if: always()
@@ -221,21 +115,7 @@ jobs:
       - name: Run MCP SDK mock suites in independent processes
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/mcp-mocks
-          for file in \
-            test/mcp/lifecycle.test.ts \
-            test/mcp/headers.test.ts \
-            test/mcp/oauth-auto-connect.test.ts \
-            test/mcp/oauth-browser.test.ts; do
-            report=".artifacts/mcp-mocks/$(basename "$file").xml"
-            rm -f -- "$report"
-            bun test "$file" --timeout 120000 \
-              --reporter=junit --reporter-outfile="$report"
-            test -s "$report"
-            python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
-          done
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" isolated mcp-mocks .artifacts/mcp-mocks
 
       - name: Upload JUnit
         if: always()
@@ -259,20 +139,7 @@ jobs:
       - name: Run provider refresh suites in independent processes
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/provider-refresh
-          for file in \
-            test/provider/refresh.test.ts \
-            test/provider/refresh-boundaries.test.ts \
-            test/provider/refresh-harness.test.ts; do
-            report=".artifacts/provider-refresh/$(basename "$file").xml"
-            rm -f -- "$report"
-            bun test "$file" --timeout 120000 \
-              --reporter=junit --reporter-outfile="$report"
-            test -s "$report"
-            python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
-          done
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" isolated provider-refresh .artifacts/provider-refresh
 
       - name: Upload JUnit
         if: always()
@@ -296,16 +163,7 @@ jobs:
       - name: Run stdio exit observer tests
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/unit
-          report=.artifacts/unit/junit.xml
-          rm -f -- "$report"
-          bun test test/mcp/stdio-exit-observe.test.ts --timeout 120000 \
-            --reporter=junit --reporter-outfile="$report"
-          test -s "$report"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" \
-            "$report" test/mcp/stdio-exit-observe.test.ts
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" isolated stdio-exit-observe .artifacts/unit
 
       - name: Upload JUnit
         if: always()
@@ -329,15 +187,7 @@ jobs:
       - name: Run resume negatives in an independent process
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/resume-negatives
-          report=.artifacts/resume-negatives/junit.xml
-          file=test/actor/subagent-resume-negatives.test.ts
-          rm -f -- "$report"
-          bun test "$file" --timeout 120000 --reporter=junit --reporter-outfile="$report"
-          test -s "$report"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" isolated resume-negatives .artifacts/resume-negatives
 
       - name: Upload JUnit
         if: always()
@@ -361,15 +211,7 @@ jobs:
       - name: Run bus integration in an independent process
         shell: bash
         working-directory: packages/cli
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/bus-integration
-          report=.artifacts/bus-integration/junit.xml
-          file=test/bus/bus-integration.test.ts
-          rm -f -- "$report"
-          bun test "$file" --timeout 120000 --reporter=junit --reporter-outfile="$report"
-          test -s "$report"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/verify-junit.py" "$report" "$file"
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/run-cli-tests.sh" isolated bus-integration .artifacts/bus-integration
 
       - name: Upload JUnit
         if: always()

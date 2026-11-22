@@ -240,9 +240,6 @@ export const ExperimentalRoutes = lazy(() =>
             return yield* registry.tools({
               providerID: resolved.providerID,
               modelID: resolved.id,
-              modelAPIID: resolved.api.id,
-              modelFamily: resolved.family,
-              harnessModel: resolved.harness_model,
               agent: yield* agents.get(yield* agents.defaultAgent()),
             })
           }),

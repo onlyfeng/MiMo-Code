@@ -403,6 +403,8 @@ FD-010, FD-011 and FD-012 are grouped under [Compaction summary acceptance](#com
 
 ## FD-005 — one resolved harness selects prompt, discovery, and tools
 
+- Prompt selection and tool registration share the upstream model-independent `usesCodexMode(harness)` interface. Explicit session choices still take precedence over the process selector. Historical model metadata remains part of the frozen-prefix identity.
+
 - 2026-11-21 synchronization: The live skill set never rebuilds agent permission or changes profile-key inputs; explicit session harness precedence remains.
 
 - 2026-11-13 synchronization: adopt upstream `e3592f0e`'s unified default prompt and model-independent Codex opt-in. Retain the fork resolver and explicit session precedence: session `codex`/`default` wins, otherwise process true selects Codex, otherwise default. Model ids, API ids, families and legacy `harness_model` declarations no longer select the harness. The profile policy generation changes consistently for capture, ordinary requests and compaction, preventing reuse of a prior model-selected frozen prompt under the new policy. Historical inference notes below describe the policy before this synchronization. FD-006's authorized implementation pool and direct controls remain active; FC-050 retains recovery of old oversized prefixes.

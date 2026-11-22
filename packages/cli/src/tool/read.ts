@@ -14,6 +14,7 @@ import { isReadAttachmentMime, looksLikeMediaMime, sniffAttachmentMime } from "@
 import { missingFile, resolveFilePath } from "./read-common"
 
 const DEFAULT_READ_LIMIT = 2000
+
 const MAX_LINE_LENGTH = 2000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024

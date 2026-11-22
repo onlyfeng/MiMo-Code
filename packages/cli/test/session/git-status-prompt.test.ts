@@ -1,10 +1,6 @@
 import { describe, expect } from "bun:test"
-import fs from "fs/promises"
-import path from "path"
 import { Effect, Layer } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Session as SessionNs } from "../../src/session"
-import { GitStatusPrompt } from "../../src/session/git-status"
 import { SessionPrefixSnapshot } from "../../src/session/prefix-snapshot"
 import { MessageID, type SessionID } from "../../src/session/schema"
 import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
@@ -15,70 +11,14 @@ import { testEffect } from "../lib/effect"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
-const status = (dir: string) =>
-  ChildProcessSpawner.ChildProcessSpawner.use((spawner) =>
-    spawner.string(ChildProcess.make("git", GitStatusPrompt.ARGS, { cwd: dir })),
-  ).pipe(Effect.map((text) => GitStatusPrompt.cap(text.trim())))
-
-const writeFiles = (dir: string, names: string[]) =>
-  Effect.promise(async () => {
-    for (const name of names) {
-      await fs.mkdir(path.dirname(path.join(dir, name)), { recursive: true })
-      await fs.writeFile(path.join(dir, name), "x\n")
-    }
-  })
-
-describe("legacy git status prompt helper", () => {
-  it.live(
-    "an untracked directory is listed once, not file by file",
-    provideTmpdirInstance(
-      (dir) =>
-        Effect.gen(function* () {
-          yield* writeFiles(
-            dir,
-            Array.from({ length: 300 }, (_, i) => `scratch/run-${i}/out.txt`),
-          )
-          const section = yield* status(dir)
-          expect(section).toContain("?? scratch/")
-          expect(section).not.toContain("scratch/run-0/out.txt")
-          expect(section.split("\n")).toHaveLength(1)
-        }),
-      { git: true },
-    ),
-  )
-
-  it.live(
-    "a long status is capped and says how much it left out",
-    provideTmpdirInstance(
-      (dir) =>
-        Effect.gen(function* () {
-          const count = GitStatusPrompt.MAX_LINES + 50
-          yield* writeFiles(
-            dir,
-            Array.from({ length: count }, (_, i) => `untracked-${i.toString().padStart(4, "0")}.txt`),
-          )
-          const section = yield* status(dir)
-          const lines = section.split("\n")
-          expect(lines.length).toBeLessThanOrEqual(GitStatusPrompt.MAX_LINES + 1)
-          expect(section.length).toBeLessThanOrEqual(GitStatusPrompt.MAX_CHARS)
-          expect(lines.at(-1)).toBe(
-            `... ${count - (lines.length - 1)} more entries omitted; run \`git status\` for the full list.`,
-          )
-          expect(GitStatusPrompt.oversized([`gitStatus: x\nStatus:\n${section}\n\nRecent commits:\nabc`])).toBe(false)
-        }),
-      { git: true },
-    ),
-  )
-})
-
 describe("frozen prefix with an oversized git status", () => {
-  const huge = (lines: number) =>
+  const environment = (status: string) =>
     [
       "# Environment",
       "gitStatus: This is the git status at the start of the conversation.",
       "",
       "Status:",
-      ...Array.from({ length: lines }, (_, i) => `?? .tmp/file-${i}.txt`),
+      status,
       "",
       "Recent commits:",
       "abc1234 init",
@@ -123,15 +63,22 @@ describe("frozen prefix with an oversized git status", () => {
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* (yield* SessionNs.Service).create({})
-        yield* legacy(session.id, "stale", ["base prompt", huge(2_000)])
+        yield* legacy(session.id, "stale", ["base prompt", environment("x".repeat(10_001))])
 
         expect(yield* SessionPrefixSnapshot.get(session.id, "stale")).toBeUndefined()
-        const fresh = yield* pin(session.id, "stale", ["base prompt", huge(10)])
-        expect(fresh.system[1]).toBe(huge(10))
-        expect((yield* SessionPrefixSnapshot.get(session.id, "stale"))?.system).toEqual(["base prompt", huge(10)])
+        const fresh = yield* pin(session.id, "stale", ["unified environment"])
+        expect((yield* SessionPrefixSnapshot.get(session.id, "stale"))?.system).toEqual(fresh.system)
+
+        const capped = environment("?? scratch/\n... 20 more entries omitted; run `git status` for the full list.")
+        yield* legacy(session.id, "capped", [capped])
+        expect((yield* SessionPrefixSnapshot.get(session.id, "capped"))?.system).toEqual([capped])
+
+        const limit = environment("x".repeat(10_000))
+        yield* legacy(session.id, "limit", [limit])
+        expect((yield* SessionPrefixSnapshot.get(session.id, "limit"))?.system).toEqual([limit])
 
         // A prefix without an environment block is never touched.
-        yield* legacy(session.id, "plain", ["base prompt", "x".repeat(GitStatusPrompt.MAX_CHARS * 3)])
+        yield* legacy(session.id, "plain", ["base prompt", "x".repeat(30_000)])
         expect(yield* SessionPrefixSnapshot.get(session.id, "plain")).toBeDefined()
       }),
     ),

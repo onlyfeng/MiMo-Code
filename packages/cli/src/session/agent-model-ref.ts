@@ -22,16 +22,3 @@ export interface AgentModel {
 export type AgentModelResolveFn = (agentName: string) => Effect.Effect<AgentModel | undefined>
 
 export const agentModelRef: { current: AgentModelResolveFn | undefined } = { current: undefined }
-
-const live: AgentModelResolveFn[] = []
-
-/** Same lifecycle as `registerPrefixCapture`: the most recent live resolver wins. */
-export function registerAgentModelResolver(resolve: AgentModelResolveFn): () => void {
-  live.push(resolve)
-  agentModelRef.current = resolve
-  return () => {
-    const index = live.lastIndexOf(resolve)
-    if (index !== -1) live.splice(index, 1)
-    if (agentModelRef.current === resolve) agentModelRef.current = live.at(-1)
-  }
-}

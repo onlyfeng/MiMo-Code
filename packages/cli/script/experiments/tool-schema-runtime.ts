@@ -252,9 +252,6 @@ export async function runExperiment(input: Input) {
         if (!agent) throw new Error("Builtin build agent is unavailable")
         const registryInput = {
           modelID: model.id,
-          modelAPIID: model.api.id,
-          modelFamily: model.family,
-          harnessModel: model.harness_model,
           providerID: model.providerID,
           agent,
         }

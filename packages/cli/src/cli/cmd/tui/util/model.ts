@@ -2,7 +2,7 @@ import type { AssistantMessage, Config, Message, Model, Provider } from "@mimo-a
 import { contextWindow as overflowWindow } from "@/session/overflow"
 import { XIAOMI_CREDENTIAL_PROVIDER_IDS } from "@/provider/xiaomi-family"
 import { Locale, Token } from "@/util"
-import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
+import { compareMessageOrder } from "@/session/message-order"
 
 type Selection = {
   providerID: string
@@ -166,19 +166,18 @@ export function computeContextUsage(input: {
   checkpointCoverage: (messageID: string) => string | undefined
 }): { context: string; cost: number; pending: boolean } | undefined {
   const { messages, window: win, checkpointCoverage } = input
-  const compare = (left: Message, right: Message) =>
-    left.time.created - right.time.created || compareUtf8Bytes(left.id, right.id)
-  const last = messages
-    .filter((m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0)
-    .sort(compare)
-    .at(-1)
+  let last: AssistantMessage | undefined
+  let cost = 0
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+    cost += message.cost
+    if (message.tokens.output > 0 && (!last || compareMessageOrder(message, last) >= 0)) last = message
+  }
   if (!last) return undefined
 
   const tokens =
     last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
   if (tokens <= 0) return undefined
-
-  const cost = messages.reduce((sum, m) => sum + (m.role === "assistant" ? m.cost : 0), 0)
 
   // The window frame is `<usable>` plus the `↓` config-budget marker. Denominator
   // is the compaction trigger, not the raw window — otherwise the percentage never
@@ -192,7 +191,7 @@ export function computeContextUsage(input: {
     const coveredUpTo = checkpointCoverage(m.id)
     if (!coveredUpTo) return false
     const watermark = byID.get(coveredUpTo)
-    return !watermark || compare(watermark, last) >= 0
+    return !watermark || compareMessageOrder(watermark, last) >= 0
   })
   if (pending) {
     // Blank only the unmeasured numerator; keep the frame when we have one so the

@@ -197,15 +197,11 @@ describe("ToolRegistry.tools: toolset selection", () => {
           const normal = yield* reg.tools({
             providerID: ProviderID.opencode,
             modelID: ModelID.make("mimo"),
-            modelAPIID: "mimo-v2.6-ptc",
-            modelFamily: "mimo-v2.6",
             agent: general,
           })
           const codex = yield* reg.tools({
             providerID: ProviderID.opencode,
             modelID: ModelID.make("mimo"),
-            modelAPIID: "mimo-v2.6-ptc",
-            modelFamily: "mimo-v2.6",
             agent: general,
             harness: "codex",
           })

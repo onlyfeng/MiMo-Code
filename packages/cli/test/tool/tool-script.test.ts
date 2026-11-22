@@ -627,7 +627,7 @@ describe("exec", () => {
     expect(result.output).not.toContain("exec_command")
   })
 
-  test("passes the complete model identity to its late-bound registry", async () => {
+  test("passes the provider and model IDs to its late-bound registry", async () => {
     let received: Parameters<NonNullable<typeof toolScriptRegistry.current>>[0] | undefined
     const result = await runToolScript(`return ALL_TOOLS.length`, [], undefined, {
       model: {
@@ -646,9 +646,6 @@ describe("exec", () => {
     expect(received).toMatchObject({
       providerID: "xiaomi",
       modelID: "mimo",
-      modelAPIID: "mimo-v2.5-pro",
-      modelFamily: "mimo-v2.6",
-      harnessModel: "gpt-5.6-sol",
     })
   })
 

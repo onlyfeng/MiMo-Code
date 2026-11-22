@@ -20,7 +20,7 @@ const WINDOW = { hard: 1_000_000, effective: 980_000, usable: 960_000, source: "
 // computeContextUsage reads id/role/tokens/cost and, in the order-independence
 // tests, time.created; the rest of the SDK message shape is irrelevant, so build
 // the minimal object and cast.
-function assistant(id: string, input: number, opts?: { cost?: number; created?: number }): Message {
+function assistant(id: string, input: number, opts?: { cost?: number; created?: number; output?: number }): Message {
   return {
     id,
     role: "assistant",
@@ -28,7 +28,7 @@ function assistant(id: string, input: number, opts?: { cost?: number; created?: 
     modelID: "qwen-plus",
     cost: opts?.cost ?? 0,
     time: { created: opts?.created ?? 0 },
-    tokens: { input, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+    tokens: { input, output: opts?.output ?? 100, reasoning: 0, cache: { read: 0, write: 0 } },
   } as AssistantMessage
 }
 
@@ -99,12 +99,16 @@ describe("computeContextUsage", () => {
 
   test("measured: reports the last assistant turn's context fill and cumulative cost", () => {
     // 578900 + 100 output = 579000 tokens over a 960K usable window → 579.0K/960K (60%).
-    const messages = [user("msg_01"), assistant("msg_02", 578_900, { cost: 13.1 })]
+    const messages = [
+      user("msg_01"),
+      assistant("msg_02", 578_900, { cost: 13.1 }),
+      assistant("msg_03", 100_000, { cost: 2, output: 0 }),
+    ]
     const out = computeContextUsage({ messages, window: WINDOW, checkpointCoverage: () => undefined })
     expect(out).toBeDefined()
     expect(out!.pending).toBe(false)
     expect(out!.context).toBe("579.0K/960K (60%)")
-    expect(out!.cost).toBe(13.1)
+    expect(out!.cost).toBe(15.1)
   })
 
   test("after a manual /rebuild the stale pre-rebuild figure is NOT shown", () => {
