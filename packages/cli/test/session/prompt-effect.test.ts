@@ -2550,10 +2550,22 @@ it.live("re-announces a full skill catalog when overflow replay carries only a d
   ),
 )
 
+// Codex mode is opt-in (upstream e3592f0e): "auto" resolves to Codex only under
+// MIMOCODE_CODEX_MODE=true, which the auto case sets for its own duration.
 for (const harness of ["codex", "auto"] as const) {
-  it.live(`uses the frozen system and appends the compaction prompt to the existing conversation with ${harness}`, () =>
+  it.live(`uses the frozen system and appends the compaction prompt to the existing conversation with ${harness}${harness === "auto" ? " under MIMOCODE_CODEX_MODE=true" : ""}`, () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
+        if (harness === "auto") {
+          const previous = process.env.MIMOCODE_CODEX_MODE
+          process.env.MIMOCODE_CODEX_MODE = "true"
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (previous == null) delete process.env.MIMOCODE_CODEX_MODE
+              else process.env.MIMOCODE_CODEX_MODE = previous
+            }),
+          )
+        }
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
         const compaction = yield* SessionCompaction.Service
@@ -4263,6 +4275,8 @@ for (const changed of [false, true]) {
           yield* prompt.prompt({
             sessionID: parent.id,
             model,
+            // Codex mode is opt-in (upstream e3592f0e); the exec toolset needs it explicitly.
+            harness: "codex",
             noReply: true,
             parts: [{ type: "text", text: "capture the original tool contract" }],
           })

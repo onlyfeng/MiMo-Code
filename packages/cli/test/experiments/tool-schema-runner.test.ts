@@ -78,7 +78,8 @@ test("experiment model defaults reach real SDK wire without copying transport op
         maxOutputTokens: 1024,
       })
       expect(bodies.at(-1)?.store).toBe(false)
-      expect(bodies.at(-1)?.reasoning).toEqual({ effort: override ? "low" : "medium", summary: "auto" })
+      // Without a configured level the effort is left to the vendor default (upstream c9c91d7b).
+      expect(bodies.at(-1)?.reasoning).toEqual(override ? { effort: "low", summary: "auto" } : { summary: "auto" })
       expect(bodies.at(-1)?.include).toContain("reasoning.encrypted_content")
       expect(bodies.at(-1)?.prompt_cache_key).toBe("synthetic-session")
       expect(bodies.at(-1)?.max_output_tokens).toBe(1024)
