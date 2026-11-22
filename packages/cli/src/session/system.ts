@@ -11,17 +11,10 @@ import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { canLoadSkills, canSearchSkills } from "@/skill/search-access"
 import { Flag } from "@/flag/flag"
-import { type HarnessMode, resolveHarnessMode } from "@/tool/gpt"
+import { type HarnessMode, usesCodexMode } from "@/tool/gpt"
 
-export function provider(model: Provider.Model, harness?: HarnessMode) {
-  const mode = resolveHarnessMode({
-    modelID: model.id,
-    modelAPIID: model.api.id,
-    modelFamily: model.family,
-    harnessModel: model.harness_model,
-    harness,
-  })
-  return [mode === "codex" ? PROMPT_GPT : PROMPT_DEFAULT]
+export function provider(_model: Provider.Model, harness?: HarnessMode) {
+  return [usesCodexMode(harness) ? PROMPT_GPT : PROMPT_DEFAULT]
 }
 
 export function agent(agent: Agent.Info, model: Provider.Model, harness?: HarnessMode) {
@@ -29,7 +22,7 @@ export function agent(agent: Agent.Info, model: Provider.Model, harness?: Harnes
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model, now?: number, harness?: HarnessMode) => Effect.Effect<string[]>
+  readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   /**
    * Model-visible skills for the catalog reminder. Empty unless the effective
    * permission, agent allowlist and user tool toggles allow loading or

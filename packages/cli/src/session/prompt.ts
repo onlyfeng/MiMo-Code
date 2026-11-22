@@ -157,8 +157,8 @@ import {
   assistantFinalText,
   sessionErrorText,
 } from "./trajectory"
-import { prefixCaptureRef, prefixModelIdentity, registerPrefixCapture } from "./prefix-capture-ref"
-import { registerAgentModelResolver, type AgentModelResolveFn } from "./agent-model-ref"
+import { prefixCaptureRef, prefixModelIdentity } from "./prefix-capture-ref"
+import { agentModelRef, type AgentModelResolveFn } from "./agent-model-ref"
 import { spawnRef } from "@/actor/spawn-ref"
 import type { Interface as ActorInterface } from "@/actor/spawn"
 import { workflowRef } from "@/workflow/runtime-ref"
@@ -229,7 +229,7 @@ import {
   type McpServerReminder,
   type McpToolSearchEntry,
 } from "@/tool/mcp-tool-search"
-import { mcpToolSearchMode, resolveHarnessMode } from "@/tool/gpt"
+import { mcpToolSearchMode, usesCodexMode } from "@/tool/gpt"
 import { GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED } from "@/tool/tool-script-ref"
 import { SessionPrefixSnapshot } from "./prefix-snapshot"
 import { isDeepStrictEqual } from "node:util"
@@ -964,10 +964,6 @@ export const layer = Layer.effect(
           mcpToolSearch: mcpToolSearchMode(
             parseMcpToolSearchMode(Flag.MIMOCODE_MCP_TOOL_SEARCH),
             capturePrompt.harness,
-            model.id,
-            model.api.id,
-            model.family,
-            model.harness_model,
           ),
           prebuiltSystem: frozen?.system,
           prompt: capturePrompt,
@@ -1015,8 +1011,7 @@ export const layer = Layer.effect(
         ),
       )
     }
-    const unregisterCapture = registerPrefixCapture(capture)
-    yield* Effect.addFinalizer(() => Effect.sync(unregisterCapture))
+    yield* bindScopedRef(prefixCaptureRef, capture)
 
     // FC-047: late-bind the agent model resolver for the same layer-cycle reason
     // as the captor above. An agent without a configured model, or one whose
@@ -1040,8 +1035,7 @@ export const layer = Layer.effect(
             : elog.warn("agent model resolution failed", { agentName, cause }).pipe(Effect.as(undefined)),
         ),
       )
-    const unregisterAgentModel = registerAgentModelResolver(resolveAgentModel)
-    yield* Effect.addFinalizer(() => Effect.sync(unregisterAgentModel))
+    yield* bindScopedRef(agentModelRef, resolveAgentModel)
 
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
       return yield* EffectBridge.make().pipe(RunApproval.capture)
@@ -2082,21 +2076,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // global; see toolWhitelist/mcpToolSearch precedent).
       const execMcp: { current: Record<string, AITool> } = { current: {} }
       const execTools: { current: Tool.Def[] } = { current: [] }
-      const useGPTTools =
-        resolveHarnessMode({
-          modelID: input.model.id,
-          modelAPIID: input.model.api.id,
-          modelFamily: input.model.family,
-          harnessModel: input.model.harness_model,
-          harness: input.harness,
-        }) === "codex"
+      const useGPTTools = usesCodexMode(input.harness)
       const searchMode = mcpToolSearchMode(
         parseMcpToolSearchMode(Flag.MIMOCODE_MCP_TOOL_SEARCH),
         input.harness,
-        input.model.id,
-        input.model.api.id,
-        input.model.family,
-        input.model.harness_model,
       )
       // Decided once every request-authorized MCP schema is known (auto mode
       // compares their size to the context window); read lazily by the MCP
@@ -2241,9 +2224,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const mcpTools = Object.entries(yield* mcp.tools(input.mcpContext)).toSorted(([a], [b]) => a.localeCompare(b))
       const definitions = yield* registry.registered({
         modelID: input.model.id,
-        modelAPIID: input.model.api.id,
-        modelFamily: input.model.family,
-        harnessModel: input.model.harness_model,
         providerID: input.model.providerID,
         // A full-context fork inherits the parent's frozen wire membership.
         // Keep the child allowlist as an execution-time gate above instead of

@@ -1000,6 +1000,8 @@ entry point, user agent and persisted session using build-time definitions.
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- The preview endpoint owns its request and response schemas. It calls the shared FC-023 prompt resolver in `session/model-selection.ts`.
+
 - 2026-11-03 FC-030 propagation (`main` PR #203): resuming a session holds the last main-lane user message's variant in memory for that model (`variant.resume`) instead of saving it with `variant.set`; a message without a variant keeps the saved per-model choice. Compat's `local.tsx` matches main and its restore effect is the inherited one, so the change applies unchanged. The `ModelMetadata` preview reads `variant.current()` and so resolves the resumed variant; previews still never write the selected variant store, and submission sends the same `variant.current()` value.
 
 - 2026-11-02 FC-023 rebuild-boundary propagation (`main` PR #193): `insertRebuildBoundary` keeps the variant of the lane's newest user message when the boundary is on that message's model. Compat restores the TUI selection and resolves model-less turns through `SessionModelSelection.resolve`, whose fallback takes the last user message's model and variant; with the boundary now carrying the variant, a session reopened after a rebuild shows it and inbox deliveries keep it. `checkpoint.ts` merges without conflict beside compat's `coverage` read and writer `turnContext`.

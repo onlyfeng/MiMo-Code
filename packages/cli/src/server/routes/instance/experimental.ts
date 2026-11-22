@@ -71,9 +71,12 @@ const GenTitleRequestBody = {
   required: true,
   content: { "application/json": { schema: z.toJSONSchema(GenTitleBody, { io: "input" }) } },
 } as unknown as NonNullable<Parameters<typeof describeRoute>[0]["requestBody"]>
+const PreviewModel = z.object({ providerID: ProviderID.zod, modelID: ModelID.zod })
+const PreviewInput = z.object({ agent: z.string().optional(), model: PreviewModel, variant: z.string().optional() })
+const ResolvedModelSelection = PreviewModel.extend({ variant: z.string().optional() }).meta({ ref: "ResolvedModelSelection" })
 const ModelSelectionRequestBody = {
   required: true,
-  content: { "application/json": { schema: z.toJSONSchema(SessionModelSelection.PreviewInput, { io: "input" }) } },
+  content: { "application/json": { schema: z.toJSONSchema(PreviewInput, { io: "input" }) } },
 } as unknown as NonNullable<Parameters<typeof describeRoute>[0]["requestBody"]>
 export const ExperimentalRoutes = lazy(() =>
   new Hono()
@@ -87,12 +90,12 @@ export const ExperimentalRoutes = lazy(() =>
         responses: {
           200: {
             description: "Resolved model selection",
-            content: { "application/json": { schema: resolver(SessionModelSelection.Selection) } },
+            content: { "application/json": { schema: resolver(ResolvedModelSelection) } },
           },
           ...errors(400, 404),
         },
       }),
-      validator("json", SessionModelSelection.PreviewInput),
+      validator("json", PreviewInput),
       async (c) =>
         jsonRequest("ExperimentalRoutes.resolveModelSelection", c, function* () {
           const body = c.req.valid("json")
@@ -273,9 +276,6 @@ export const ExperimentalRoutes = lazy(() =>
             return yield* registry.tools({
               providerID: resolved.providerID,
               modelID: resolved.id,
-              modelAPIID: resolved.api.id,
-              modelFamily: resolved.family,
-              harnessModel: resolved.harness_model,
               agent: yield* agents.get(yield* agents.defaultAgent()),
             })
           }),

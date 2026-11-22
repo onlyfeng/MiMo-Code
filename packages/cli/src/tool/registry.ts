@@ -71,7 +71,7 @@ import * as BashInteractive from "./bash-interactive"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
 import { bindToolScriptRef, GPT_TOP_LEVEL_TOOLS, TOOL_SCRIPT_EXCLUDED, toolScriptRegistry } from "./tool-script-ref"
-import { type HarnessMode, resolveHarnessMode } from "./gpt"
+import { type HarnessMode, usesCodexMode } from "./gpt"
 import { canSearchSkills } from "../skill/search-access"
 
 const log = Log.create({ service: "tool.registry" })
@@ -118,9 +118,6 @@ export interface Interface {
   readonly tools: (model: {
     providerID: ProviderID
     modelID: ModelID
-    modelAPIID?: string
-    modelFamily?: string
-    harnessModel?: string
     agent: Agent.Info
     permission?: Permission.Ruleset
     preserveMembership?: boolean
@@ -351,14 +348,7 @@ export const layer = Layer.effect(
 
     const available = Effect.fn("ToolRegistry.available")(function* (input: Parameters<Interface["tools"]>[0]) {
       const websearchSettings = (yield* config.get()).websearch
-      const useGPTTools =
-        resolveHarnessMode({
-          modelID: input.modelID,
-          modelAPIID: input.modelAPIID,
-          modelFamily: input.modelFamily,
-          harnessModel: input.harnessModel,
-          harness: input.harness,
-        }) === "codex"
+      const useGPTTools = usesCodexMode(input.harness)
       // Only built-in media readers require support from the active model and adapter.
       const model = yield* provider
         .getModel(input.providerID, input.modelID)
@@ -488,7 +478,7 @@ export const layer = Layer.effect(
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const definitions = yield* registered(input)
-      return resolveHarnessMode(input) === "codex"
+      return usesCodexMode(input.harness)
         ? definitions.filter((tool) => GPT_TOP_LEVEL_TOOLS.has(tool.id))
         : definitions
     })

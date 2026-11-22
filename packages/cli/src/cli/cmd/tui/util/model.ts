@@ -1,8 +1,8 @@
 import type { AssistantMessage, CheckpointCoverage, Config, Message, Model, Provider } from "@mimo-ai/sdk/v2"
-import { compareUtf8Bytes } from "@mimo-ai/shared/util/encode"
 import { contextWindow as overflowWindow } from "@/session/overflow"
 import { XIAOMI_CREDENTIAL_PROVIDER_IDS } from "@/provider/xiaomi-family"
 import { Locale, Token } from "@/util"
+import { compareMessageOrder } from "@/session/message-order"
 
 type Selection = {
   providerID: string
@@ -141,11 +141,6 @@ export type ContextWindow = ReturnType<typeof overflowWindow>
 
 export type CheckpointCoverageProjection = CheckpointCoverage
 
-function compareMessageOrder(left: Pick<Message, "id" | "time">, right: Pick<Message, "id" | "time">) {
-  if (left.time.created !== right.time.created) return left.time.created - right.time.created
-  return compareUtf8Bytes(left.id, right.id)
-}
-
 /**
  * Compute the footer's context-fill readout and cumulative cost from the main
  * message list. Pure and render-free so it can be unit-tested below the SolidJS
@@ -192,17 +187,18 @@ export function computeContextUsage(input: {
   checkpointCoverage: readonly CheckpointCoverageProjection[]
 }): { context: string; cost: number; pending: boolean } | undefined {
   const { messages, window: win, checkpointCoverage } = input
-  const last = messages
-    .filter((m): m is AssistantMessage => m.role === "assistant" && m.tokens.output > 0)
-    .toSorted(compareMessageOrder)
-    .at(-1)
+  let last: AssistantMessage | undefined
+  let cost = 0
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+    cost += message.cost
+    if (message.tokens.output > 0 && (!last || compareMessageOrder(message, last) >= 0)) last = message
+  }
   if (!last) return undefined
 
   const tokens =
     last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
   if (tokens <= 0) return undefined
-
-  const cost = messages.reduce((sum, m) => sum + (m.role === "assistant" ? m.cost : 0), 0)
 
   // The window frame is `<usable>` plus the `↓` config-budget marker. Denominator
   // is the compaction trigger, not the raw window — otherwise the percentage never
