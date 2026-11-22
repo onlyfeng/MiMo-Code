@@ -32,3 +32,7 @@ The final review commits touch only `docs/`. The required proof compares each fi
 | ID | Selected behavior | Main result | dev/compat result | Decisive evidence |
 | --- | --- | --- | --- | --- |
 | C01 | Isolate memory directory and FTS state in shared-process tests | Adopted upstream fixture and guidance | Inherited verbatim with compat preload | Native-layout reproduction, affected matrix and byte equality of the eight incoming files |
+
+## Follow-up (2026-11-22)
+
+Exact-SHA CI became available again on 2026-11-22; this synchronization's changes are covered by the green push CI on `e641c74d` (main) and `17cfc99a` (compat). See [the 2026-11-22 record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).

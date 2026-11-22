@@ -14,7 +14,16 @@ const running = new Map<Fiber.Fiber<unknown, unknown>, () => void>()
 // minutes on slow CI disks. Flushing here is best-effort; tests that assert on
 // log contents call Log.flush() themselves.
 const FLUSH_BUDGET_MS = 1_000
-const flushLogs = () => Promise.race([Log.flush(), Bun.sleep(FLUSH_BUDGET_MS)])
+// A stalled queue otherwise shows only as every later test running one budget
+// slower (FC-008, FC-054); report the first one per process.
+let stallReported = false
+const flushLogs = async () => {
+  const settled = await Promise.race([Log.flush().then(() => true), Bun.sleep(FLUSH_BUDGET_MS).then(() => false)])
+  if (settled || stallReported) return
+  stallReported = true
+  const prefix = process.env["GITHUB_ACTIONS"] === "true" ? "::warning::" : ""
+  console.warn(`${prefix}the process-wide log queue did not settle within ${FLUSH_BUDGET_MS} ms at ${new Date().toISOString()}`)
+}
 
 afterEach(async () => {
   await Promise.all(

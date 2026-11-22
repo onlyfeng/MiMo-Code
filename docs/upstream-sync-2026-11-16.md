@@ -110,3 +110,7 @@ Final advancement validation (same default-selector environment and isolated dep
 - Both runtime snapshots are pushed. At exact SHAs main `1fc8d7dd0f6dafb4b1a4c5ec92c1826d6d13c65d` and compat `c26c974102ce6857ace779cb77946e97b8d2c8e6`, run queries return `[]`; all three workflow dispatches again return HTTP 422 on both branches, including compat Windows requested explicitly. The acceptance blockers stated above remain.
 
 All selected capabilities are implemented/reconciled and published; CI acceptance is incomplete. Final docs-only tips, exact remote equality, ancestry, outside-docs equality and cleanup receipts are retained in the local publication evidence. No successful historical CI is substituted for these missing exact-SHA runs.
+
+## Follow-up (2026-11-22)
+
+The Linux CI acceptance left pending here was established on 2026-11-22 through the later tips `e641c74d` (main) and `17cfc99a` (compat), whose push CI, including Windows runtime, is green. The shared log-queue stall that this synchronization isolated for `subagent-resume-negatives` recurred in shard 3 through `bus-integration`; FC-008 isolates that file and FC-054 bounds the stall. See [the 2026-11-22 record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).

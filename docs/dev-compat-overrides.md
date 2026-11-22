@@ -1320,6 +1320,8 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
 
 ## DC-SESSION-001 — one live process drives a session
 
+- 2026-11-22 propagation of `main` pull request #266 (FC-054, FC-008): `test/preload.ts` now also points `os.homedir()` at the isolated home, in the HOME setup well before this owner's teardown. The `release()` call before the data directory is removed is unchanged, and the session-owner suites pass. The bounded log sink (FC-054) does not touch session ownership.
+
 - 2026-11-16 synchronization: inherit same-process live-claim shielding and monotonic claim run ids. The live set does not authorize a process to run another process’s session: ownership checks, immediate transactions, current-controller wake checks and recovery guards remain. On true orphan recovery preserve FC-024 consumed outcomes; a stop-fenced run with no remaining claim interrupts. See C09 in the shared sync record.
 
 - 2026-11-04 FC-038 propagation (`main` PR #216): a keyed resend that revives an unseen row places the owner's wake in the accept transaction like an inserted input (`placeWake`).

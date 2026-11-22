@@ -359,3 +359,58 @@ test("cloned loggers keep their own tags", async () => {
   expect(lines.find((line) => line.includes("from a"))).toContain("session.id=ses_a")
   expect(lines.find((line) => line.includes("from base"))).not.toContain("session.id=")
 })
+
+// FC-054: on Linux CI a log write was seen whose callback never arrived, so every
+// later record, flush and shutdown queued behind it forever. These cases drop a
+// callback (or a close) on purpose and require the queue to move on.
+const settles = (promise: Promise<unknown>, ms: number) =>
+  Promise.race([promise.then(() => true), Bun.sleep(ms).then(() => false)])
+
+test("a write whose callback never arrives does not hold the queue", async () => {
+  await using tmp = await tmpdir()
+  Global.Path.log = tmp.path
+  await Log.init({ print: false, writeTimeout: 100 })
+  const proto = (await import("fs")).WriteStream.prototype
+  const original = proto.write
+  let dropped = 0
+  proto.write = function (this: unknown, chunk: unknown, ...rest: unknown[]) {
+    if (dropped === 0 && String(chunk).includes("lost callback")) {
+      dropped++
+      return true
+    }
+    return (original as (...args: unknown[]) => boolean).call(this, chunk, ...rest)
+  } as typeof proto.write
+  try {
+    Log.Default.info("lost callback")
+    Log.Default.info("after the stall")
+    expect(await settles(Log.flush(), 3000)).toBe(true)
+  } finally {
+    proto.write = original
+  }
+  expect(dropped).toBe(1)
+  Log.Default.info("after recovery")
+  await Log.flush()
+  const text = await fs.readFile(Log.file(), "utf8")
+  expect(text).toContain("after the stall")
+  expect(text).toContain("after recovery")
+})
+
+test("a stream that never closes does not hold reinitialization or shutdown", async () => {
+  await using tmp = await tmpdir()
+  Global.Path.log = tmp.path
+  await Log.init({ print: false, writeTimeout: 100 })
+  Log.Default.info("before the wedged close")
+  await Log.flush()
+  const proto = (await import("fs")).WriteStream.prototype
+  const original = proto.end
+  proto.end = function (this: unknown) {
+    return this
+  } as typeof proto.end
+  try {
+    expect(await settles(Log.init({ print: false, writeTimeout: 100 }), 3000)).toBe(true)
+    Log.Default.info("on the new file")
+    expect(await settles(Log.shutdown(), 3000)).toBe(true)
+  } finally {
+    proto.end = original
+  }
+})

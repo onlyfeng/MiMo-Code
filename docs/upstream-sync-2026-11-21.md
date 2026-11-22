@@ -365,3 +365,7 @@ Propagation into `dev/compat` is prepared locally on
 `sync/upstream-128adcb7-compat` and is not pushed. It must be re-merged from
 `main` after this pull request lands, because the compat branch predates the
 `main` commits above.
+
+## Follow-up (2026-11-22)
+
+Pull request #263 was merged without CI because Actions was disabled. CI on the later tips `e641c74d` (main) and `17cfc99a` (compat) is green. Of the "pre-existing failures" listed above, the eight codex-compact cases and the three prompt-effect compaction and frozen-tool cases were regressions from the 2026-11-13 synchronization, fixed in pull requests #264 and #265. The other entries were not shown to be regressions. Linux CI is green, but the Windows path fixtures listed above are not part of it. See [the 2026-11-22 record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).
