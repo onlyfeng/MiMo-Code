@@ -194,3 +194,14 @@ typecheck and test (44974452743, 44974452747, 44974452732). Pull request #265
 merged into compat as `17cfc99a` after a green dispatched test run on
 `84858551`, including Windows runtime (44974595191). Compat push CI is
 recorded in the compat review record.
+
+### Commit authorship
+
+Ten commits from this follow-up are authored `Test <test@mimocode.test>`:
+`528c418b`, `09271a84`, `2bda848d`, `2a522587`, `143554ea`, `ebbd842a`,
+`6d3c2de4`, `84858551`, `9a0386d6` and `86717804`. A `git bisect run` over
+`main` checked out unrelated root commits and ran their tests. Their fixture
+`git init`/`git config` calls reached the repository's shared `.git/config`
+and set `core.bare` and the test identity there. The configuration was
+restored after the push, and the owner chose to keep the published history
+unchanged. The code and CI evidence above are unaffected.
