@@ -1993,6 +1993,10 @@ describe("Actor tool reasoning variant inheritance", () => {
       {
         config: {
           ...xiaomi,
+          // Variants are exactly the declared levels (upstream c9c91d7b).
+          provider: {
+            xiaomi: { ...xiaomi.provider.xiaomi, models: { "mimo-v2-pro": { variants: { high: {}, low: {} } } } },
+          },
           agent: { tuned: { description: "Tuned", mode: "subagent", model: "xiaomi/mimo-v2-pro", variant: "low" } },
         },
       },
@@ -2009,6 +2013,10 @@ describe("Actor tool reasoning variant inheritance", () => {
       {
         config: {
           ...xiaomi,
+          // Variants are exactly the declared levels (upstream c9c91d7b).
+          provider: {
+            xiaomi: { ...xiaomi.provider.xiaomi, models: { "mimo-v2-pro": { variants: { high: {}, low: {}, medium: {} } } } },
+          },
           agent: { tuned: { description: "Tuned", mode: "subagent", model: "xiaomi/mimo-v2-pro", variant: "low" } },
         },
       },
