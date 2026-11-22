@@ -80,9 +80,11 @@ describe("ToolRegistry.tools: actor tool subagent gating", () => {
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
           for (const name of ["general", "explore", "helper"]) {
+            // Codex mode is opt-in (upstream e3592f0e); a GPT model alone selects the default harness.
             const input = {
               providerID: ProviderID.opencode,
               modelID: ModelID.make("gpt-5.4"),
+              harness: "codex" as const,
               agent: yield* get(name),
             }
             const advertised = yield* registry.tools(input)

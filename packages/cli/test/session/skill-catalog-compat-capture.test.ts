@@ -179,11 +179,13 @@ it.live(
             expect(captured.system).toEqual(winner.system)
             expect(captured).toHaveProperty("currentTurnMessages", captured.inheritedMessages)
             expect(captured.system.join("\n")).not.toContain(NEW)
-            // The v2 user-side snapshot stays stored but is projected into neither view.
-            for (const view of [captured.inheritedMessages, captured.currentTurnMessages])
-              expect(
-                view.some((message) => message.role === "user" && JSON.stringify(message.content).includes(OLD)),
-              ).toBe(false)
+            // The v2 user-side snapshot stays stored but is projected into neither
+            // view; the current-turn view equals the inherited one (asserted above).
+            expect(
+              captured.inheritedMessages.some(
+                (message) => message.role === "user" && JSON.stringify(message.content).includes(OLD),
+              ),
+            ).toBe(false)
             expect(Object.keys(captured.tools)).toEqual(["actor"])
             expect(
               yield* Effect.promise(() =>
