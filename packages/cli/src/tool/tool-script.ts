@@ -858,9 +858,6 @@ export const ToolScriptTool = Tool.define(
                   | {
                       id: ModelID
                       providerID: ProviderID
-                      api?: { id: string }
-                      family?: string
-                      harness_model?: string
                     }
                   | undefined
                 return yield* getDefs(
@@ -868,9 +865,6 @@ export const ToolScriptTool = Tool.define(
                     ? {
                         providerID: model.providerID,
                         modelID: model.id,
-                        modelAPIID: model.api?.id,
-                        modelFamily: model.family,
-                        harnessModel: model.harness_model,
                         agent: agentInfo,
                         harness: ctx.extra?.harness as HarnessMode | undefined,
                       }

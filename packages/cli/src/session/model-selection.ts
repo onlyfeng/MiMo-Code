@@ -1,63 +1,37 @@
 import { Effect } from "effect"
-import z from "zod"
 import type { Agent } from "@/agent/agent"
 import type { Provider } from "@/provider"
-import { ModelID, ProviderID } from "@/provider/schema"
+import type { ModelID, ProviderID } from "@/provider/schema"
 
-const Model = z.object({ providerID: ProviderID.zod, modelID: ModelID.zod })
+type Model = { providerID: ProviderID; modelID: ModelID; variant?: string }
 
-export const PreviewInput = z.object({
-  agent: z.string().optional(),
-  model: Model,
-  variant: z.string().optional(),
-})
-
-export const Selection = Model.extend({ variant: z.string().optional() }).meta({ ref: "ResolvedModelSelection" })
-
-// Both prompt admission and read-only previews use this resolver. In particular,
-// agent model groups keep prompt's no-context-provider resolution semantics.
 export const resolve = Effect.fn("SessionModelSelection.resolve")(function* (
   provider: Provider.Interface,
   input: {
     agent: Pick<Agent.Info, "model" | "modelRef" | "variant">
-    model?: z.infer<typeof Model>
+    model?: Pick<Model, "providerID" | "modelID">
     modelRef?: string
     variant?: string
   },
-  fallback: Effect.Effect<z.infer<typeof Model> & { variant?: string }>,
+  fallback: Effect.Effect<Model>,
 ) {
-  const inputModel = input.modelRef
-    ? yield* provider
-        .resolveModelRef(input.modelRef)
-        .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
-    : input.model
-  const agentModel = input.agent.modelRef
-    ? yield* provider
-        .resolveModelRef(input.agent.modelRef)
-        .pipe(Effect.map((m) => ({ providerID: m.providerID, modelID: m.id })))
-    : input.agent.model
-  const model = inputModel ?? agentModel ?? (yield* fallback)
-  const same = agentModel && model.providerID === agentModel.providerID && model.modelID === agentModel.modelID
-  const full =
-    !input.variant && input.agent.variant && same
-      ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
-      : undefined
-  // FC-023: only a model taken from the fallback continues its variant, while
-  // the model still offers it. A named model without a variant keeps its default.
-  const continued: (z.infer<typeof Model> & { variant?: string }) | undefined =
-    inputModel || agentModel ? undefined : model
-  const offered =
-    !input.variant && continued?.variant
-      ? yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
-      : undefined
-  return {
-    providerID: model.providerID,
-    modelID: model.modelID,
-    variant:
-      input.variant ??
-      (input.agent.variant && full?.variants?.[input.agent.variant] ? input.agent.variant : undefined) ??
-      (continued?.variant && offered?.variants?.[continued.variant] ? continued.variant : undefined),
-  }
+  const byRef = (ref: string) =>
+    provider.resolveModelRef(ref).pipe(Effect.map((model) => ({ providerID: model.providerID, modelID: model.id })))
+  const inputModel = input.modelRef ? yield* byRef(input.modelRef) : input.model
+  const agentModel = input.agent.modelRef ? yield* byRef(input.agent.modelRef) : input.agent.model
+  const model: Model = inputModel ?? agentModel ?? (yield* fallback)
+  const { providerID, modelID } = model
+  if (input.variant != null) return { providerID, modelID, variant: input.variant }
+
+  // An explicitly named model uses its default. Only the agent's own model
+  // or a model continued from the previous turn can supply an implicit variant.
+  const sameAgentModel = agentModel?.providerID === providerID && agentModel.modelID === modelID
+  const continued = !inputModel && !agentModel ? model.variant : undefined
+  const candidate = sameAgentModel ? input.agent.variant : continued
+  const full = candidate
+    ? yield* provider.getModel(providerID, modelID).pipe(Effect.catchDefect(() => Effect.void))
+    : undefined
+  return { providerID, modelID, variant: candidate && full?.variants?.[candidate] ? candidate : undefined }
 })
 
 export * as SessionModelSelection from "./model-selection"

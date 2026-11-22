@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { ProcessLiveness } from "../../src/session/process-liveness"
@@ -43,14 +43,19 @@ describe("process liveness", () => {
     using locks = lockDirectory()
     const stale = "00000000-0000-4000-8000-000000000001"
     const file = path.join(locks.directory, `${stale}.lock`)
-    writeFileSync(file, "")
-    ProcessLiveness.withCoordination(locks.directory, () => undefined)
-    // Deletion fails on Windows while another handle has the file open, as a
-    // concurrent probe does. POSIX deletes open files, so there the directory
-    // is made read-only instead; on Windows that attribute would also fail
-    // the coordination lock's mkdir.
-    const open = init(file).$client
     const readOnly = process.platform !== "win32"
+    if (readOnly) {
+      // Keep both SQLite databases and their journals writable. Only the
+      // directory entries that the probe tries to unlink are read-only.
+      const backing = path.join(locks.directory, "databases")
+      mkdirSync(backing)
+      writeFileSync(path.join(backing, "stale.db"), "")
+      ProcessLiveness.withCoordination(backing, () => undefined)
+      symlinkSync(path.join(backing, "stale.db"), file)
+      symlinkSync(path.join(backing, "coordination.db"), path.join(locks.directory, "coordination.db"))
+    }
+    // On Windows this open handle prevents deletion during the first probe.
+    const open = init(file).$client
     if (readOnly) chmodSync(locks.directory, 0o555)
     try {
       expect(ProcessLiveness.isAlive(stale, locks.directory)).toBe(false)
@@ -94,5 +99,29 @@ describe("process liveness", () => {
 
   test("the current process counts as alive", () => {
     expect(ProcessLiveness.isAlive(ProcessLiveness.INSTANCE_ID)).toBe(true)
+  })
+
+  test("an unreadable lock preserves the owner until a later probe proves it is free", () => {
+    using locks = lockDirectory()
+    const id = "00000000-0000-4000-8000-000000000002"
+    const file = path.join(locks.directory, `${id}.lock`)
+    // Opening a directory as a writable database fails on Windows and POSIX.
+    mkdirSync(file)
+    expect(ProcessLiveness.isAlive(id, locks.directory)).toBe(true)
+    expect(existsSync(file)).toBe(true)
+    rmSync(file, { recursive: true })
+    writeFileSync(file, "")
+    expect(ProcessLiveness.isAlive(id, locks.directory)).toBe(false)
+    expect(existsSync(file)).toBe(false)
+  })
+
+  test("an unavailable coordination database preserves a free-looking lock", () => {
+    using locks = lockDirectory()
+    const id = "00000000-0000-4000-8000-000000000003"
+    const file = path.join(locks.directory, `${id}.lock`)
+    writeFileSync(file, "")
+    mkdirSync(path.join(locks.directory, "coordination.db"))
+    expect(ProcessLiveness.isAlive(id, locks.directory)).toBe(true)
+    expect(existsSync(file)).toBe(true)
   })
 })

@@ -37,8 +37,25 @@ Earlier review records and dated propagation notes (75 sections, dated 2026-09-0
 | DC-WEBSEARCH-001 | `websearch` config, `LLM.stream` tool injection/retry/replay, preflight `LLM.wireTools`, Anthropic tool-call reorder, websearch tool chain, registry exposure | Compat-only extension; main has no native search and no `websearch` config | Preserve opt-in native search, search-specific in-turn fallback, text replay downgrade, and the fallback chain order |
 | DC-WEBFETCH-001 | `webfetch` config, WebFetch route chain, destination classification, hosted fetch models | Compat-only extension; main has no hosted fetch and no `webfetch` config | Preserve direct-first default, private targets direct-only, result-block proof, digest labelling and chained failure reasons |
 | DC-SESSION-001 | `ExecutionOwnership`, `SessionRunState` entries, `preparePrompt`, inbox `maybeKick`/wake poller/`reconcileOnBoot`, `actor send`, `sweepAbandonedZombies`, TUI `claimSession` | Compat-only extension; main assumes one process per database | Keep one live driver per session; never adopt across sessions; gate any new lane start, run entry or boot-time recovery of other processes' state |
+| DC-BUILD-001 | Local version in the CLI, user agent and persisted session | Compat extends FC-052's embedded build time | Keep the same timestamp for the lifetime of a local binary |
 
 Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is not reused; its last compat entry is kept verbatim in [the compat history](dev-compat-registry-history.md#2026-11-07-inherit-fc-053-and-the-fc-008-ci-alignment).
+
+## DC-BUILD-001 — local build version
+
+Commit `70aac89e` uses FC-052's embedded UTC build time to distinguish local
+builds. A binary built with version `local` reports, for example,
+`local-20260102T030405Z` for its entire lifetime. Published versions retain
+their supplied value. A source run with no build metadata reports `local`.
+
+The CLI's `--version`, the installation user agent and new sessions all read
+`InstallationVersion` from `packages/cli/src/installation/version.ts`.
+Existing sessions retain the version recorded at creation. The startup log
+also carries FC-052's commit, dirty status and full build time. The local
+version contract can move to FC-052 if shared `main` adopts it.
+
+`packages/cli/test/installation/build-provenance.test.ts` exercises the CLI
+entry point, user agent and persisted session using build-time definitions.
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -983,6 +1000,8 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
 
 ## DC-TUI-001 — request provider/model/variant display
 
+- The preview endpoint owns its request and response schemas. It calls the shared FC-023 prompt resolver in `session/model-selection.ts`.
+
 - 2026-11-03 FC-030 propagation (`main` PR #203): resuming a session holds the last main-lane user message's variant in memory for that model (`variant.resume`) instead of saving it with `variant.set`; a message without a variant keeps the saved per-model choice. Compat's `local.tsx` matches main and its restore effect is the inherited one, so the change applies unchanged. The `ModelMetadata` preview reads `variant.current()` and so resolves the resumed variant; previews still never write the selected variant store, and submission sends the same `variant.current()` value.
 
 - 2026-11-02 FC-023 rebuild-boundary propagation (`main` PR #193): `insertRebuildBoundary` keeps the variant of the lane's newest user message when the boundary is on that message's model. Compat restores the TUI selection and resolves model-less turns through `SessionModelSelection.resolve`, whose fallback takes the last user message's model and variant; with the boundary now carrying the variant, a session reopened after a rebuild shows it and inbox deliveries keep it. `checkpoint.ts` merges without conflict beside compat's `coverage` read and writer `turnContext`.
@@ -1107,6 +1126,11 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
   when shared `main` exposes the equivalent preview and metadata display.
 
 ## DC-WEBSEARCH-001 — provider-native web search and layered fallback
+
+Configured fallback search and hosted WebFetch entries use `tool/web-model.ts`
+to parse literal provider/model references, check supported SDKs and variants,
+and apply provider, model and variant options in that order. Each tool owns its
+route eligibility, permissions, result validation and retry behavior.
 
 - 2026-11-04 FC-035 propagation (`main` PR #211): the processor's two patch-part sites gain `written` (and `cleanup` clears the message's write record); the native-search output display in `completeToolCall` is a separate hunk and merges unchanged.
 - 2026-11-02 PR #189 propagation: main's FC-013 change bounds background system agents' retries in the `llm.ts` request ladder and as the processor stream policy's final `cap`; both merge without conflict beside this owner's code. The native-search resend before output stays one-shot per stream attempt and outside the ladder's retry count, so a capped system agent makes at most one extra request per attempt and still stops. The native display path in `processor.ts` is untouched.
@@ -1319,6 +1343,11 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
   the shared registry.
 
 ## DC-SESSION-001 — one live process drives a session
+
+A failed lock probe keeps the session with its current owner. A missing lock
+or a confirmed free lock permits adoption. Reclaiming a free lock requires a
+second probe under the directory's coordination lock. An unavailable
+coordination database defers adoption until a later attempt.
 
 - 2026-11-22 propagation of `main` pull request #266 (FC-054, FC-008): `test/preload.ts` now also points `os.homedir()` at the isolated home, in the HOME setup well before this owner's teardown. The `release()` call before the data directory is removed is unchanged, and the session-owner suites pass. The bounded log sink (FC-054) does not touch session ownership.
 

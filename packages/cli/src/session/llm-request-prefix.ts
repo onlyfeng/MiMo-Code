@@ -22,7 +22,7 @@ import {
   type McpToolSearchMode,
 } from "../tool/mcp-tool-search"
 import type { PromptConfig } from "./session"
-import { resolveHarnessMode } from "../tool/gpt"
+import { usesCodexMode } from "../tool/gpt"
 import { GPT_TOP_LEVEL_TOOLS } from "../tool/tool-script-ref"
 
 /**
@@ -124,9 +124,6 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   // Resolve tools using parent agent's permission and toolAllowlist
   const toolDefs = yield* toolRegistry.registered({
     modelID: input.model.id,
-    modelAPIID: input.model.api.id,
-    modelFamily: input.model.family,
-    harnessModel: input.model.harness_model,
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.permission,
@@ -145,14 +142,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
       Object.assign(rawTools[item.id], { nativeInputSchema: z.toJSONSchema(item.nativeParameters) })
   }
   const localToolNames = new Set(Object.keys(rawTools))
-  const compact =
-    resolveHarnessMode({
-      modelID: input.model.id,
-      modelAPIID: input.model.api.id,
-      modelFamily: input.model.family,
-      harnessModel: input.model.harness_model,
-      harness: lastUser.harness,
-    }) === "codex"
+  const compact = usesCodexMode(lastUser.harness)
   const mcpSearchEntries: McpToolSearchEntry[] = []
   const agentToolAllowlist = input.agent.toolAllowlist ? new Set(input.agent.toolAllowlist) : undefined
   for (const [id, item] of Object.entries(input.mcpTools ?? {})) {

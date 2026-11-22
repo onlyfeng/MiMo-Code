@@ -2,77 +2,20 @@ import { Flag } from "@/flag/flag"
 import type { McpToolSearchMode } from "./mcp-tool-search"
 
 export type HarnessMode = "auto" | "codex" | "default"
-export type ResolvedHarnessMode = Exclude<HarnessMode, "auto">
 
 // Explicit configuration names a canonical modern GPT identity, never a
 // display name or wildcard. This compatibility field never selects a harness.
 export const GPT_HARNESS_MODEL_PATTERN =
   /^gpt-(?:[5-9]|[1-9][0-9]+)(?:\.[0-9]+)*(?:-(?!oss(?:-|$)|mimo(?:-|$)|gpt-4)[a-z0-9]+)*$/
 
-export type HarnessResolutionInput = {
-  modelID: string
-  modelAPIID?: string
-  modelFamily?: string
-  harnessModel?: string
-  harness?: HarnessMode
-}
-
-function codexHarnessOverride(harness?: HarnessMode): boolean | undefined {
+// An explicit session harness takes precedence over the process default.
+export function usesCodexMode(harness?: HarnessMode) {
   if (harness === "codex") return true
   if (harness === "default") return false
-  return undefined
+  return Flag.MIMOCODE_CODEX_MODE === true
 }
 
-export function isGPTModel(...values: Array<string | undefined>) {
-  const ids = values.flatMap((value) => (value ? [value.toLowerCase()] : []))
-  if (ids.some((id) => id.includes("gpt-oss"))) return false
-  return ids.some((id) => id.includes("gpt"))
-}
-
-export function resolveHarnessMode(input: HarnessResolutionInput): ResolvedHarnessMode {
-  const override = codexHarnessOverride(input.harness)
-  if (override !== undefined) return override ? "codex" : "default"
-  const processMode = Flag.MIMOCODE_CODEX_MODE
-  if (processMode !== undefined) return processMode ? "codex" : "default"
-  return "default"
-}
-
-export function usesCodexMode(harness?: HarnessMode) {
-  return resolveHarnessMode({ modelID: "", harness }) === "codex"
-}
-
-// The configured deferral mode applies to the default harness; the resolved
-// Codex harness always defers, since exec reaches MCP tools without a search.
-export function mcpToolSearchMode(
-  configured: McpToolSearchMode,
-  harness: HarnessMode | undefined,
-  modelID = "",
-  modelAPIID?: string,
-  modelFamily?: string,
-  harnessModel?: string,
-): McpToolSearchMode {
-  if (resolveHarnessMode({ modelID, modelAPIID, modelFamily, harnessModel, harness }) === "codex") return { type: "always" }
+export function mcpToolSearchMode(configured: McpToolSearchMode, harness: HarnessMode | undefined): McpToolSearchMode {
+  if (usesCodexMode(harness)) return { type: "always" }
   return configured
-}
-
-export function isMimoV25Model(...values: Array<string | undefined>) {
-  return values.some((value) => value && /(?:^|[/_-])mimo-v2\.5(?:-pro)?$/.test(value.toLowerCase()))
-}
-
-export function usesGPTToolset(
-  modelID: string,
-  harness?: HarnessMode,
-  modelAPIID?: string,
-  modelFamily?: string,
-  harnessModel?: string,
-) {
-  return (
-    resolveHarnessMode({
-      modelID,
-      modelAPIID,
-      modelFamily,
-      harnessModel,
-      harness,
-    }) === "codex"
-  )
 }

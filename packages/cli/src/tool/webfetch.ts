@@ -1,6 +1,5 @@
 import z from "zod"
 import { Cause, Effect, Exit, Option } from "effect"
-import { mergeDeep, pipe } from "remeda"
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import * as Tool from "./tool"
 import * as HostedFetch from "./webfetch-hosted/hosted"
@@ -9,8 +8,8 @@ import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { Config } from "@/config"
 import { Permission } from "@/permission"
-import { Provider, ProviderTransform } from "@/provider"
-import { ModelID, ProviderID } from "@/provider/schema"
+import { Provider } from "@/provider"
+import { prepareWebModel } from "./web-model"
 import { Log } from "@/util"
 import { isImageAttachment } from "@/util/media"
 
@@ -52,19 +51,7 @@ export const WebFetchTool = Tool.define(
       const ref = `${entry.providerID}/${entry.modelID}`
       if (!provider) return { ref, reason: "no provider service" }
       const resolved = yield* Effect.exit(
-        Effect.gen(function* () {
-          const model = yield* provider.getModel(ProviderID.make(entry.providerID), ModelID.make(entry.modelID))
-          const variant = entry.variant ? model.variants?.[entry.variant] : {}
-          if (!variant || !HostedFetch.kindFor(model.api.npm)) return undefined
-          const info = yield* provider.getProvider(model.providerID)
-          const language = yield* provider.getLanguage(model)
-          const options = pipe(
-            ProviderTransform.options({ model, sessionID: ctx.sessionID, providerOptions: info.options }),
-            mergeDeep(model.options),
-            mergeDeep(variant),
-          )
-          return { model, language, providerOptions: ProviderTransform.providerOptions(model, options) }
-        }),
+        prepareWebModel(provider, entry, ctx.sessionID, (npm) => !!HostedFetch.kindFor(npm)),
       )
       if (Exit.isFailure(resolved) || !resolved.value) {
         log.warn("skipping webfetch hosted entry", { ref, variant: entry.variant })

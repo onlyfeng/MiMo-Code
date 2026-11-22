@@ -18,7 +18,7 @@ import type { SessionID } from "./schema"
 import type { ModelMessage, Tool as AITool } from "ai"
 import type { Permission } from "../permission"
 import type { Provider } from "../provider"
-import { resolveHarnessMode, type HarnessMode } from "../tool/gpt"
+import { usesCodexMode, type HarnessMode } from "../tool/gpt"
 
 /** Decisions that choose the request harness and tool membership. No credentials. */
 export const prefixModelIdentity = (model: Provider.Model, harness?: HarnessMode) =>
@@ -29,13 +29,7 @@ export const prefixModelIdentity = (model: Provider.Model, harness?: HarnessMode
     model.api.npm,
     model.family ?? null,
     model.harness_model ?? null,
-    resolveHarnessMode({
-      modelID: model.id,
-      modelAPIID: model.api.id,
-      modelFamily: model.family,
-      harnessModel: model.harness_model,
-      harness,
-    }),
+    usesCodexMode(harness) ? "codex" : "default",
   ])
 
 export interface PrefixCaptureResult {
@@ -71,23 +65,3 @@ export type PrefixCaptureFn = (input: {
 }) => Effect.Effect<PrefixCaptureResult, never>
 
 export const prefixCaptureRef: { current: PrefixCaptureFn | undefined } = { current: undefined }
-
-const live: PrefixCaptureFn[] = []
-
-/**
- * Make `capture` the process's captor until the returned function runs.
- *
- * A process can hold several SessionPrompt layers at once (a test builds its
- * own beside the process-wide AppRuntime). Disposing one gives the slot back to
- * the most recent captor still live, never to one already disposed, instead of
- * clearing it under the others.
- */
-export function registerPrefixCapture(capture: PrefixCaptureFn): () => void {
-  live.push(capture)
-  prefixCaptureRef.current = capture
-  return () => {
-    const index = live.lastIndexOf(capture)
-    if (index !== -1) live.splice(index, 1)
-    if (prefixCaptureRef.current === capture) prefixCaptureRef.current = live.at(-1)
-  }
-}

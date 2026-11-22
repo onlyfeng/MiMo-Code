@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { init } from "#db"
 import { Global } from "@/global"
@@ -40,15 +40,6 @@ function remove(file: string) {
       rmSync(target, { force: true })
     } catch {}
   }
-}
-
-function busy(error: unknown) {
-  if (!(error instanceof Error)) return false
-  // bun:sqlite reports `code`/`errno`, node:sqlite reports `errcode`.
-  const { code, errno, errcode } = error as Error & Partial<Record<"code" | "errno" | "errcode", unknown>>
-  return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED" ||
-    errno === 5 || errno === 6 || errcode === 5 || errcode === 6 ||
-    /database (table )?is locked/i.test(error.message)
 }
 
 const COORDINATION = "coordination.db"
@@ -119,7 +110,7 @@ export function isAlive(instanceID: string, dir = directory()): boolean {
   if (!ID.test(instanceID)) return false
   const file = lockFile(dir, instanceID)
   const first = probe(file)
-  if (first !== "free") return first === "held"
+  if (first !== "free") return first === "unavailable"
   // Free outside the coordination lock may mean "still starting": look again
   // under it, after any starter has locked its file.
   try {
@@ -128,29 +119,30 @@ export function isAlive(instanceID: string, dir = directory()): boolean {
       // The id is random per process and never reused, so no live process can
       // still want this file once its lock is free here.
       if (again === "free") remove(file)
-      return again === "held"
+      return again === "unavailable"
     })
-  } catch (error) {
-    // Never declare a process dead on doubt.
-    if (busy(error)) return true
-    throw error
+  } catch {
+    // Coordination failed, so the first observation cannot authorize takeover.
+    return true
   }
 }
 
-function probe(file: string): "held" | "free" | "missing" {
-  if (!existsSync(file)) return "missing"
-  let client: Client | undefined
+function probe(file: string): "unavailable" | "free" | "missing" {
   try {
-    client = init(file).$client
-    client.exec("PRAGMA busy_timeout = 0")
-    client.exec("BEGIN EXCLUSIVE")
-    client.exec("ROLLBACK")
-  } catch (error) {
-    if (busy(error)) return "held"
-  } finally {
-    client?.close()
+    if (!statSync(file, { throwIfNoEntry: false })) return "missing"
+    const client = init(file).$client
+    try {
+      client.exec("PRAGMA busy_timeout = 0")
+      client.exec("BEGIN EXCLUSIVE")
+      client.exec("ROLLBACK")
+    } finally {
+      client.close()
+    }
+    return "free"
+  } catch {
+    // A live lock and an I/O error both leave the owner in place.
+    return "unavailable"
   }
-  return "free"
 }
 
 /** Remove lock files left by processes that are gone. */

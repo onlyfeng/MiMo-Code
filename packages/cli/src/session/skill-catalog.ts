@@ -150,12 +150,8 @@ export function diffSkillCatalog(input: {
 // DC-CONTEXT-001: compat capped that catalog at 50 KiB, so a large block ends
 // at the cap's truncation marker instead of its closing tag. The block stops at
 // whichever terminator comes first.
-const LEGACY_CATALOG_END =
-  "<\\/available_skills>|\\n\\n\\.\\.\\. \\d+ bytes of available skills truncated before model injection \\.\\.\\."
-const LEGACY_SYSTEM_CATALOG = new RegExp(
-  `(?:\\n\\n)?Skills available in this session:\\n(?:<available_skills>(?:(?!${LEGACY_CATALOG_END})[\\s\\S])*(?:${LEGACY_CATALOG_END})|No skills are currently available\\.)`,
-  "g",
-)
+const LEGACY_SYSTEM_CATALOG =
+  /(?:\n\n)?Skills available in this session:\n(?:<available_skills>[\s\S]*?(?:<\/available_skills>|\n\n\.\.\. \d+ bytes of available skills truncated before model injection \.\.\.)|No skills are currently available\.)/g
 
 /**
  * Remove legacy catalog blocks from a frozen system prompt. Blocks that the
