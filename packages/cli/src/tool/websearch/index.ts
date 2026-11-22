@@ -1,14 +1,13 @@
 import z from "zod"
 import { Effect, Exit } from "effect"
 import { HttpClient } from "effect/unstable/http"
-import { mergeDeep, pipe } from "remeda"
 import * as Tool from "../tool"
 import * as McpExa from "../mcp-exa"
 import * as NativeWebSearch from "./native"
 import * as WebSearchCodex from "./codex"
 import { Config } from "@/config"
-import { Provider, ProviderTransform } from "@/provider"
-import { ModelID, ProviderID } from "@/provider/schema"
+import { Provider } from "@/provider"
+import { prepareWebModel } from "../web-model"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util"
 import DESCRIPTION from "./websearch.txt"
@@ -65,19 +64,7 @@ export const WebSearchTool = Tool.define(
     ) {
       const ref = `${entry.providerID}/${entry.modelID}`
       const resolved = yield* Effect.exit(
-        Effect.gen(function* () {
-          const model = yield* provider.getModel(ProviderID.make(entry.providerID), ModelID.make(entry.modelID))
-          const variant = entry.variant ? model.variants?.[entry.variant] : {}
-          if (model.api.npm !== "@ai-sdk/openai" || !variant) return undefined
-          const info = yield* provider.getProvider(model.providerID)
-          const language = yield* provider.getLanguage(model)
-          const options = pipe(
-            ProviderTransform.options({ model, sessionID: ctx.sessionID, providerOptions: info.options }),
-            mergeDeep(model.options),
-            mergeDeep(variant),
-          )
-          return { model, language, providerOptions: ProviderTransform.providerOptions(model, options) }
-        }),
+        prepareWebModel(provider, entry, ctx.sessionID, (npm) => npm === "@ai-sdk/openai"),
       )
       if (Exit.isFailure(resolved) || !resolved.value) {
         log.warn("skipping websearch fallback entry", { ref, variant: entry.variant })

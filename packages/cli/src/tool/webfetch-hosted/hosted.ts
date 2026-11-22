@@ -7,8 +7,9 @@
 import { generateText, jsonSchema, type ContentPart, type Tool, type ToolSet } from "ai"
 import type { LanguageModelV3, SharedV3ProviderOptions } from "@ai-sdk/provider"
 import type { Config } from "@/config"
+import { parseWebModelRef, type WebModelEntry } from "../web-model"
 
-export type Entry = { providerID: string; modelID: string; variant?: string; maxContentTokens?: number }
+export type Entry = WebModelEntry & { maxContentTokens?: number }
 
 /** `text` is the fetched page; `digest` is the model's account of it. */
 export type Kind = "text" | "digest"
@@ -19,16 +20,10 @@ type Settings = Config.Info["webfetch"]
 
 export const DEFAULT_MAX_CONTENT_TOKENS = 30_000
 
-function parseRef(ref: string): Pick<Entry, "providerID" | "modelID"> | undefined {
-  const index = ref.indexOf("/")
-  if (index <= 0 || index === ref.length - 1) return undefined
-  return { providerID: ref.slice(0, index), modelID: ref.slice(index + 1) }
-}
-
 /** Hosted fetch models in configured order; malformed refs are dropped. */
 export function entries(settings: Settings): Entry[] {
   return (settings?.hosted ?? []).flatMap((item) => {
-    const ref = parseRef(typeof item === "string" ? item : item.model)
+    const ref = parseWebModelRef(typeof item === "string" ? item : item.model)
     if (!ref) return []
     if (typeof item === "string") return [ref]
     return [

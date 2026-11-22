@@ -4,6 +4,7 @@
 import { jsonSchema, type Tool } from "ai"
 import type { LanguageModelV3Prompt, LanguageModelV3ToolResultOutput } from "@ai-sdk/provider"
 import type { Config } from "@/config"
+import { parseWebModelRef, type WebModelEntry } from "../web-model"
 import type { Permission } from "@/permission"
 import type { Provider } from "@/provider"
 import { Log, Wildcard } from "@/util"
@@ -19,7 +20,7 @@ type Settings = Config.Info["websearch"]
 
 export type Route = { replay: "native" | "text" }
 
-export type FallbackEntry = { providerID: string; modelID: string; variant?: string }
+export type FallbackEntry = WebModelEntry
 
 function entry(value: boolean | { replay?: "native" | "text" }): Route | undefined {
   if (value === false) return undefined
@@ -35,16 +36,10 @@ export function route(settings: Settings, model: Provider.Model): Route | undefi
   return value === undefined ? undefined : entry(value)
 }
 
-function parseRef(ref: string): Pick<FallbackEntry, "providerID" | "modelID"> | undefined {
-  const index = ref.indexOf("/")
-  if (index <= 0 || index === ref.length - 1) return undefined
-  return { providerID: ref.slice(0, index), modelID: ref.slice(index + 1) }
-}
-
 /** Standalone search models for the websearch tool, in configured order. */
 export function fallbackEntries(settings: Settings): FallbackEntry[] {
   return (settings?.fallback ?? []).flatMap((item) => {
-    const ref = parseRef(typeof item === "string" ? item : item.model)
+    const ref = parseWebModelRef(typeof item === "string" ? item : item.model)
     if (!ref) return []
     return typeof item !== "string" && item.variant ? [{ ...ref, variant: item.variant }] : [ref]
   })
