@@ -911,6 +911,8 @@ Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is 
 
 ## DC-ACTOR-002 — explicit subagent model variant
 
+- 2026-11-22 CI follow-up: upstream `c9c91d7b` (adopted 2026-11-13) offers exactly the reasoning levels a model declares. "an explicit model keeps the agent variant when it resolves to the agent model" and "an explicit variant outranks both the agent and parent variants" now declare the levels they select (`low`, and `medium`) on the fixture model; before, spawn dropped or rejected them, and both cases failed in CI. The owner's precedence is unchanged, and "an unsupported configured variant stays unset despite a supported parent variant" already asserts the declared-level rule.
+
 - Status: active
 - Canonical owner: `dev/compat` model-facing actor creation
 - Base: inherited main `fd04de73ced82599baac249e9cf96dfb55b9d778` supports
