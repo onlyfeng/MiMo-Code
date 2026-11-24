@@ -5660,3 +5660,17 @@ Compat `c813b0f05988b9cdb9d291d10ea29f17ae673eeb` inherits main `51c508648582e50
 - Validation: CLI typecheck, lint and the focused media, prompt, auth, native search and preflight matrices pass with the Windows fixture exceptions recorded in the shared review. GitHub rejected lint, typecheck and test dispatches with HTTP 422, including the test dispatch requesting Windows runtime.
 
 This superseded current-review block is retained as history. The 2026-11-22 propagation of `main` pull request #263 and upstream `2c76c13c` is recorded in [the shared sync record](upstream-sync-2026-11-22.md); compat runtime/test snapshot `671bb78490a76405f8213fc8724bb596a74f2695`.
+
+## 2026-11-22 brief session list and compat catalog propagation
+
+- Last reviewed: 2026-11-22. Audited `75e1ed0b3b6561796bdfeb36edcf091f9793f24d..2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`: upstream `128adcb7` through `main` pull request #263 and `2c76c13c` through this synchronization.
+
+- Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-22.md).
+
+- Starting main: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Starting compat: `7723f83da65184447892c4c81a1171e8ad4e5008`. Main runtime snapshot: `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`). Compat runtime snapshot: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`).
+
+- Result: inherit the user-turn skill catalog and the opt-in brief session list. DC-CONTEXT-001 keeps the 50 KiB catalog cap at the reminder renderer and strips capped system-tail catalogs from old frozen rows; its strict capped-v2 recognizer and the `skillCatalogInSystem` projection retire. Pin-winner selection follows `main` with compat's loaded-MCP tools hash and current-turn projection (DC-MODEL-001, DC-ACTOR-001). All other DC owners are unchanged.
+
+- Validation: CLI typecheck, lint and SDK regeneration pass. After Actions was restored, the first exact-SHA runs exposed the compat capture test's typecheck error and the fork-wide CI regressions described in [the shared record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored); pull request #265 carries the fixes and DC-ACTOR-002's fixture levels. Push CI on `17cfc99a` passed lint, typecheck and test, including Windows runtime (runs 44975311656, 44975311702, 44975311723).
+
+This superseded current-review block is retained as history. The 2026-11-24 propagation of upstream `81a37ab5` (MCP form elicitation) is recorded in [the shared sync record](upstream-sync-2026-11-24.md); compat runtime/test snapshot `b8236b3f83ac73d218fb561b38a679c2a94ecfd6`.

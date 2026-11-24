@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-22. Audited `75e1ed0b3b6561796bdfeb36edcf091f9793f24d..2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`: upstream `128adcb7` through `main` pull request #263 and `2c76c13c` through this synchronization.
+- Last reviewed: 2026-11-24. Audited `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb..81a37ab596e5ee4d086697df81731a06817e2237`: upstream pull request #2862 (MCP form elicitation, call association and elicitation records) through this synchronization.
 
-- Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-22.md).
+- Scope: C01–C04 (N=4). See [the shared synchronization record](upstream-sync-2026-11-24.md).
 
-- Starting main: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Starting compat: `7723f83da65184447892c4c81a1171e8ad4e5008`. Main runtime snapshot: `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`). Compat runtime snapshot: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`).
+- Starting main: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Starting compat: `7e8f7703c2b095eb4887c8627cd66de88ebc329e` (already containing that `main`). Main runtime snapshot: `20eb00ddaa626fe67dc06f632f9c389913515ed8`. Compat runtime snapshot: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6`.
 
-- Result: inherit the user-turn skill catalog and the opt-in brief session list. DC-CONTEXT-001 keeps the 50 KiB catalog cap at the reminder renderer and strips capped system-tail catalogs from old frozen rows; its strict capped-v2 recognizer and the `skillCatalogInSystem` projection retire. Pin-winner selection follows `main` with compat's loaded-MCP tools hash and current-turn projection (DC-MODEL-001, DC-ACTOR-001). All other DC owners are unchanged.
+- Result: inherit form-mode elicitation, call association, structured question replies and `elicitation` message parts through a clean merge. DC-CONTEXT-001's replay caps and current-turn split filter UI messages after conversion, where elicitation parts are already dropped, and the checkpoint rebuild copies only text and file parts, so elicitation records stay out of model requests. DC-NET-002 remote MCP reachability is unaffected. All other DC owners are unchanged.
 
-- Validation: CLI typecheck, lint and SDK regeneration pass. After Actions was restored, the first exact-SHA runs exposed the compat capture test's typecheck error and the fork-wide CI regressions described in [the shared record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored); pull request #265 carries the fixes and DC-ACTOR-002's fixture levels. Push CI on `17cfc99a` passed lint, typecheck and test, including Windows runtime (runs 44975311656, 44975311702, 44975311723).
+- Validation: root `bun typecheck` and SDK regeneration pass; root lint reports 0 errors. 110 focused files, including 35 compat-owned session, MCP, preflight and question suites: 1,773 pass, 0 fail on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-24.md#publication).
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
