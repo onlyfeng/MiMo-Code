@@ -248,8 +248,9 @@
     "tree-sitter-bash",
   ],
   "patchedDependencies": {
-    "quickjs-emscripten-core@0.32.0": "patches/quickjs-emscripten-core@0.32.0.patch",
     "solid-js@1.9.10": "patches/solid-js@1.9.10.patch",
+    "quickjs-emscripten-core@0.32.0": "patches/quickjs-emscripten-core@0.32.0.patch",
+    "@ai-sdk/google@3.0.73": "patches/@ai-sdk%2Fgoogle@3.0.73.patch",
     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
     "@opentui/core@0.1.101": "patches/@opentui%2Fcore@0.1.101.patch",
     "@npmcli/agent@4.0.2": "patches/@npmcli%2Fagent@4.0.2.patch",

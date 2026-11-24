@@ -1,0 +1,114 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 3c49515b63eb2fa380c7405142b22a44202d6e4a..62ab9e1b04f901bb36156bb5bfb21a767a82f0ac 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -17,7 +17,7 @@ declare const googleLanguageModelOptions: _ai_sdk_provider_utils.LazySchema<{
+     thinkingConfig?: {
+         thinkingBudget?: number | undefined;
+         includeThoughts?: boolean | undefined;
+-        thinkingLevel?: "minimal" | "low" | "medium" | "high" | undefined;
++        thinkingLevel?: "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+     } | undefined;
+     cachedContent?: string | undefined;
+     structuredOutputs?: boolean | undefined;
+@@ -289,7 +289,7 @@ declare const googleInteractionsLanguageModelOptions: _ai_sdk_provider_utils.Laz
+         visualization?: "auto" | "off" | null | undefined;
+         collaborativePlanning?: boolean | null | undefined;
+     } | null | undefined;
+-    thinkingLevel?: "minimal" | "low" | "medium" | "high" | null | undefined;
++    thinkingLevel?: "minimal" | "low" | "medium" | "high" | "xhigh" | null | undefined;
+     thinkingSummaries?: "auto" | "none" | null | undefined;
+     imageConfig?: {
+         aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9" | "1:8" | "8:1" | "1:4" | "4:1" | null | undefined;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 3c49515b63eb2fa380c7405142b22a44202d6e4a..62ab9e1b04f901bb36156bb5bfb21a767a82f0ac 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -17,7 +17,7 @@ declare const googleLanguageModelOptions: _ai_sdk_provider_utils.LazySchema<{
+     thinkingConfig?: {
+         thinkingBudget?: number | undefined;
+         includeThoughts?: boolean | undefined;
+-        thinkingLevel?: "minimal" | "low" | "medium" | "high" | undefined;
++        thinkingLevel?: "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
+     } | undefined;
+     cachedContent?: string | undefined;
+     structuredOutputs?: boolean | undefined;
+@@ -289,7 +289,7 @@ declare const googleInteractionsLanguageModelOptions: _ai_sdk_provider_utils.Laz
+         visualization?: "auto" | "off" | null | undefined;
+         collaborativePlanning?: boolean | null | undefined;
+     } | null | undefined;
+-    thinkingLevel?: "minimal" | "low" | "medium" | "high" | null | undefined;
++    thinkingLevel?: "minimal" | "low" | "medium" | "high" | "xhigh" | null | undefined;
+     thinkingSummaries?: "auto" | "none" | null | undefined;
+     imageConfig?: {
+         aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9" | "1:8" | "8:1" | "1:4" | "4:1" | null | undefined;
+diff --git a/dist/index.js b/dist/index.js
+index 546bf5509004510b023212d70b4c0875a24eb302..e665cf8f550a8e7532f04656075eb94f4e7bb082 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -718,7 +718,7 @@ var googleLanguageModelOptions = (0, import_provider_utils5.lazySchema)(
+         thinkingBudget: import_v44.z.number().optional(),
+         includeThoughts: import_v44.z.boolean().optional(),
+         // https://ai.google.dev/gemini-api/docs/gemini-3?thinking=high#thinking_level
+-        thinkingLevel: import_v44.z.enum(["minimal", "low", "medium", "high"]).optional()
++        thinkingLevel: import_v44.z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional()
+       }).optional(),
+       /**
+        * Optional.
+@@ -4428,7 +4428,7 @@ var googleInteractionsLanguageModelOptions = (0, import_provider_utils18.lazySch
+           collaborativePlanning: import_v416.z.boolean().nullish()
+         })
+       ]).nullish(),
+-      thinkingLevel: import_v416.z.enum(["minimal", "low", "medium", "high"]).nullish(),
++      thinkingLevel: import_v416.z.enum(["minimal", "low", "medium", "high", "xhigh"]).nullish(),
+       thinkingSummaries: import_v416.z.enum(["auto", "none"]).nullish(),
+       imageConfig: import_v416.z.object({
+         aspectRatio: import_v416.z.enum([
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 5c8c20cbbcd4d398523602dd80ae8c3fa10a84ea..f59fe040331e5660a390b0a51fca295c3965c974 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -727,7 +727,7 @@ var googleLanguageModelOptions = lazySchema4(
+         thinkingBudget: z4.number().optional(),
+         includeThoughts: z4.boolean().optional(),
+         // https://ai.google.dev/gemini-api/docs/gemini-3?thinking=high#thinking_level
+-        thinkingLevel: z4.enum(["minimal", "low", "medium", "high"]).optional()
++        thinkingLevel: z4.enum(["minimal", "low", "medium", "high", "xhigh"]).optional()
+       }).optional(),
+       /**
+        * Optional.
+@@ -4496,7 +4496,7 @@ var googleInteractionsLanguageModelOptions = lazySchema14(
+           collaborativePlanning: z16.boolean().nullish()
+         })
+       ]).nullish(),
+-      thinkingLevel: z16.enum(["minimal", "low", "medium", "high"]).nullish(),
++      thinkingLevel: z16.enum(["minimal", "low", "medium", "high", "xhigh"]).nullish(),
+       thinkingSummaries: z16.enum(["auto", "none"]).nullish(),
+       imageConfig: z16.object({
+         aspectRatio: z16.enum([
+diff --git a/dist/internal/index.js b/dist/internal/index.js
+index 947af6f4282f1bb9b46a76fdf199d7155600b550..1380068994d64bd9e1bd80218b3dc9a1bbb5296d 100644
+--- a/dist/internal/index.js
++++ b/dist/internal/index.js
+@@ -520,7 +520,7 @@ var googleLanguageModelOptions = (0, import_provider_utils3.lazySchema)(
+         thinkingBudget: import_v42.z.number().optional(),
+         includeThoughts: import_v42.z.boolean().optional(),
+         // https://ai.google.dev/gemini-api/docs/gemini-3?thinking=high#thinking_level
+-        thinkingLevel: import_v42.z.enum(["minimal", "low", "medium", "high"]).optional()
++        thinkingLevel: import_v42.z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional()
+       }).optional(),
+       /**
+        * Optional.
+diff --git a/dist/internal/index.mjs b/dist/internal/index.mjs
+index 28853288c1ff8f589448e7ddcddfd8ed36c4d995..ed68f5817dcf4dd6bfcbe4142f09b5065436c30c 100644
+--- a/dist/internal/index.mjs
++++ b/dist/internal/index.mjs
+@@ -510,7 +510,7 @@ var googleLanguageModelOptions = lazySchema2(
+         thinkingBudget: z2.number().optional(),
+         includeThoughts: z2.boolean().optional(),
+         // https://ai.google.dev/gemini-api/docs/gemini-3?thinking=high#thinking_level
+-        thinkingLevel: z2.enum(["minimal", "low", "medium", "high"]).optional()
++        thinkingLevel: z2.enum(["minimal", "low", "medium", "high", "xhigh"]).optional()
+       }).optional(),
+       /**
+        * Optional.
