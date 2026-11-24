@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-22
-- Upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`
-- Prior reviewed upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099`
-- Review completion: `main` adopts the opt-in brief view of the global session list (C02); C01, the live skill catalog, landed through pull request #263 and now also reaches `dev/compat`. No FD changes. After Actions was restored, pull request #264 fixed the CI regressions left by the 2026-11-13 synchronization and isolated `bus-integration` (FC-008). See [the synchronization record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).
-- Main behavior (runtime/tests): `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`)
-- Inherited compat behavior: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`)
+- Last reviewed: 2026-11-24
+- Upstream: `81a37ab596e5ee4d086697df81731a06817e2237`
+- Prior reviewed upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb` (2026-11-22)
+- Review completion: `main` adapts upstream's MCP form elicitation, call association and elicitation records (C01–C04). No FD contract changes; FD-006 gains a dated note that exec's MCP entries reach the elicitation recorder through the shared `executeMcp` wrapper without gaining authority. `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-24.md).
+- Main behavior (runtime/tests): `20eb00ddaa626fe67dc06f632f9c389913515ed8` (synchronization merge over pull request #268)
+- Inherited compat behavior: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6` (propagation merge over pull request #269)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Prior fork `dev/compat` tip: `7723f83da65184447892c4c81a1171e8ad4e5008`
+- Prior fork `main` tip: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Prior fork `dev/compat` tip: `7e8f7703c2b095eb4887c8627cd66de88ebc329e`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-22 brief session list and compat catalog propagation](upstream-sync-2026-11-22.md), C01–C02 (N=2).
+Latest reviewed synchronization is the [2026-11-24 MCP form elicitation](upstream-sync-2026-11-24.md), C01–C04 (N=4).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -561,6 +561,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   table has no reader of that argument and preserves its three used arguments.
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
+
+- 2026-11-24 synchronization: upstream `81a37ab5` passes the nested context's `messageID` and the session's `onMcpElicitation` recorder (read from `ctx.extra`) into exec's MCP calls. The passthrough is kept in `tool-script.ts`, but in the fork exec's MCP entries are `execMcpTools`, built on the same `executeMcp` wrapper in `session/prompt.ts` as direct and `mcp_tool_use` calls; that wrapper replaces `experimental_context` and itself supplies the assistant `messageID` and the recorder, so an elicitation raised inside a script is recorded and associated with the nested call id. The fork's nested pipeline (request-pinned pool, permission, hooks, settlement and closed intake) is unchanged; the recorder grants no tool or execution authority. See C03 in [the synchronization record](upstream-sync-2026-11-24.md).
 
 - 2026-10-28 synchronization: config-declared always-direct MCP tools join the top-level active set and remain available through exec, while excluded from deferred search/dispatch. The rejection condition retains GPT hidden direct calls and legacy frozen exceptions beside the new always-direct exception. Current permission, whitelist and frozen schema/membership checks still gate all paths. See C01 in [the sync record](upstream-sync-2026-10-28.md).
 
