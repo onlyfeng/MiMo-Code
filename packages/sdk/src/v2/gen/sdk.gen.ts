@@ -131,6 +131,7 @@ import type {
   PtyUpdateErrors,
   PtyUpdateResponses,
   QuestionAnswer,
+  QuestionElicitationReply,
   QuestionListResponses,
   QuestionNeverAskResponses,
   QuestionRejectErrors,
@@ -3751,6 +3752,9 @@ export class Question extends HeyApiClient {
       directory?: string
       workspace?: string
       answers?: Array<QuestionAnswer>
+      source?: string
+      reason?: string
+      elicitation?: QuestionElicitationReply
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3763,6 +3767,9 @@ export class Question extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "answers" },
+            { in: "body", key: "source" },
+            { in: "body", key: "reason" },
+            { in: "body", key: "elicitation" },
           ],
         },
       ],
