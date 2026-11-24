@@ -1243,11 +1243,14 @@ function anthropicEffort(model: Provider.Model, effort: string, display: boolean
   return { thinking: { type: "adaptive", ...(display ? { display: "summarized" } : {}) }, effort }
 }
 
-// Google thinkingLevel accepts only these values.
+// Google thinkingLevel values. Gemini 4 Neon and Hydrogen add `xhigh` (models.dev declares it per
+// model). The pinned @ai-sdk/google 3.0.73 is patched to accept it, as the SDK does from 3.0.146,
+// so only the direct Google SDKs send it; gateways fronting Gemini keep the four values below.
 const GOOGLE_EFFORTS = new Set(["minimal", "low", "medium", "high"])
+const GOOGLE_SDK_EFFORTS = new Set([...GOOGLE_EFFORTS, "xhigh"])
 
-function googleEffort(effort: string) {
-  if (!GOOGLE_EFFORTS.has(effort)) return undefined
+function googleEffort(effort: string, accepted: ReadonlySet<string> = GOOGLE_EFFORTS) {
+  if (!accepted.has(effort)) return undefined
   return { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } }
 }
 
@@ -1287,7 +1290,7 @@ function effortOptions(model: Provider.Model, effort: string): Record<string, an
 
     case "@ai-sdk/google":
     case "@ai-sdk/google-vertex":
-      return googleEffort(effort)
+      return googleEffort(effort, GOOGLE_SDK_EFFORTS)
 
     case "@ai-sdk/gateway": {
       // Gateway routes options to the upstream named by the model-id prefix, so each upstream gets its own shape.
