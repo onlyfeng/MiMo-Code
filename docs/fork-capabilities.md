@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-22
-- Upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb`
-- Prior reviewed upstream: `128adcb782a72ef3d10752ab9c14e4fdcb319099` (2026-11-21, recorded in [upstream-deviations.md](upstream-deviations.md) and its synchronization record; this header still named `75e1ed0b3b6561796bdfeb36edcf091f9793f24d`)
-- Review completion: `main` adopts the opt-in brief view of the global session list under FC-008's fixture convention and FC-035's full-view revert; `dev/compat` inherits FC-005's user-turn catalog from pull request #263. After Actions was restored, pull request #264 fixed the CI regressions left by the 2026-11-13 synchronization and isolated `bus-integration` (FC-008). See [the synchronization record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored).
-- Main behavior (runtime/tests): `e641c74d415658d580118606a023f84427b55b1e` (pull request #264 over the synchronization snapshot `da9e883f6ecf9c1dbfde19d4e4161e1065124f05`)
-- Inherited compat behavior: `17cfc99a3243b83599ffa7c31278440fb73144e4` (pull request #265 over `671bb78490a76405f8213fc8724bb596a74f2695`)
+- Last reviewed: 2026-11-24
+- Upstream: `81a37ab596e5ee4d086697df81731a06817e2237`
+- Prior reviewed upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb` (2026-11-22)
+- Review completion: `main` adapts upstream's MCP form elicitation, call association and elicitation records (C01–C04): the Question lifecycle keeps POLICY-01 (FC-008 note) while replies carry the whole `Replied` payload, and the shared `executeMcp` wrapper records and associates every MCP entry (FC-004, FD-006 notes). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-24.md).
+- Main behavior (runtime/tests): `20eb00ddaa626fe67dc06f632f9c389913515ed8` (synchronization merge over pull request #268)
+- Inherited compat behavior: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6` (propagation merge over pull request #269)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `6a3c8173b57826139ecaaae00d3021c945a8310e`. Prior fork `dev/compat` tip: `7723f83da65184447892c4c81a1171e8ad4e5008`
+- Prior fork `main` tip: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Prior fork `dev/compat` tip: `7e8f7703c2b095eb4887c8627cd66de88ebc329e`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-22 brief session list and compat catalog propagation](upstream-sync-2026-11-22.md), C01–C02 (N=2).
+Latest reviewed synchronization is the [2026-11-24 MCP form elicitation](upstream-sync-2026-11-24.md), C01–C04 (N=4).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -1231,6 +1231,8 @@ own source list remains the complete watch surface.
 
 ## FC-004 — MCP configuration and connection lifecycle
 
+- 2026-11-24 synchronization: upstream `81a37ab5` adds form-mode elicitation (`mcp/elicitation-form.ts`) and associates server requests with the originating call. `convertMcpTool` adds the call id to the turn-lifecycle `_meta` of `tools/call` and passes the call, turn and message ids and an optional recorder to `McpElicitation.beginCall`; a request that matches no call or several calls is rejected with -32602. The request-authorized `executeMcp` wrapper in `session/prompt.ts`, shared by direct calls, `mcp_tool_use` dispatch and exec's `execMcpTools`, supplies the assistant `messageID` and the session's elicitation recorder beside the fork's progress presentation. Pending Claude imports, `auto_connect`/`enabled` precedence, URL validation and request isolation are unchanged. Evidence: `test/mcp/elicitation.test.ts`, `test/mcp/elicitation-form.test.ts`, `test/mcp/lifecycle.test.ts`. See C02–C03 in [the synchronization record](upstream-sync-2026-11-24.md).
+
 - 2026-11-04 synchronization: upstream `bfd5a2f4` reverses the 2026-10-31 execution-source filter. MCP/LSP/formatter and Claude imports again use ordinary configuration sources; `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS` remains a plugin-only boundary and `config/host.ts` is removed. The native control-overrides argument, pending defaults and explicit `auto_connect`/`enabled` precedence remain. FD-013 owns the retained source/persistence deviation: shared config loading retains fresh TOML parsing and models-only refresh without migration writes; `Config.update` retains raw stored JSONC validation and literal reference persistence. The updated positive project-source and persistence tests in `test/config/config.test.ts`, pending Claude import test and real Node plugin-host tests cover these decisions. The following 2026-10-31 paragraph is historical, not the current source policy.
 
 - 2026-10-31 synchronization: upstream `7bc7dc3a` adds the host execution policy (`config/host.ts`). On the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`, MCP sections from sources outside `MIMOCODE_CONFIG_DIR` and host-injected content are dropped before merging, so their startup controls never reach the Claude import merge. `mergeClaudeMcp` keeps the fork's control-overrides argument and returns before reading a Claude file from a rejected source. A host-source `auto_connect: true` therefore cannot supply startup authority to a project `.claude.json` transport; the leftover transportless control is ignored. Ordinary Bun CLI loading, pending imports and `auto_connect`/`enabled` precedence are unchanged. Evidence: `test/mcp/claude-auto-connect.test.ts` (`host execution policy skips a project Claude import…`, which fails if the guard is removed), `test/mcp/project-config-execution.test.ts`, and the host-policy cases in `test/config/config.test.ts`.
@@ -1592,6 +1594,8 @@ own source list remains the complete watch surface.
   recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
+
+- 2026-11-24 synchronization: upstream `81a37ab5` splits `Question.ask` into an internal `raise` plus `askElicitation`, adds an optional `elicitation` request to questions, and lets a reply carry `source`, `reason` and a structured `elicitation` answer. The POLICY-01 Question lifecycle is unchanged: registration still refuses a closed generation inside the acquire/use/release lifetime, abort and release still go through `dismiss`, and `reply` stays uninterruptible and publishes `Replied` through the captured publisher before completing the waiter, which now receives the whole `Replied` payload instead of the answers alone. `ask` still resolves with the answers. Removing the payload fields fails two cases of `test/mcp/elicitation.test.ts` ("form choices are answered, exposed on the question and recorded", "structured replies are validated against the schema"); `test/question/lifecycle.test.ts`, `test/question/question.test.ts` and `test/cli/tui/question-lifecycle.test.tsx` pass. See C01 in [the synchronization record](upstream-sync-2026-11-24.md).
 
 - 2026-11-22 test home isolation: Bun caches `os.homedir()` at process start, so the HOME set by `test/preload.ts` never reached it. Instead, about 30 production call sites read the developer's real home: `instruction.ts` put the real `~/.claude/CLAUDE.md` into every test system prompt. Two `prompt-skill-command-multi`/`prompt-effect` cases failed locally because of it, and CI runners have no such file. The preload now also points `os.homedir()` at the isolated home. `test/fixture/fixture-root.test.ts` "os.homedir() follows the preload's isolated HOME" fails without it. Limit: a named `import { homedir }` keeps Bun's original binding; only `cron/loop-file.ts` (`~/loop.md`) uses one.
 - 2026-11-22 stall visibility: `test/lib/effect.ts` reports the first bounded flush that misses its 1-second budget in each process, as a GitHub `::warning::` annotation in Actions. A stalled shared log queue therefore appears as a warning rather than only as later tests running a second slower. FC-054 bounds the stall itself.
