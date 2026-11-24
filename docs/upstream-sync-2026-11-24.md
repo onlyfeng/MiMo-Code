@@ -79,4 +79,21 @@ below.
 
 ## Publication
 
-Pending.
+Both branches were published by direct push, as for the previous
+synchronization. The first `main` push was declined by GitHub's email privacy
+check for the commit author address; after the account owner turned off
+"Keep my email addresses private" the same commits were pushed unchanged.
+
+| Branch | Push | Exact-SHA push CI | Result |
+| --- | --- | --- | --- |
+| `main` | `27bc6691..13b13d6f` (`20eb00dd` runtime, `13b13d6f` record) | lint 45369897390, typecheck 45369897464, test 45369897222 on `13b13d6f10effc0828e3353d58c58cc163fe1024` | All success; `windows-runtime` is skipped on `main` by design. |
+| `dev/compat` | `7e8f7703..dd3c42fe` (`b8236b3f` runtime, record merges) | lint 45369994422, typecheck 45369994335, test 45369994460 on `dd3c42fe53caa89d639053e8b16eecb1b969d25a` | All success, including `windows-runtime`. |
+
+Ancestry: upstream `81a37ab5` is an ancestor of `main` `13b13d6f`, which is an
+ancestor of `dev/compat` `dd3c42fe`; upstream had not advanced when the tips
+were rechecked after CI.
+
+The commit that adds this section, and its merge into `dev/compat`, change only
+`docs/` and start no workflow. Their trees outside `docs/` equal `13b13d6f` and
+`dd3c42fe` respectively (`git diff --quiet <ancestor> <tip> -- .
+':(exclude)docs'`), so the runs above are their CI evidence.
