@@ -3716,6 +3716,33 @@ describe("ProviderTransform.variants", () => {
     }
   })
 
+  // Gemini 4 Neon and Hydrogen declare xhigh; the patched @ai-sdk/google accepts it, gateways do not.
+  test("direct Google SDKs offer a declared xhigh, gateways fronting Gemini drop it", () => {
+    for (const npm of ["@ai-sdk/google", "@ai-sdk/google-vertex"]) {
+      expect(ProviderTransform.variants(model(npm, ["low", "medium", "high", "xhigh"]))).toEqual({
+        low: { thinkingConfig: { includeThoughts: true, thinkingLevel: "low" } },
+        medium: { thinkingConfig: { includeThoughts: true, thinkingLevel: "medium" } },
+        high: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } },
+        xhigh: { thinkingConfig: { includeThoughts: true, thinkingLevel: "xhigh" } },
+      })
+      // A level the model does not declare is never added.
+      expect(Object.keys(ProviderTransform.variants(model(npm, ["low", "medium", "high"])))).toEqual([
+        "low",
+        "medium",
+        "high",
+      ])
+      expect(Object.keys(ProviderTransform.variants(model(npm, ["high", "max"])))).toEqual(["high"])
+    }
+    expect(
+      Object.keys(ProviderTransform.variants(model("@ai-sdk/gateway", ["high", "xhigh"], { apiID: "google/test-model" }))),
+    ).toEqual(["high"])
+    expect(
+      Object.keys(
+        ProviderTransform.variants(model("@jerome-benoit/sap-ai-provider-v2", ["high", "xhigh"], { apiID: "gemini-test" })),
+      ),
+    ).toEqual(["high"])
+  })
+
   test("Gateway picks the shape of the upstream named by the model-id prefix", () => {
     const npm = "@ai-sdk/gateway"
     expect(ProviderTransform.variants(model(npm, ["high"], { apiID: "anthropic/test-model" }))).toEqual({

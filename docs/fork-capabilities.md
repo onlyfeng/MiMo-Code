@@ -31,7 +31,7 @@ authority.
 the runtime/test tree the last upstream review covered; bundled guidance has a
 separate content snapshot. Pure registry/history commits advance neither
 reference, and neither do fork pull requests merged between synchronizations
-(FC-044 through FC-054 and later corrections to existing entries): each such
+(FC-044 through FC-055 and later corrections to existing entries): each such
 entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
@@ -98,6 +98,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-052 | Build provenance: `MIMOCODE_BUILD` define from the build scripts, `build=` on the startup log line       | Fork addition to upstream build defines and startup log          | Tie a running process to the commit it was built from after the binary is rebuilt        |
 | FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
 | FC-054 | Log sink writes, opens and closes in `util/log.ts` | Fork hardening of the upstream log queue | A sink that stops answering is abandoned after `writeTimeout`; the queue, flush and shutdown never wait on it forever |
+| FC-055 | `@ai-sdk/google` 3.0.73 `thinkingLevel` patch and `GOOGLE_SDK_EFFORTS` in `provider/transform.ts` | Fork patch of the dependency upstream pins unpatched | Send a declared Gemini `xhigh` through the direct Google SDKs; gateways fronting Gemini keep four levels; retire when upstream pins `@ai-sdk/google` >= 3.0.146 and allows `xhigh` |
 
 Grouped sections: [Actor and inbox](#actor-and-inbox) holds FC-001, FC-024, FC-031, FC-037, FC-038 and FC-043; [Checkpoint writer and ladder](#checkpoint-writer-and-ladder) holds FC-002, FC-021, FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047. Every other entry keeps its own section in numeric order. Retired identifiers FC-003 (2026-09-15) and FC-018 (2026-09-24) are not reused; their entries moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization).
 
@@ -3696,3 +3697,45 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 - Exit condition: retire when upstream bounds the sink, or when Bun's file
   stream is shown to deliver every callback, demonstrated by shard-level CI
   with the bound removed and `bus-integration` back in its hash shard.
+
+## FC-055 — a declared Gemini `xhigh` thinking level reaches the request
+
+- Status: active
+- Canonical owner: fork `main` — `patches/@ai-sdk%2Fgoogle@3.0.73.patch` with its
+  `patchedDependencies` entry, and `GOOGLE_SDK_EFFORTS` / `googleEffort` in
+  `packages/cli/src/provider/transform.ts`
+- Base: upstream pins `@ai-sdk/google` 3.0.73, whose provider-options schema
+  accepts `thinkingConfig.thinkingLevel` only as `minimal`/`low`/`medium`/`high`,
+  and `googleEffort` drops every other level. models.dev declares
+  `low`/`medium`/`high`/`xhigh` for Gemini 4 Neon and Hydrogen (Carbon and Argon
+  stop at `high`), so their `xhigh` variant was silently missing, and an `xhigh`
+  written in config failed with "invalid google provider options" before any
+  request.
+- Observable contract: the patch adds `xhigh` to the two `thinkingLevel` enums
+  (Generate Content and Interactions options) in every `dist` build and type
+  declaration, exactly as the SDK's own changeset `271ca50` does from 3.0.146;
+  nothing else in the adapter changes. `@ai-sdk/google-vertex` depends on the
+  same 3.0.73 install, so both direct SDKs use `GOOGLE_SDK_EFFORTS` and offer a
+  model's declared `xhigh`; a level the model does not declare is still never
+  added. `@ai-sdk/gateway` and the SAP provider keep the four-level set, because
+  their upstream schemas are not verified to accept `xhigh`; GitHub Copilot sends
+  no Gemini effort at all, as before.
+- Upstream relationship: fork patch of a dependency upstream ships unpatched;
+  `dev/compat` inherits it.
+- Watch surfaces: the `patchedDependencies` entry and `bun.lock`, any
+  `@ai-sdk/google` or `@ai-sdk/google-vertex` version change, and `googleEffort`,
+  `GOOGLE_EFFORTS` and `GOOGLE_SDK_EFFORTS` in `transform.ts`.
+- Tests/evidence: `packages/cli/test/provider/google-thinking-level-wire.test.ts`
+  drives the real adapter with the provider options `ProviderTransform` produces
+  and reads the request body: a declared and a configured `xhigh` reach
+  `generationConfig.thinkingConfig`, while `max` is still rejected. With the
+  installed enum reverted, the two `xhigh` cases fail on the thrown validation
+  error. `test/provider/transform.test.ts` "direct Google SDKs offer a declared
+  xhigh, gateways fronting Gemini drop it" fails when `googleEffort` uses the
+  four-level set for the direct SDKs. A fresh `bun ci` reapplies the patch.
+  On 2026-11-24 `mimo run` from this source with `--variant xhigh` against a
+  Gemini 4 Neon `/v1beta` gateway sent `thinkingLevel: "xhigh"` on both turns of
+  a tool round trip, where the installed pre-patch binary stopped at "invalid
+  google provider options".
+- Exit condition: retire the patch and `GOOGLE_SDK_EFFORTS` when upstream pins
+  `@ai-sdk/google` >= 3.0.146 and lets `googleEffort` send `xhigh`.
