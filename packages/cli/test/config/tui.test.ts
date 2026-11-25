@@ -37,6 +37,21 @@ afterEach(async () => {
   await clear(true)
 })
 
+// DC-RESOURCE-001
+test("reads fps and drops a config whose fps is out of range", async () => {
+  await using valid = await tmpdir({ outsideGit: true, init: async (dir) => {
+    await Bun.write(path.join(dir, "tui.json"), JSON.stringify({ fps: 20 }))
+  } })
+  expect((await getTuiConfig(valid.path)).fps).toBe(20)
+
+  await using invalid = await tmpdir({ outsideGit: true, init: async (dir) => {
+    await Bun.write(path.join(dir, "tui.json"), JSON.stringify({ fps: 0, theme: "ignored" }))
+  } })
+  const config = await getTuiConfig(invalid.path)
+  expect(config.fps).toBeUndefined()
+  expect(config.theme).toBeUndefined()
+})
+
 // engine-runtime [TP-R14-02]
 test("ignores cloud sharing shortcuts in existing TUI config", async () => {
   await using tmp = await tmpdir({ outsideGit: true, init: async (dir) => {

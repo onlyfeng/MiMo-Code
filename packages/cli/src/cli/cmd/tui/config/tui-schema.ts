@@ -24,6 +24,13 @@ export const TuiOptions = z.object({
     .optional()
     .describe("Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column"),
   mouse: z.boolean().optional().describe("Enable or disable mouse capture (default: true)"),
+  fps: z
+    .number()
+    .int()
+    .min(1)
+    .max(240)
+    .optional()
+    .describe("Maximum TUI redraws per second (default: 60). Lower values cut CPU use when many sessions run at once."),
 })
 
 export const TuiInfo = z

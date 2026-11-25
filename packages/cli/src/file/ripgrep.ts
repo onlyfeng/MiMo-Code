@@ -3,12 +3,13 @@ import path from "path"
 import { childProcessEnv } from "@/util/child-process-env"
 import z from "zod"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
-import { Cause, Context, Effect, Fiber, Layer, Queue, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, Layer, Option, Queue, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 
+import { Config } from "@/config"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
 import { Log } from "@/util"
@@ -249,8 +250,39 @@ function fail(queue: Queue.Queue<string, PlatformError | Error | Cause.Done>, er
   Queue.failCauseUnsafe(queue, Cause.fail(err))
 }
 
-function filesArgs(input: FilesInput) {
-  const args = ["--no-config", "--files", "--glob=!.git/*"]
+// DC-RESOURCE-001: optional `ripgrep` config bounding each process. Many parallel
+// readers on a large tree can saturate the disk, so `threads` caps rg's walker and
+// `timeout` stops a run that will not finish. serviceOption reads Config from the
+// caller's runtime without adding it to the requirement set; without one (unit
+// tests, detached fibers) ripgrep keeps its own defaults and no time limit.
+type Limits = { readonly threads?: number; readonly timeout?: number }
+
+const limits: Effect.Effect<Limits> = Effect.gen(function* () {
+  const svc = yield* Effect.serviceOption(Config.Service)
+  if (Option.isNone(svc)) return {}
+  return (yield* svc.value.get()).ripgrep ?? {}
+})
+
+function threadArgs(limit: Limits) {
+  return limit.threads ? [`--threads=${limit.threads}`] : []
+}
+
+function timedOut(ms: number, cwd: string) {
+  const err = new Error(
+    `ripgrep stopped after ${ms}ms in '${cwd}' (ripgrep.timeout). Narrow the search path or glob pattern.`,
+  )
+  err.name = "RipgrepTimeoutError"
+  return err
+}
+
+function withTimeout<A, E, R>(effect: Effect.Effect<A, E, R>, limit: Limits, cwd: string) {
+  const ms = limit.timeout
+  if (!ms) return effect
+  return effect.pipe(Effect.timeoutOrElse({ duration: `${ms} millis`, orElse: () => Effect.fail(timedOut(ms, cwd)) }))
+}
+
+function filesArgs(input: FilesInput, limit: Limits) {
+  const args = ["--no-config", "--files", "--glob=!.git/*", ...threadArgs(limit)]
   if (input.follow) args.push("--follow")
   if (input.hidden !== false) args.push("--hidden")
   if (input.hidden === false) args.push("--glob=!.*")
@@ -262,8 +294,8 @@ function filesArgs(input: FilesInput) {
   return args
 }
 
-function searchArgs(input: SearchInput) {
-  const args = ["--no-config", "--json", "--hidden", "--glob=!.git/*", "--no-messages"]
+function searchArgs(input: SearchInput, limit: Limits) {
+  const args = ["--no-config", "--json", "--hidden", "--glob=!.git/*", "--no-messages", ...threadArgs(limit)]
   if (input.follow) args.push("--follow")
   if (input.glob) {
     for (const glob of input.glob) args.push(`--glob=${glob}`)
@@ -476,7 +508,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                   Queue.endUnsafe(queue)
                   return
                 }
-                const handle = yield* spawner.spawn(yield* command(input.cwd, filesArgs(input)))
+                const limit = yield* limits
+                const handle = yield* spawner.spawn(yield* command(input.cwd, filesArgs(input, limit)))
                 const stderr = yield* Stream.mkString(Stream.decodeText(handle.stderr)).pipe(Effect.forkScoped)
                 const stdout = yield* Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
@@ -484,7 +517,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                   Stream.runForEach((line) => Effect.sync(() => Queue.offerUnsafe(queue, clean(line)))),
                   Effect.forkScoped,
                 )
-                const code = yield* raceAbort(handle.exitCode, input.signal)
+                const code = yield* withTimeout(raceAbort(handle.exitCode, input.signal), limit, input.cwd)
                 yield* Fiber.join(stdout)
                 if (code === 0 || code === 1) {
                   Queue.endUnsafe(queue)
@@ -518,23 +551,29 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
                     INSTALL_RIPGREP_MESSAGE,
                 ),
               )
-            const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input)))
+            // The time limit covers the rg run only, not a ripgrep download above.
+            const limit = yield* limits
+            const handle = yield* spawner.spawn(yield* command(input.cwd, searchArgs(input, limit)))
 
-            const [items, stderr, code] = yield* Effect.all(
-              [
-                Stream.decodeText(handle.stdout).pipe(
-                  Stream.splitLines,
-                  Stream.filter((line) => line.length > 0),
-                  Stream.mapEffect(parse),
-                  Stream.filter((item): item is Match => item.type === "match"),
-                  Stream.map((item) => row(item.data)),
-                  Stream.runCollect,
-                  Effect.map((chunk) => [...chunk]),
-                ),
-                Stream.mkString(Stream.decodeText(handle.stderr)),
-                handle.exitCode,
-              ],
-              { concurrency: "unbounded" },
+            const [items, stderr, code] = yield* withTimeout(
+              Effect.all(
+                [
+                  Stream.decodeText(handle.stdout).pipe(
+                    Stream.splitLines,
+                    Stream.filter((line) => line.length > 0),
+                    Stream.mapEffect(parse),
+                    Stream.filter((item): item is Match => item.type === "match"),
+                    Stream.map((item) => row(item.data)),
+                    Stream.runCollect,
+                    Effect.map((chunk) => [...chunk]),
+                  ),
+                  Stream.mkString(Stream.decodeText(handle.stderr)),
+                  handle.exitCode,
+                ],
+                { concurrency: "unbounded" },
+              ),
+              limit,
+              input.cwd,
             )
 
             if (code !== 0 && code !== 1 && code !== 2) {
