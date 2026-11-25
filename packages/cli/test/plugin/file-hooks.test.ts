@@ -119,6 +119,60 @@ describe("plugin file hooks", () => {
     expect(out.system).toEqual(["v2"])
   })
 
+  // FC-056: artifacts load by file URL; these cases pin what a loader change could break.
+  test("keeps import.meta at the hook's own directory", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, ".mimocode", "hooks", "where.ts"),
+          [
+            'import path from "path"',
+            'import { fileURLToPath } from "url"',
+            "const where = path.basename(path.dirname(fileURLToPath(import.meta.url)))",
+            "export default {",
+            '  "experimental.chat.system.transform": async (_input, output) => {',
+            "    output.system.push(where)",
+            "  },",
+            "}",
+            "",
+          ].join("\n"),
+        )
+        await Bun.write(path.join(dir, "mimocode.json"), "{}")
+      },
+    })
+    const out = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => triggerTransform().pipe(Effect.provide(Plugin.defaultLayer), Effect.runPromise),
+    })
+    expect(out.system).toEqual(["hooks"])
+  })
+
+  test("loads a hook with asynchronous top-level await next to other hooks", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, ".mimocode", "hooks", "late.ts"),
+          [
+            'const marker = await new Promise<string>((resolve) => setTimeout(() => resolve("awaited"), 20))',
+            "export default {",
+            '  "experimental.chat.system.transform": async (_input, output) => {',
+            "    output.system.push(marker)",
+            "  },",
+            "}",
+            "",
+          ].join("\n"),
+        )
+        await Bun.write(path.join(dir, ".mimocode", "hooks", "greet.ts"), hookSource("sync"))
+        await Bun.write(path.join(dir, "mimocode.json"), "{}")
+      },
+    })
+    const out = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => triggerTransform().pipe(Effect.provide(Plugin.defaultLayer), Effect.runPromise),
+    })
+    expect(out.system.toSorted()).toEqual(["awaited", "sync"])
+  })
+
   test("detects newly added hook files", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
