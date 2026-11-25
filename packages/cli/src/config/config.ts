@@ -444,6 +444,21 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Web fetch: gateway-hosted fetch models tried around the direct fetch." }),
+  ripgrep: Schema.optional(
+    Schema.Struct({
+      threads: Schema.optional(PositiveInt).annotate({
+        description:
+          "Threads each ripgrep process may use (rg --threads). Unset lets ripgrep choose from the CPU count, up to 12.",
+      }),
+      timeout: Schema.optional(PositiveInt).annotate({
+        description:
+          "Milliseconds a ripgrep search or file listing may run before it is stopped with an error. Unset means no limit.",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Limits for the ripgrep processes behind grep, glob and file listing. Bounds parallel disk reads on large trees.",
+  }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

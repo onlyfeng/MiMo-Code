@@ -3196,6 +3196,19 @@ export type Config = {
      */
     first?: "local" | "hosted"
   }
+  /**
+   * Limits for the ripgrep processes behind grep, glob and file listing. Bounds parallel disk reads on large trees.
+   */
+  ripgrep?: {
+    /**
+     * Threads each ripgrep process may use (rg --threads). Unset lets ripgrep choose from the CPU count, up to 12.
+     */
+    threads?: number
+    /**
+     * Milliseconds a ripgrep search or file listing may run before it is stopped with an error. Unset means no limit.
+     */
+    timeout?: number
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**

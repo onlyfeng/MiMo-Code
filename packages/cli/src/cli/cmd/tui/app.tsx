@@ -68,6 +68,7 @@ import { Process } from "@/util"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
 import { TuiConfig } from "@/cli/cmd/tui/config/tui"
+import { frameRates } from "./util/frame-rate"
 import { createTuiApi, TuiPluginRuntime, type RouteMap } from "./plugin"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { isPlainTerminal, isWindowsTerminal } from "./util/terminal"
@@ -88,10 +89,11 @@ import { DialogAgreement, AGREEMENT_KEY, shouldShowAgreement } from "./component
 
 function rendererConfig(_config: TuiConfig.Info, plainTerminal: boolean): CliRendererConfig {
   const mouseEnabled = !plainTerminal && !Flag.MIMOCODE_DISABLE_MOUSE && (_config.mouse ?? true)
+  const { targetFps, maxFps } = frameRates(_config.fps, plainTerminal)
 
   return {
     externalOutputMode: "passthrough",
-    targetFps: plainTerminal ? 10 : 60,
+    targetFps,
     gatherStats: false,
     exitOnCtrlC: false,
     useKittyKeyboard: plainTerminal ? null : {},
@@ -101,13 +103,13 @@ function rendererConfig(_config: TuiConfig.Info, plainTerminal: boolean): CliRen
     useMouse: mouseEnabled,
     ...(plainTerminal
       ? {
-          maxFps: 15,
+          maxFps,
           screenMode: "main-screen" as const,
           useThread: false,
           backgroundColor: "transparent",
         }
       : {
-          maxFps: 60,
+          maxFps,
         }),
     consoleOptions: {
       keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
