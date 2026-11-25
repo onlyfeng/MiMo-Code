@@ -43,9 +43,53 @@ import { registerAdaptor } from "@/control-plane/adaptors"
 import type { WorkspaceAdaptor } from "@/control-plane/types"
 import { Glob } from "@mimo-ai/shared/util/glob"
 import fs from "fs"
+import os from "os"
 import path from "path"
+import { pathToFileURL } from "url"
+import { isRecord } from "@/util/record"
 
 const log = Log.create({ service: "plugin" })
+
+// FC-056: in a compiled Windows binary, an import() issued by the binary's
+// embedded code cannot see a file created in a directory it has already read
+// ("Cannot find module"), so every transpiled file hook failed to load from an
+// installed binary while `bun run` worked. An import() issued by a module on
+// disk sees the file. Hook artifacts are therefore imported through a one-line
+// loader module written once per process into a new directory, which the
+// embedded code has never read, so they keep their own path and import.meta.
+// require() is no alternative: in the running CLI it rejects every file as an
+// "async module". If the loader cannot be created, import directly.
+let diskImport: Promise<(url: string) => Promise<unknown>> | undefined
+
+function diskLoader() {
+  diskImport ??= (async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "mimocode-hook-loader-"))
+    try {
+      const file = path.join(dir, "load.mjs")
+      await Bun.write(file, "export default (url) => import(url)\n")
+      const mod: unknown = await import(pathToFileURL(file).href)
+      const load = isRecord(mod) ? mod.default : undefined
+      if (typeof load !== "function") throw new Error("file hook loader has no default export")
+      return (url: string): Promise<unknown> => load(url)
+    } finally {
+      fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })().catch((err) => {
+    diskImport = undefined
+    throw err
+  })
+  return diskImport
+}
+
+async function importFromDisk(url: string): Promise<Record<string, unknown>> {
+  const load = await diskLoader().catch((err) => {
+    log.warn("file hook loader unavailable, importing directly", { error: errorMessage(err) })
+    return (target: string): Promise<unknown> => import(target)
+  })
+  const mod = await load(url)
+  if (!isRecord(mod)) throw new Error(`file hook did not load as a module: ${url}`)
+  return mod
+}
 
 export const HookEvent = {
   Executed: BusEvent.define(
@@ -414,6 +458,7 @@ export const layer = Layer.effect(
             // avoids two pitfalls: (1) Bun's import() ignores query-string cache
             // busters so re-imports return stale modules, (2) require() transpiles
             // .ts in some contexts but not others (CI Linux edge case).
+            // FC-056: the artifact is imported through importFromDisk().
             const mod = yield* Effect.tryPromise({
               try: async () => {
                 const result = await Bun.build({
@@ -427,7 +472,7 @@ export const layer = Layer.effect(
                 const tmpFile = `${match}.${Date.now()}.mjs`
                 await Bun.write(tmpFile, blob)
                 try {
-                  return await import(tmpFile) as Record<string, unknown>
+                  return await importFromDisk(pathToFileURL(tmpFile).href)
                 } finally {
                   fs.promises.unlink(tmpFile).catch(() => {})
                 }
