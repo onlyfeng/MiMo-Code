@@ -15,10 +15,16 @@ const it = testEffect(
   Layer.mergeAll(CrossSpawnSpawner.defaultLayer, AppFileSystem.defaultLayer, Ripgrep.defaultLayer, Config.defaultLayer),
 )
 
+// Enough files that rg cannot finish inside a 1ms limit, even where the timer
+// fires late (Windows timers resolve to about 15ms).
+const FILES = 1000
+
 const seed = (dir: string) =>
   Effect.promise(async () => {
     await fs.mkdir(path.join(dir, "src", "nested"), { recursive: true })
-    for (let i = 0; i < 50; i++) await Bun.write(path.join(dir, "src", `file-${i}.txt`), `needle ${i}\n`)
+    await Promise.all(
+      Array.from({ length: FILES }, (_, i) => Bun.write(path.join(dir, "src", `file-${i}.txt`), `needle ${i}\n`)),
+    )
     await Bun.write(path.join(dir, "src", "nested", "deep.txt"), "needle deep\n")
   })
 
@@ -61,9 +67,9 @@ describe("ripgrep config limits", () => {
       Effect.gen(function* () {
         const rg = yield* Ripgrep.Service
         const found = yield* rg.search({ cwd: dir, pattern: "needle" })
-        expect(found.items).toHaveLength(51)
+        expect(found.items).toHaveLength(FILES + 1)
         const listed = yield* rg.files({ cwd: dir }).pipe(Stream.runCollect)
-        expect([...listed].filter((file) => file.endsWith(".txt"))).toHaveLength(51)
+        expect([...listed].filter((file) => file.endsWith(".txt"))).toHaveLength(FILES + 1)
       }),
     ),
   )
