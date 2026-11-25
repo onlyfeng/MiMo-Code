@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-24. Audited `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb..81a37ab596e5ee4d086697df81731a06817e2237`: upstream pull request #2862 (MCP form elicitation, call association and elicitation records) through this synchronization.
+- Last reviewed: 2026-11-25. Audited `81a37ab596e5ee4d086697df81731a06817e2237..c538fab349373356623acea5bb80defa7fc279c0`: upstream pull request #2863 (always-direct MCP tools in server status and reminders) through this synchronization, and compat pull request #272 (DC-RESOURCE-001) merged since the previous review.
 
-- Scope: C01–C04 (N=4). See [the shared synchronization record](upstream-sync-2026-11-24.md).
+- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-25.md).
 
-- Starting main: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Starting compat: `7e8f7703c2b095eb4887c8627cd66de88ebc329e` (already containing that `main`). Main runtime snapshot: `20eb00ddaa626fe67dc06f632f9c389913515ed8`. Compat runtime snapshot: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6`.
+- Starting main: `f1d3628423da4ebc3c9e5c3739f9b321d4bdbf10`. Starting compat: `2ce781c493580987723acbbfb7bc3c9addf43ec7` (already containing that `main`). Main runtime snapshot: `b9499a965e10f906f2a2ead5e0698e243cd0ce54`. Compat runtime snapshot: `c70dfa435437a0dd49a4d60aa5946d02cffb227c`.
 
-- Result: inherit form-mode elicitation, call association, structured question replies and `elicitation` message parts through a clean merge. DC-CONTEXT-001's replay caps and current-turn split filter UI messages after conversion, where elicitation parts are already dropped, and the checkpoint rebuild copies only text and file parts, so elicitation records stay out of model requests. DC-NET-002 remote MCP reachability is unaffected. All other DC owners are unchanged.
+- Result: inherit always-direct MCP tools in readiness, server reminders, the `mcp_tool_search` status and the `mcp_tool_use` rejection, with FC-004's replay validation of `directToolNames`, through a clean merge. Compat-owned `prompt.ts` hunks do not touch the readiness, reminder or dispatcher regions; `mcp-tool-search.ts` is identical to `main`. DC-RESOURCE-001's `ripgrep.ts` and TUI renderer surfaces are untouched by the incoming change. All DC owners are unchanged.
 
-- Validation: root `bun typecheck` and SDK regeneration pass; root lint reports 0 errors. 110 focused files, including 35 compat-owned session, MCP, preflight and question suites: 1,773 pass, 0 fail on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-24.md#publication).
+- Validation: root `bun typecheck` passes; root lint reports 0 errors. `test/tool/mcp-tool-search.test.ts`, `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts` and `test/session/codex-compact.test.ts`: 326 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-25.md#publication).
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 

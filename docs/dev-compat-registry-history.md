@@ -5674,3 +5674,17 @@ This superseded current-review block is retained as history. The 2026-11-22 prop
 - Validation: CLI typecheck, lint and SDK regeneration pass. After Actions was restored, the first exact-SHA runs exposed the compat capture test's typecheck error and the fork-wide CI regressions described in [the shared record](upstream-sync-2026-11-22.md#ci-after-actions-was-restored); pull request #265 carries the fixes and DC-ACTOR-002's fixture levels. Push CI on `17cfc99a` passed lint, typecheck and test, including Windows runtime (runs 44975311656, 44975311702, 44975311723).
 
 This superseded current-review block is retained as history. The 2026-11-24 propagation of upstream `81a37ab5` (MCP form elicitation) is recorded in [the shared sync record](upstream-sync-2026-11-24.md); compat runtime/test snapshot `b8236b3f83ac73d218fb561b38a679c2a94ecfd6`.
+
+## 2026-11-24 MCP form elicitation propagation
+
+- Last reviewed: 2026-11-24. Audited `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb..81a37ab596e5ee4d086697df81731a06817e2237`: upstream pull request #2862 (MCP form elicitation, call association and elicitation records) through this synchronization.
+
+- Scope: C01–C04 (N=4). See [the shared synchronization record](upstream-sync-2026-11-24.md).
+
+- Starting main: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Starting compat: `7e8f7703c2b095eb4887c8627cd66de88ebc329e` (already containing that `main`). Main runtime snapshot: `20eb00ddaa626fe67dc06f632f9c389913515ed8`. Compat runtime snapshot: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6`.
+
+- Result: inherit form-mode elicitation, call association, structured question replies and `elicitation` message parts through a clean merge. DC-CONTEXT-001's replay caps and current-turn split filter UI messages after conversion, where elicitation parts are already dropped, and the checkpoint rebuild copies only text and file parts, so elicitation records stay out of model requests. DC-NET-002 remote MCP reachability is unaffected. All other DC owners are unchanged.
+
+- Validation: root `bun typecheck` and SDK regeneration pass; root lint reports 0 errors. 110 focused files, including 35 compat-owned session, MCP, preflight and question suites: 1,773 pass, 0 fail on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-24.md#publication).
+
+This superseded current-review block is retained as history. The 2026-11-25 propagation of upstream `c538fab3` (always-direct MCP status) is recorded in [the shared sync record](upstream-sync-2026-11-25.md); compat runtime/test snapshot `c70dfa435437a0dd49a4d60aa5946d02cffb227c`.
