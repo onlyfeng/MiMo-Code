@@ -80,4 +80,19 @@ below.
 
 ## Publication
 
-Pending.
+Both branches were published by direct fast-forward push, as for the previous
+synchronization.
+
+| Branch | Push | Exact-SHA push CI | Result |
+| --- | --- | --- | --- |
+| `main` | `f1d36284..e6f77f18` (`b9499a96` runtime, `e6f77f18` record) | lint 45600578809, typecheck 45600578935, test 45600578725 on `e6f77f18a3280e9cd1d9dfd79389e5b4c72bd3d6` | All success; `windows-runtime` is skipped on `main` by design. |
+| `dev/compat` | `2ce781c4..a51745c4` (`c70dfa43` runtime, record merge and compat record) | lint 45600583957, typecheck 45600583967, test 45600583955 on `a51745c41c028e6ae84752836ce445c143420751` | All success, including `windows-runtime`. |
+
+Ancestry: upstream `c538fab3` is an ancestor of `main` `e6f77f18`, which is an
+ancestor of `dev/compat` `a51745c4`; upstream had not advanced when the tips
+were rechecked after CI.
+
+The commit that adds this section, and its merge into `dev/compat`, change only
+`docs/` and start no workflow. Their trees outside `docs/` equal `e6f77f18` and
+`a51745c4` respectively (`git diff --quiet <ancestor> <tip> -- .
+':(exclude)docs'`), so the runs above are their CI evidence.
