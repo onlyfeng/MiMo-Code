@@ -3642,3 +3642,7 @@ The review advances from `128adcb782a72ef3d10752ab9c14e4fdcb319099` (2026-11-21,
 ## 2026-11-24 MCP form elicitation
 
 The one-commit review advances from `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb` to `81a37ab596e5ee4d086697df81731a06817e2237` (upstream pull request #2862). C01–C04 adapt form-mode elicitation, call association, structured question replies and `elicitation` message parts on main `20eb00ddaa626fe67dc06f632f9c389913515ed8`; compat `b8236b3f83ac73d218fb561b38a679c2a94ecfd6` inherits them through a clean merge. FC-004, FC-008 (POLICY-01 Question lifecycle) and FD-006 gain dated notes; no entry changes its contract. See [the synchronization record](upstream-sync-2026-11-24.md).
+
+## 2026-11-25 always-direct MCP status
+
+The one-commit review advances from `81a37ab596e5ee4d086697df81731a06817e2237` to `c538fab349373356623acea5bb80defa7fc279c0` (upstream pull request #2863). C01–C03 adopt always-direct MCP tools in readiness, server reminders, the `mcp_tool_search` status and the `mcp_tool_use` rejection on main `b9499a965e10f906f2a2ead5e0698e243cd0ce54`, with FC-004's replay validation extended to the new `directToolNames` field; compat `c70dfa435437a0dd49a4d60aa5946d02cffb227c` inherits them through a clean merge. FC-004 gains a dated note; no entry changes its contract. See [the synchronization record](upstream-sync-2026-11-25.md).
