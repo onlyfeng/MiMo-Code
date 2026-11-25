@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-24
-- Upstream: `81a37ab596e5ee4d086697df81731a06817e2237`
-- Prior reviewed upstream: `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb` (2026-11-22)
-- Review completion: `main` adapts upstream's MCP form elicitation, call association and elicitation records (C01–C04): the Question lifecycle keeps POLICY-01 (FC-008 note) while replies carry the whole `Replied` payload, and the shared `executeMcp` wrapper records and associates every MCP entry (FC-004, FD-006 notes). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-24.md).
-- Main behavior (runtime/tests): `20eb00ddaa626fe67dc06f632f9c389913515ed8` (synchronization merge over pull request #268)
-- Inherited compat behavior: `b8236b3f83ac73d218fb561b38a679c2a94ecfd6` (propagation merge over pull request #269)
+- Last reviewed: 2026-11-25
+- Upstream: `c538fab349373356623acea5bb80defa7fc279c0`
+- Prior reviewed upstream: `81a37ab596e5ee4d086697df81731a06817e2237` (2026-11-24)
+- Review completion: `main` adopts upstream's always-direct MCP status and reminders (C01–C03) and validates the new `directToolNames` reminder field before replay (FC-004 note). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-25.md).
+- Main behavior (runtime/tests): `b9499a965e10f906f2a2ead5e0698e243cd0ce54` (synchronization merge over pull request #271)
+- Inherited compat behavior: `c70dfa435437a0dd49a4d60aa5946d02cffb227c` (propagation merge over pull request #272)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `27bc66918bddab241cf485ae82ad5710a9e4bb0f`. Prior fork `dev/compat` tip: `7e8f7703c2b095eb4887c8627cd66de88ebc329e`
+- Prior fork `main` tip: `f1d3628423da4ebc3c9e5c3739f9b321d4bdbf10`. Prior fork `dev/compat` tip: `2ce781c493580987723acbbfb7bc3c9addf43ec7`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-24 MCP form elicitation](upstream-sync-2026-11-24.md), C01–C04 (N=4).
+Latest reviewed synchronization is the [2026-11-25 always-direct MCP status](upstream-sync-2026-11-25.md), C01–C03 (N=3).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
@@ -1232,6 +1232,8 @@ own source list remains the complete watch surface.
   model.
 
 ## FC-004 — MCP configuration and connection lifecycle
+
+- 2026-11-25 synchronization: upstream `c538fab3` adds each connected server's request-exposed always-direct tools to readiness (`directTools`) and their names to server reminder metadata (`directToolNames`), which joins the fingerprint only when present and the removal diff of the next reminder. `announcedMcpReminders` validates `directToolNames` like `toolNames`, so a malformed historical value is skipped without erasing an earlier valid state instead of throwing in `mcpReminderMarker` or corrupting the removal list. Direct tools come from the same request-authorized set that exposes them top-level; readiness still grants no invocation authority. Evidence: `test/tool/mcp-tool-search.test.ts` ("malformed historical reminder metadata cannot erase valid state or break replay" fails without the check; "always-direct MCP tools in status and reminders"), `test/session/prompt-effect.test.ts`. See C01–C03 in [the synchronization record](upstream-sync-2026-11-25.md).
 
 - 2026-11-24 synchronization: upstream `81a37ab5` adds form-mode elicitation (`mcp/elicitation-form.ts`) and associates server requests with the originating call. `convertMcpTool` adds the call id to the turn-lifecycle `_meta` of `tools/call` and passes the call, turn and message ids and an optional recorder to `McpElicitation.beginCall`; a request that matches no call or several calls is rejected with -32602. The request-authorized `executeMcp` wrapper in `session/prompt.ts`, shared by direct calls, `mcp_tool_use` dispatch and exec's `execMcpTools`, supplies the assistant `messageID` and the session's elicitation recorder beside the fork's progress presentation. Pending Claude imports, `auto_connect`/`enabled` precedence, URL validation and request isolation are unchanged. Evidence: `test/mcp/elicitation.test.ts`, `test/mcp/elicitation-form.test.ts`, `test/mcp/lifecycle.test.ts`. See C02–C03 in [the synchronization record](upstream-sync-2026-11-24.md).
 
