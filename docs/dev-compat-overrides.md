@@ -110,7 +110,16 @@ unchanged until a user sets them.
   report 450 pass and 2 fail. Both failures are
   `test/file/path-traversal.test.ts` cases that assert POSIX system paths and
   fail identically on the unchanged `dev/compat` tree. `test/config/`: 199 pass,
-  0 fail.
+  0 fail. `c224afaf` seeds 1000 files so the 1ms timeout case cannot race a
+  coarse Windows timer; it passed five consecutive runs.
+- Binary evidence (2026-11-25, a local single-target build of this branch with
+  FC-056 merged, run with an isolated home and data directory): with
+  `ripgrep.timeout: 50`, `mimo debug rg search` over a repository checkout
+  stopped with `RipgrepTimeoutError` naming `ripgrep.timeout`; with
+  `threads: 2, timeout: 60000` and with no block it completed. The previously
+  installed binary, which lacks this entry, refused the same config at startup
+  with `Unrecognized key: "ripgrep"`, which is the upgrade-order hazard recorded
+  under Compatibility.
 
 ## DC-NET-001 — approved private-network WebFetch
 
