@@ -31,7 +31,7 @@ authority.
 the runtime/test tree the last upstream review covered; bundled guidance has a
 separate content snapshot. Pure registry/history commits advance neither
 reference, and neither do fork pull requests merged between synchronizations
-(FC-044 through FC-055 and later corrections to existing entries): each such
+(FC-044 through FC-056 and later corrections to existing entries): each such
 entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
@@ -99,6 +99,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-053 | Config providers on `@ai-sdk/xai` (`Provider.getLanguage` fallback, `sdkKey`) and `@ai-sdk/openai` reasoning options | Fork fix of upstream config-provider routing | Route `@ai-sdk/xai` config providers to Responses under the `xai` key; force reasoning only for declared reasoning models |
 | FC-054 | Log sink writes, opens and closes in `util/log.ts` | Fork hardening of the upstream log queue | A sink that stops answering is abandoned after `writeTimeout`; the queue, flush and shutdown never wait on it forever |
 | FC-055 | `@ai-sdk/google` 3.0.73 `thinkingLevel` patch and `GOOGLE_SDK_EFFORTS` in `provider/transform.ts` | Fork patch of the dependency upstream pins unpatched | Send a declared Gemini `xhigh` through the direct Google SDKs; gateways fronting Gemini keep four levels; retire when upstream pins `@ai-sdk/google` >= 3.0.146 and allows `xhigh` |
+| FC-056 | file-hook artifact import in `plugin/index.ts` (`importFromDisk`) | Fork fix for compiled Windows binaries; upstream imports the artifact directly | Keep hook artifacts next to their hook and import them from on-disk code until Bun's embedded resolver sees new files |
 
 Grouped sections: [Actor and inbox](#actor-and-inbox) holds FC-001, FC-024, FC-031, FC-037, FC-038 and FC-043; [Checkpoint writer and ladder](#checkpoint-writer-and-ladder) holds FC-002, FC-021, FC-027, FC-028, FC-029, FC-036, FC-044, FC-045, FC-046 and FC-047. Every other entry keeps its own section in numeric order. Retired identifiers FC-003 (2026-09-15) and FC-018 (2026-09-24) are not reused; their entries moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization).
 
@@ -3739,3 +3740,48 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   google provider options".
 - Exit condition: retire the patch and `GOOGLE_SDK_EFFORTS` when upstream pins
   `@ai-sdk/google` >= 3.0.146 and lets `googleEffort` send `xhigh`.
+
+## FC-056 — file hooks load from a compiled Windows binary
+
+- Status: active
+- Canonical owner: fork `main` — `importFromDisk` and `diskLoader` in
+  `packages/cli/src/plugin/index.ts`, used by the file-hook loader
+- Base: upstream transpiles each `.mimocode/hook(s)/*.{js,ts}` file with
+  `Bun.build`, writes the artifact next to the hook as `<hook>.<time>.mjs`, and
+  `import()`s it from the plugin service. In a compiled Windows binary an
+  `import()` issued by the binary's embedded code cannot see a file created in
+  a directory it has already read, so every file hook failed with
+  "Cannot find module '<hook>.<time>.mjs' from 'B/~BUN/root/chunk-….js'" while
+  `bun run` loaded it. Neither a file URL nor a bare path changes this.
+- Observable contract: an `import()` issued by a module on disk does see the
+  file. Once per process the loader writes a one-line module
+  (`export default (url) => import(url)`) into a new temporary directory, which
+  the embedded code has never read, imports it, removes the directory, and
+  imports every hook artifact through it by file URL. The artifact stays next
+  to its hook, so `import.meta`, top-level await, host SDK imports and hot
+  reload are unchanged. If the loader cannot be created it logs a warning and
+  imports directly, as upstream does. `require()` is not used: in the running
+  CLI it rejects every file, including a pre-existing CommonJS file, as an
+  "async module".
+- Upstream relationship: fork fix of upstream's file-hook loader; `dev/compat`
+  inherits it.
+- Watch surfaces: the file-hook loading block in `plugin/index.ts`
+  (`Bun.build`, the artifact path, `importFromDisk`) and any Bun upgrade that
+  changes standalone module resolution.
+- Tests/evidence: `packages/cli/test/plugin/file-hooks.test.ts` "keeps
+  import.meta at the hook's own directory" and "loads a hook with asynchronous
+  top-level await next to other hooks" pin what a loader change could break;
+  the suite passes 7/7 and `test/plugin/host-sdk.test.ts` "serves
+  @mimo-ai/plugin to file hooks" passes. Plain `bun test` does not reproduce
+  the compiled-binary failure. On 2026-11-25 a local single-target Windows
+  build loaded two file hooks that the previously installed binary rejected
+  with "Cannot find module": a probe hook whose module code ran with
+  `import.meta` in its `hooks` directory, and a project hook that imports a
+  sibling plugin module.
+- Known upstream behavior now reachable on Windows binaries, unchanged here:
+  the trigger snapshots a hook's output with `structuredClone`, which throws
+  `DataCloneError` for `tool.definition` output (its zod schema), and a hook
+  with an `event` handler can keep a one-shot command from exiting.
+- Exit condition: retire `importFromDisk` when a compiled Windows binary on
+  the pinned Bun imports a freshly written artifact from embedded code; re-test
+  on each Bun upgrade.
