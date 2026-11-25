@@ -38,6 +38,7 @@ Earlier review records and dated propagation notes (75 sections, dated 2026-09-0
 | DC-WEBFETCH-001 | `webfetch` config, WebFetch route chain, destination classification, hosted fetch models | Compat-only extension; main has no hosted fetch and no `webfetch` config | Preserve direct-first default, private targets direct-only, result-block proof, digest labelling and chained failure reasons |
 | DC-SESSION-001 | `ExecutionOwnership`, `SessionRunState` entries, `preparePrompt`, inbox `maybeKick`/wake poller/`reconcileOnBoot`, `actor send`, `sweepAbandonedZombies`, TUI `claimSession` | Compat-only extension; main assumes one process per database | Keep one live driver per session; never adopt across sessions; gate any new lane start, run entry or boot-time recovery of other processes' state |
 | DC-BUILD-001 | Local version in the CLI, user agent and persisted session | Compat extends FC-052's embedded build time | Keep the same timestamp for the lifetime of a local binary |
+| DC-RESOURCE-001 | `ripgrep` config, rg arguments and run timeout in `ripgrep.ts`, TUI `fps` and `rendererConfig` | Compat-only opt-in limits; unset keeps the inherited behavior | Preserve unset-means-inherited; retire for an equivalent upstream setting |
 
 Retired identifier: DC-PROVIDER-001 moved to shared FC-053 on 2026-11-07 and is not reused; its last compat entry is kept verbatim in [the compat history](dev-compat-registry-history.md#2026-11-07-inherit-fc-053-and-the-fc-008-ci-alignment).
 
@@ -56,6 +57,60 @@ version contract can move to FC-052 if shared `main` adopts it.
 
 `packages/cli/test/installation/build-provenance.test.ts` exercises the CLI
 entry point, user agent and persisted session using build-time definitions.
+
+## DC-RESOURCE-001 — opt-in local resource limits
+
+Commit `90aac15f` adds two opt-in settings for machines that run many TUI
+sessions at once. Both are unset by default, so the inherited behavior is
+unchanged until a user sets them.
+
+- Status: active
+- Canonical owner: `dev/compat` local resource limits
+- Base: inherited `main` runs each ripgrep process with ripgrep's own thread
+  heuristic (CPU count, at most 12) and no time limit, and renders the TUI at
+  fixed rates: 60 frames per second, or 10 for animation and 15 for on-demand
+  redraws in a plain terminal.
+- Overrides:
+  - `ripgrep.threads` and `ripgrep.timeout` (milliseconds) in the main config.
+    `Ripgrep.search` and `Ripgrep.files`, and `tree` through it, pass
+    `--threads=<n>`. A run that outlasts the timeout fails with a
+    `RipgrepTimeoutError` naming the setting; failing the run closes its scope,
+    which ends the rg process. The limit covers the rg run only, not
+    provisioning a ripgrep download. The limits are read at call time through
+    `Effect.serviceOption(Config.Service)`; without a Config service, as in unit
+    tests, ripgrep keeps its defaults. The no-rg listing fallback of
+    DC-PLATFORM-001 is not affected.
+  - `fps` in the TUI config sets both opentui rates: `targetFps`, which drives
+    continuous animation, and `maxFps`, which throttles on-demand redraws such
+    as streaming output. A plain terminal keeps its fixed rates unless `fps` is
+    lower.
+- Delta: these settings bound per-process parallel reads, run time and render
+  rate. They are not a path filter; search-scope policy stays with project
+  plugins and ignore files.
+- Compatibility: the main config is strict, so a binary without this entry
+  rejects a config that sets `ripgrep`, both at startup and on a later model
+  refresh. Install a binary that has the entry before adding the key. A binary
+  without `fps` warns and ignores the whole TUI config file that sets it.
+- Source surfaces: `packages/cli/src/config/config.ts` (`ripgrep` block),
+  `packages/cli/src/file/ripgrep.ts` (limit helpers, `filesArgs`, `searchArgs`
+  and the `files`/`search` timeout), `packages/cli/src/cli/cmd/tui/config/tui-schema.ts`
+  (`fps`), `packages/cli/src/cli/cmd/tui/util/frame-rate.ts`,
+  `packages/cli/src/cli/cmd/tui/app.tsx` (`rendererConfig`) and the generated
+  `packages/sdk/src/v2/gen/types.gen.ts`.
+- Test surfaces: `packages/cli/test/file/ripgrep-limits.test.ts`,
+  `packages/cli/test/cli/tui/frame-rate.test.ts` and the `fps` case in
+  `packages/cli/test/config/tui.test.ts`.
+- Required decision: preserve unset-means-inherited for both settings. Review
+  `filesArgs`/`searchArgs` when upstream changes rg arguments and
+  `rendererConfig` when it changes renderer options. If upstream adds its own
+  ripgrep limits or TUI frame-rate option, adopt it and retire this entry.
+- Evidence: on Windows with Bun 1.3.14, `bun run typecheck` in `packages/cli`
+  passes. The new and affected suites (`test/file/`, the frame-rate and TUI
+  config tests, the grep, glob, skill and skill-search tools, `test/server/`)
+  report 450 pass and 2 fail. Both failures are
+  `test/file/path-traversal.test.ts` cases that assert POSIX system paths and
+  fail identically on the unchanged `dev/compat` tree. `test/config/`: 199 pass,
+  0 fail.
 
 ## DC-NET-001 — approved private-network WebFetch
 
@@ -215,6 +270,8 @@ entry point, user agent and persisted session using build-time definitions.
   contract explicitly guarantees the same reachability.
 
 ## DC-PLATFORM-001 — restricted-network and Windows ripgrep/archive fallback
+
+- 2026-11-25 DC-RESOURCE-001: `ripgrep.ts` also carries the opt-in `ripgrep.threads` and `ripgrep.timeout` limits owned by DC-RESOURCE-001. They apply only to spawned rg runs; the no-rg listing fallback, the Windows archive extraction and their fail-closed boundaries are unchanged.
 
 - 2026-11-01 DC-SESSION-001 follow-up: the Windows entry adds a fourth focused suite, `session-owner` (`test/session/process-liveness.test.ts` and `test/session/session-owner.test.ts`), and records `src/session/process-liveness.ts` in its source hashes. That suite and its subject belong to DC-SESSION-001; the archive, no-rg and other focused cases are unchanged.
 
