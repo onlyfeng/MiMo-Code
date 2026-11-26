@@ -8,11 +8,18 @@ import { serverAuthHeaders } from "../../../src/server/auth"
 import { createWorkerListener } from "../../../src/cli/cmd/tui/worker-listener"
 import { tmpdir } from "../../fixture/fixture"
 
-const operator = Flag.MIMOCODE_SERVER_PASSWORD
+const operator = process.env.MIMOCODE_SERVER_PASSWORD
 const username = Flag.MIMOCODE_SERVER_USERNAME
 
+// An operator secures the server the way upstream reads it: through the
+// environment. A generated listener credential never appears there.
+function setOperatorPassword(value: string | undefined) {
+  if (value == null) delete process.env.MIMOCODE_SERVER_PASSWORD
+  else process.env.MIMOCODE_SERVER_PASSWORD = value
+}
+
 afterEach(async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = operator
+  setOperatorPassword(operator)
   Flag.MIMOCODE_SERVER_USERNAME = username
   await Instance.disposeAll()
 })
@@ -40,7 +47,7 @@ function closed(url: string) {
 }
 
 test("worker listener authenticates automatically without changing operator directory or bind authority", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = undefined
+  setOperatorPassword(undefined)
   const env = process.env.MIMOCODE_SERVER_PASSWORD
   await using local = await tmpdir({ root: "cwd", git: true, config: {} })
   await using outside = await tmpdir({ config: {} })
@@ -51,7 +58,7 @@ test("worker listener authenticates automatically without changing operator dire
     if (!result.ok) throw new Error(result.error)
     expect("headers" in result).toBe(false)
     expect(Boolean(Flag.MIMOCODE_SERVER_PASSWORD)).toBe(true)
-    expect(Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD).toBeUndefined()
+    expect(Flag.MIMOCODE_SERVER_PASSWORD_SUPPLIED).toBe(false)
     expect(process.env.MIMOCODE_SERVER_PASSWORD === env).toBe(true)
     expect(await status(result.url, `/config?directory=${encodeURIComponent(local.path)}`)).toBe(401)
     expect(await status(result.url, `/config?directory=${encodeURIComponent(local.path)}`, serverAuthHeaders())).toBe(
@@ -76,7 +83,7 @@ test("worker listener authenticates automatically without changing operator dire
 }, 30000)
 
 test("worker listener preserves operator authentication and explicit network permission", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = "operator-fixture-password"
+  setOperatorPassword("operator-fixture-password")
   Flag.MIMOCODE_SERVER_USERNAME = "operator"
   await using local = await tmpdir({ root: "cwd", git: true, config: {} })
   await using outside = await tmpdir({ config: {} })
@@ -97,12 +104,12 @@ test("worker listener preserves operator authentication and explicit network per
     await listener.stop()
     listener.clearAuthentication()
   }
-  expect(Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD === "operator-fixture-password").toBe(true)
+  expect(Flag.MIMOCODE_SERVER_PASSWORD_SUPPLIED).toBe(true)
   expect(Flag.MIMOCODE_SERVER_PASSWORD === "operator-fixture-password").toBe(true)
 }, 30000)
 
 test("concurrent worker starts share one real socket and shutdown blocks further admission", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = undefined
+  setOperatorPassword(undefined)
   await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
@@ -125,7 +132,7 @@ test("concurrent worker starts share one real socket and shutdown blocks further
 
 for (const bindFirst of [false, true]) {
   test(`worker shutdown joins a pending start with real bind ${bindFirst ? "before" : "after"} the gate`, async () => {
-    Flag.MIMOCODE_SERVER_PASSWORD = undefined
+    setOperatorPassword(undefined)
     await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
     const entered = Promise.withResolvers<void>()
     const gate = Promise.withResolvers<void>()
@@ -162,7 +169,7 @@ for (const bindFirst of [false, true]) {
 }
 
 test("real occupied port gives a bounded safe result and a later worker start can retry", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = undefined
+  setOperatorPassword(undefined)
   await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("occupied") })
   const listener = createWorkerListener({ directory: tmp.path })
@@ -186,14 +193,14 @@ test("real occupied port gives a bounded safe result and a later worker start ca
 }, 15000)
 
 test("automatic authentication permits external binding only with the existing explicit noAuth option", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = undefined
+  setOperatorPassword(undefined)
   await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
     const result = await listener.start({ hostname: "0.0.0.0", noAuth: true, http: true })
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error(result.error)
-    expect(Flag.MIMOCODE_SERVER_OPERATOR_PASSWORD).toBeUndefined()
+    expect(Flag.MIMOCODE_SERVER_PASSWORD_SUPPLIED).toBe(false)
     expect(Boolean(result.headers?.Authorization)).toBe(true)
     // Explicit network permission does not disable the authentication itself.
     const url = new URL(result.url)
@@ -208,7 +215,7 @@ test("automatic authentication permits external binding only with the existing e
 }, 15000)
 
 test("operator changes override a live automatic credential and survive worker cleanup", async () => {
-  Flag.MIMOCODE_SERVER_PASSWORD = undefined
+  setOperatorPassword(undefined)
   await using tmp = await tmpdir({ root: "cwd", git: true, config: {} })
   const listener = createWorkerListener({ directory: tmp.path })
   try {
@@ -217,7 +224,7 @@ test("operator changes override a live automatic credential and survive worker c
     if (!result.ok) throw new Error(result.error)
     const config = `/config?directory=${encodeURIComponent(tmp.path)}`
     expect(await status(result.url, config, result.headers)).toBe(200)
-    Flag.MIMOCODE_SERVER_PASSWORD = "later-operator-fixture"
+    setOperatorPassword("later-operator-fixture")
     expect(await status(result.url, config, result.headers)).toBe(401)
     expect(await status(result.url, config, serverAuthHeaders())).toBe(200)
     await listener.stop()
