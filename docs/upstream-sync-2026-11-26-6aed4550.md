@@ -56,3 +56,31 @@ fails the upstream assertion (the restored path keeps `</system-reminder>`
 instead of `</SYSTEM-REMINDER>`); with upstream's line it passes again.
 
 Local runs on this host are not exact-SHA CI.
+
+## Review
+
+Pull request #286 carried `72dc3114` and the record commit `be32df92` to
+`main` for review. The Codex review found nothing (👍 and a completed review
+with no findings on `be32df92`). Pull request lint (45849478444) and typecheck
+(45849478511) passed, and the dispatched `test` workflow passed on that head
+(run 45849476969).
+
+## Publication
+
+`main` was published by direct fast-forward push to the reviewed head, which
+marked pull request #286 merged. `dev/compat` was published by direct
+fast-forward push of the propagation merge, the record merge and the compat
+review record.
+
+| Branch | Push | Exact-SHA push CI | Result |
+| --- | --- | --- | --- |
+| `main` | `3d268917..be32df92` (`72dc3114` runtime, `be32df92` record) | lint 45851039295, typecheck 45851039393, test 45851039153 on `be32df92f425b7df5ef1e189d3eb58ef0415fcf7` | All success; `windows-runtime` is skipped on `main` by design. |
+| `dev/compat` | `25c859e8..9fe8e5da` (`730b7656` runtime, record merge `90f62f98`, compat record `9fe8e5da`) | lint 45851087083, typecheck 45851087049, test 45851087019 on `9fe8e5daa64af637a1f76105bd61e5c0bc92a7cb` | All success, including `windows-runtime`. |
+
+Ancestry: upstream `6aed4550` is an ancestor of `main` `be32df92`, which is an
+ancestor of `dev/compat` `9fe8e5da`; upstream had not advanced when the tips
+were rechecked after the push CI.
+
+The commit that adds these sections, and its merge into `dev/compat`, change
+only `docs/`. Their exact-SHA evidence is the runs above, with
+`git diff --quiet <tip> <new tip> -- . ':(exclude)docs'` as the proof.
