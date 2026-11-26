@@ -91,3 +91,45 @@ fails on the current message's order; disabling the reorder fails on the
 legacy message's order. Restored, it passes.
 
 Local runs on this host are not exact-SHA CI.
+
+## Review
+
+Pull request #279 carried `d1039eda` and the record commit `52e503e6` to
+`main` for review. The Codex review found nothing (👍 on `52e503e6`). Pull
+request lint and typecheck passed, and the dispatched `test` workflow passed on
+that head (run 45813401094).
+
+## Publication
+
+Both branches were published by direct fast-forward push, which marked pull
+request #279 merged.
+
+| Branch | Push | Exact-SHA push CI | Result |
+| --- | --- | --- | --- |
+| `main` | `92d3b8d4..52e503e6` (`d1039eda` runtime, `52e503e6` record) | lint 45814804838, typecheck 45814804677, test 45814804749 on `52e503e622c481826d08c16fe8bfca340a1d8f63` | All success; `windows-runtime` is skipped on `main` by design. |
+| `dev/compat` | `d8d14a29..ea902af4` (`75e37ed2` runtime, record merge and compat record) | lint 45814811491, typecheck 45814811540, test 45814811548 on `ea902af42238db75851f77f32cdc8a70761b0cc7` | All success, including `windows-runtime`. |
+
+Ancestry: upstream `6ad6bbb4` is an ancestor of `main` `52e503e6`, which is an
+ancestor of `dev/compat` `ea902af4`; upstream had not advanced when the tips
+were rechecked before the push.
+
+## Follow-up on the same day
+
+Two layout-only pull requests followed the synchronization; they are recorded
+in [the alignment review](fork-alignment-review-2026-11-26.md). Pull request
+#280 restored upstream's text in 16 layout-only hunks on `main` (merge
+`6e3b0cd1e87fc30bf84418131c0734c4154af0fb`), propagated to compat as
+`66ba012e61ef062536660ae117f1f9afe971d367`. Pull request #281 restored `main`'s
+text in 8 layout-only hunks of compat (merge
+`45d828da15d89f6d4214cee95d388ee683a0890c`). Each file's TypeScript token
+stream is unchanged.
+
+| Branch | Tip | Exact-SHA push CI | Result |
+| --- | --- | --- | --- |
+| `main` | `6e3b0cd1` | lint 45816529995, typecheck 45816529986, test 45816530009 | All success; `windows-runtime` skipped by design. |
+| `dev/compat` | `45d828da` | lint 45817508499, typecheck 45817508515, test 45817508582 | All success, including `windows-runtime`. The `test` run for the intermediate `66ba012e` was cancelled when `45d828da` superseded it. |
+
+The commit that adds this section, and its merge into `dev/compat`, change only
+`docs/` and start no workflow. Their trees outside `docs/` equal `6e3b0cd1` and
+`45d828da` respectively (`git diff --quiet <ancestor> <tip> -- .
+':(exclude)docs'`), so the runs above are their CI evidence.
