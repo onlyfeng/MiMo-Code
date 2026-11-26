@@ -14,7 +14,6 @@
   ],
   "exclude": [
     "packages/cli/script/generate.ts",
-    "packages/cli/script/schema.ts",
-    "packages/cli/script/experiments/**"
+    "packages/cli/script/schema.ts"
   ]
 }

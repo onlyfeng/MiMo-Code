@@ -1,5 +1,7 @@
 # FD-006 数据工具声明精简实验
 
+> **2026-11-26 载体移除：** `packages/cli/script/experiments/tool-schema*.ts` 与 `test/experiments/tool-schema*.test.ts` 已删除，原因见 FD-006 同日记录。下文的命令与路径记录的是当时的实验环境；需要复现时从 `6fe784092fed596eea8d5382d85c9713ed96a378` 取回这些文件。
+>
 > **2026-09-08 后续决定：** 用户另行授权融合 upstream 已发布的生产 Codex 紧凑模式，见[使用说明](../codex-compact-tools.md)。本页保留 09-07 独立 default-harness 实验的方法与结果；下文的当时生产决策不再代表当前 Codex 默认行为。
 
 本实验仅在 `packages/opencode/script/experiments/tool-schema*.ts` 中运行，不修改

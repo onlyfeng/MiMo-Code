@@ -565,6 +565,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
 
 ## FD-006 — `exec` is a composition tool, not an authority gateway
 
+- 2026-11-26 alignment review (pull request #273): the standalone read/glob/grep experiment carrier retires. `packages/cli/script/experiments/tool-schema*.ts`, `test/experiments/tool-schema.test.ts` and `test/experiments/tool-schema-runner.test.ts` are deleted, and `tsconfig.scripts.json` is upstream's again. The experiment ran once on 2026-09-07, was superseded the next day by upstream's production compact mode, and had no production consumer, yet refactors still had to carry it. Its method and results stay in [the historical evaluation](experiments/tool-schema-2026-09-07.md); the code is recoverable from `6fe784092fed596eea8d5382d85c9713ed96a378`. No production surface or contract of this entry changes.
+
 - 2026-11-24 synchronization: upstream `81a37ab5` passes the nested context's `messageID` and the session's `onMcpElicitation` recorder (read from `ctx.extra`) into exec's MCP calls. The passthrough is kept in `tool-script.ts`, but in the fork exec's MCP entries are `execMcpTools`, built on the same `executeMcp` wrapper in `session/prompt.ts` as direct and `mcp_tool_use` calls; that wrapper replaces `experimental_context` and itself supplies the assistant `messageID` and the recorder, so an elicitation raised inside a script is recorded and associated with the nested call id. The fork's nested pipeline (request-pinned pool, permission, hooks, settlement and closed intake) is unchanged; the recorder grants no tool or execution authority. See C03 in [the synchronization record](upstream-sync-2026-11-24.md).
 
 - 2026-10-28 synchronization: config-declared always-direct MCP tools join the top-level active set and remain available through exec, while excluded from deferred search/dispatch. The rejection condition retains GPT hidden direct calls and legacy frozen exceptions beside the new always-direct exception. Current permission, whitelist and frozen schema/membership checks still gate all paths. See C01 in [the sync record](upstream-sync-2026-10-28.md).
@@ -632,8 +634,8 @@ the complete resolved model identity` case. FD-005 keeps only identity
   Snapshot compaction keeps at most 8 KiB of selected facts per child and 32
   entries per retained array; oversized fields or whole records may be omitted
   within the overall bound. Missing paths never imply a cwd mutation.
-  The standalone read/glob/grep experiment remains separate and its token
-  estimates establish no Codex production savings; see [current usage](codex-compact-tools.md)
+  The retired 2026-09-07 read/glob/grep experiment established no Codex
+  production savings; see [current usage](codex-compact-tools.md)
   and [historical evaluation](experiments/tool-schema-2026-09-07.md).
 - Upstream relationship: adapts released v0.1.14 compact registration from
   `1a0ffba7842af3f11edcb456688bbdf067407c08`, as present in the selected
@@ -661,7 +663,6 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `packages/cli/src/session/prefix-snapshot.ts`,
   `packages/cli/src/session/observed-tool-parts.ts`,
   `packages/cli/src/cli/cmd/tui/routes/session/permission.tsx`,
-  `packages/cli/script/experiments/tool-schema*.ts`,
   `packages/cli/src/cli/cmd/tui/routes/session/index.tsx`, and
   `packages/cli/src/cli/cmd/tui/routes/session/exec-expanded.tsx`.
 - Tests/evidence: `test/tool/tool-script.test.ts` covers request-pool pinning,
@@ -676,7 +677,6 @@ the complete resolved model identity` case. FD-005 keeps only identity
   `test/session/prompt-effect.test.ts` covers frozen hidden-schema positive and
   negative execution; registry, prefix, checkpoint, skill, TUI permission and
   `test/session/exec-effect-carriers.test.ts` cover the other carriers.
-  Experiment-only tests retain their independent evidence attribution.
 - 2026-09-15 standalone experiment cleanup: `disposeExperimentRuntime` closes
   its owned log sink after the global runtime and database. Reusable
   `runExperiment` calls retain their existing lifecycle. The isolated
