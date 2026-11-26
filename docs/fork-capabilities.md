@@ -1821,28 +1821,6 @@ own source list remains the complete watch surface.
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
-- 2026-11-26 alignment review: the `auto_worktree` row leaves bundled `mimocode-docs/reference/config.md` with FC-007's retired notice, matching upstream's text.
-
-- 2026-11-13 synchronization: adopt the unified default prompt and retire unused vendor-specific prompt templates, including MiniMax. The MiniMax-specific repository-reminder removal is superseded by template retirement; the factual shared Task/Actor, fixed-cwd and authorized exec guidance remains. Adopt Compose Next spec presentation and independently deliverable sub-documents from `994aa695`, retaining explicit invocation, workspace ownership and publication authorization boundaries.
-
-- 2026-11-09 synchronization: adopt upstream `26d1f3a6` unchanged. Compose Next keeps Report as `[Not finalized yet]` until finalized and Journey log as `None` until a useful entry replaces it; three upstream specs illustrate those markers. Explicit workflow invocation, workspace ownership, discovery/permission and Finish authorization boundaries remain unchanged. Content evidence only; no new runtime behavior is claimed.
-
-- 2026-10-30 registry correction: upstream `2b993ac9` removed the actor shell invocation format on 2026-09-24, including `actor.shell.txt`, its tokenizer/help, heredoc flag-placement errors and the `actor.shell` tests; FC-018 retired with them. Those references leave the observable contract, watch surfaces and Tests/evidence. JSON Actor guidance in `actor.txt` remains. No behavior or content changes.
-
-- 2026-10-30 synchronization: Adopt available search/MCP wording, explicit Exa/search MCP setup, and DuckDuckGo HTML through WebFetch when no search tool is available. Permission/discovery and workflow lifetime contracts remain unchanged; prompt text is content evidence, not a live search-provider availability claim.
-
-- 2026-10-26 synchronization: adopt upstream `18adffc9` unchanged. The `claude-code`, `codex` and `grok-build` descriptions now say to load only on explicit authorization and to confirm the binary first; their host-only `agents/openai.yaml` files are deleted, and the `mimocode-docs` discovery row names the opt-in selector. The fork's PPTX guidance regression in `test/skill/builtin.test.ts` is kept beside upstream's new cases.
-
-- 2026-10-21 synchronization: adopt upstream `12a59e90` unchanged. Compose Next spec `source` takes a branch name, PR URL or MR URL, so the frontmatter stays valid YAML; fill-ins use `{{}}`, S labels move onto Design H3s, `covers` and the Journey log are optional, and any merge needs its own confirmation. Bundled `mimocode-docs` drops `compaction.prune` and names `xiaomi/mimo-v2.6-flash` as the voice control default; the fork's compaction-row wording and `auto_worktree` entry in `config.md` are kept.
-
-- 2026-10-21 live synchronization: adopt `cf8c09d5` Compose Next unavailable-input handling, spec `source` tracking and Finish confirmation unchanged. The explicit invocation entry and discovery/permission boundaries remain; this is shipped content, not a runtime schema or bulk spec migration. Content loading/discovery and permission/search tests cover the integration, while behavioral wording is reviewed as guidance.
-
-- 2026-10-13 MiniMax reminder removal: the shipped `session/prompt/minimax.txt` no longer carries "The default branch in this repo is `main`. CI triggers on …". Upstream `25b7bac3` pasted that repository-specific sentence into a prompt every MiniMax user receives, twice; fork PR #43 kept it and updated the branch list to `dev/compat`, which made it current for this repository and still a fabricated fact for every other project. The sentence is deleted, so the file differs from upstream by two removed lines and nothing added, and this repository's branch guidance reaches the model through `AGENTS.md` like every other instruction. `test/session/system.test.ts` now asserts the absence of any repository-specific CI reminder (mutation-checked against upstream's text). The TUI skill i18n keys stay corrected: `skill/localized-alias.ts` reads `tui.skill.<name>.slash`, so upstream's `tui.skill.mimocode.*` keys have been dead since `5bf07b7e` renamed the bundle to `mimocode-docs`.
-
-- 2026-10-13 synchronization: upstream `3c6e6bb0` retires the compose agent and `compose:*` skills from bundled `mimocode-docs` content, the TUI tips and `gpt.txt`; upstream `463cbb28` documents harness-injected `<system-reminder>` content in the provider prompts. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/` suites pass.
-
-- 2026-10-10 synchronization: upstream `a4b06963` replaces the `_CLAUDE_IMPORT` disable toggle in bundled `mimocode-docs/reference/config.md` with an `MIMOCODE_ENABLE_CLAUDE_IMPORT` entry: startup import of Claude Code sessions is off by default, manual session imports remain, and Codex sessions are imported only on request. Upstream `f98dcd1c` gives the `xlsx-official/create.md` library-choice table's combined row its own Library cell. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/mimocode-docs.test.ts` and `test/skill/builtin.test.ts` pass.
-
 - Status: active process/content contract
 - Canonical owner: fork `main` prompt and bundled-skill content
 - Observable contract: the default native prompt tells models to use only the
@@ -1876,7 +1854,21 @@ own source list remains the complete watch surface.
   credentials and `advertiseDirectory`; upstream's capability route is served
   through it. The content snapshot is recorded separately from runtime/tests.
 - Upstream relationship: fork-facing guidance plus selectively adopted upstream
-  documentation improvements.
+  documentation improvements. Most upstream content changes (Compose Next
+  presentation and markers, search and MCP setup wording, the `claude-code`,
+  `codex` and `grok-build` load-on-authorization descriptions, Claude import
+  configuration, the unified default prompt) are adopted unchanged; vendor
+  prompt templates, including MiniMax, retired on 2026-11-13. What remains
+  fork-owned: the PPTX image-sourcing guidance (adapted from upstream instead of
+  shipping unconditional `image_gen`, text-only WebFetch or unchecked curl
+  claims), Actor help that distinguishes reusable actors from completed
+  ephemeral full-context actors, the factual Task/Actor, fixed-cwd and
+  authorized exec guidance, the compaction-row wording in bundled
+  `mimocode-docs/reference/config.md`, and the TUI skill i18n keys:
+  `skill/localized-alias.ts` reads `tui.skill.<name>.slash`, so upstream's
+  `tui.skill.mimocode.*` keys have been dead since `5bf07b7e` renamed the bundle
+  to `mimocode-docs`. Compose Next keeps explicit invocation, workspace
+  ownership and publication authorization boundaries.
 - Watch surfaces: `packages/cli/src/session/prompt/default.txt`,
   `packages/cli/src/tool/actor.ts`,
   `packages/cli/src/tool/actor.txt`,
@@ -1904,66 +1896,37 @@ own source list remains the complete watch surface.
   `packages/cli/test/skill/mimocode-docs.test.ts` at the main runtime/test
   SHA, plus bundled-content review at the separate guidance content SHA.
   `packages/cli/test/skill/builtin.test.ts`
-  binds the shipped PPTX guidance to the available-tool and WebFetch facts.
+  binds the shipped PPTX guidance to the available-tool and WebFetch facts,
+  beside upstream's own cases.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
-- 2026-08-28 review: adapted upstream PPTX image-sourcing guidance instead of
-  shipping unconditional `image_gen`, text-only WebFetch, or unchecked curl
-  claims. Actor help also distinguishes reusable actors from completed
-  ephemeral full-context actors.
-- 2026-09-01 tools-guidance review: adopted upstream's dynamic, action-oriented
-  default guidance after binding the `task` and `actor` lifecycle claims to the
-  shipped runtime and removing the incoming trailing whitespace. The static
-  tool inventory was retired from this prompt without changing registry or
-  permission behavior.
-- 2026-09-02 Compose Next review: adopted upstream's workspace-first ordering
-  from `6972b3290415f5e87e859e6b38f3c212f091e8e5`. Workspace now owns the
-  active workspace before Spec writes its durable document there; without-spec
-  and missing-document finalize paths remain conditional. This is bundled
-  workflow guidance and does not widen file, worktree, or publication authority.
-- 2026-09-07 selected-capability review: actor help documents explicit
-  persistent full-context creation, constrained resume, successful idle status
-  and cancellation release. Bundled configuration guidance describes
-  `harness_model`; these instructions do not widen runtime permission or
-  restore public actor/task recovery selectors.
-- 2026-09-11 PDF-gate review: the read tool now refuses a PDF when the active
-  model declares no `pdf` input support and names the bundled skill by path —
-  `<builtinSkillRoot()>/pdf-official/SKILL.md`. That is factually correct here:
-  the fork ships `pdf-official` in the same bundle under the same
-  `OFFICIAL_SKILL_NAMES` / `MIMOCODE_DISABLE_OFFICIAL_SKILLS` opt-out as
-  upstream, so no fork-facing rewrite is needed. This is a runtime message, not
-  bundled content; the guidance content snapshot is unchanged.
 - Retirement condition: the corresponding prompts/content cease to ship or
   upstream guidance is factually equivalent for fork branch names, keys,
   runtime support, and user-facing errors.
 
-- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
-  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
-  The retained spawn task namespace, synchronous commit/ownership boundary and
-  metadata-only background updates preserve existing task and message sources.
-  HTTP/SDK/tool publication and actual provider/transaction regressions are
-  recorded in the shared history; no cross-restart recovery is introduced.
-
 ## FC-012 — fork publication, contribution, and security routing
-
-- 2026-11-06 synchronization: adopt upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`’s non-interactive workspace-trust warning, headless approval description and trust-bypass scope row. Keep fork-only vulnerability handling separate from upstream’s reporting channels. FD-001 still owns invocation-scoped approval; no permission implementation changes. See [the C01 record](upstream-sync-2026-11-06.md).
-
-- 2026-10-27 synchronization: launcher extraction adopts upstream `tarCommand()`: on Windows prefer the existing absolute system tar, then fall back to PATH; other platforms still use PATH tar. Release URL/checksum/cache and staged-run behavior are retained. Adopt the README download links and desktop screenshots while preserving fork routing. See [the four-capability record](upstream-sync-2026-10-27.md).
-
-- 2026-10-26 synchronization: adopt upstream's `0.1.16` across the four workspace manifests and `bun.lock` (`d3c71e33`), and `b8dbe084`'s tag release that builds after typecheck and lint without rerunning unit tests, with `script/fds-upload.ts` defaulting to the external `cnbj1.fds.api.xiaomi.com` endpoint (`MIMO_FDS_ENDPOINT` still overrides). `GH_REPO` remains required and fork-scoped. A fork tag therefore depends on the exact-SHA branch CI of the tagged commit. No publishing stage ran during this sync. FC-019's patched quickjs versions are unchanged by the bump.
-
-- 2026-10-20 synchronization: adopt trusted-publisher `--allow-publish` and a preflight stage before npm/GitHub publication. The preflight checks SDK/plugin/CLI tarball name and version and proves an FDS signed canary write. Keep `GH_REPO` mandatory and scoped to the fork; the upstream-owned npm trust configuration is not authority to publish fork work there. A passing preflight is neither a release rollback transaction nor proof that every later publication stage succeeded. No publishing stage is invoked during synchronization validation.
-
-- 2026-10-13 synchronization: upstream `4a5e2140` replaces the maintainer release scripts with CI stages in `script/release.ts` run by `release.yml` on a pushed tag. The fork adopts the stages and keeps `GH_REPO` required: the `github` stage throws before any `gh` call when it is unset, so a fork release can never fall back to the `upstream` remote. `release.yml` itself sets `GH_REPO` from `github.repository`. The npm trusted-publisher setup still names upstream's repository and applies only to upstream's packages.
-
-- 2026-10-02 synchronization: upstream `327f5b63` makes `script/release.ts` default `GH_REPO` to `XiaomiMiMo/MiMo-Code`, which would aim an unconfigured fork release at the read-only upstream. The fork keeps `GH_REPO` required, with no default, and adopts the rest of the `.env` release flow. Upstream `698f0f29` removes the `CLAUDE.md` → `AGENTS.md` symlink; the fork keeps it so Claude Code sessions load the same routing conventions as other agents.
 
 - Status: active process contract
 - Canonical owner: fork repository governance
 - Observable contract: pushes and pull requests target `onlyfeng/MiMo-Code`,
   never the read-only upstream. Shared work enters `main` before propagation to
   `dev/compat`; compatibility-only work targets `dev/compat`. Fork-only security
-  issues are not routed through upstream public disclosure channels.
+  issues are not routed through upstream public disclosure channels, which stay
+  separate from upstream's adopted reporting text and workspace-trust warning.
+  Releases use upstream's CI stages (`script/release.ts`, run by `release.yml` on
+  a pushed tag, with the trusted-publisher `--allow-publish` and the preflight
+  stage that checks tarball names and versions and proves an FDS canary write),
+  but `GH_REPO` stays required with no default: the `github` stage throws
+  before any `gh` call when it is unset, so a fork release can never fall back
+  to the read-only upstream (upstream defaults it to `XiaomiMiMo/MiMo-Code`), and
+  `release.yml` sets it from `github.repository`. Upstream's npm trusted-publisher
+  configuration names upstream's repository and is not authority to publish
+  fork work. A tag release builds after typecheck and lint without rerunning
+  unit tests, so a fork tag depends on the tagged commit's exact-SHA branch CI;
+  a passing preflight is not a rollback transaction. The launcher keeps its
+  release URL, checksum, cache and staged-run behavior around upstream's
+  `tarCommand()`. The `CLAUDE.md` → `AGENTS.md` symlink, which upstream
+  removed, stays so Claude Code sessions load the same conventions.
 - Upstream relationship: fork-specific governance that must not be overwritten
   by upstream repository documents.
 - Watch surfaces: `AGENTS.md`, the `CLAUDE.md` link, `CONTRIBUTING.md`,
@@ -1974,44 +1937,10 @@ own source list remains the complete watch surface.
   are process checks rather than runtime tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
-- 2026-09-02 release review: adopted upstream's synchronized `0.1.14` version
-  across all sixteen workspace package manifests and `bun.lock`; fork-only
-  publication destinations and branch routing remain unchanged.
 - Retirement condition: fork ownership or publication topology changes through
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
-
-- 2026-11-26 alignment review: upstream's `MIMOCODE_EMPTY_STEP_DROP_LIMIT` (`flag/flag.ts`, from `942de16e`) has no reader here. Upstream uses it to bound consecutive `dropEmptyAssistant` drops; the 2026-11-13 synchronization (C04) adapted that bound into the count-bounded `emptyOutput` budget and the background system-agent cap instead, so `dropEmptyAssistant` and its counter are absent. The definition stays byte-identical to upstream, so setting the variable has no effect. A synchronization that brings back a reader must decide which bound governs.
-
-- 2026-11-13 synchronization: adopt live `rawFinish` propagation and `StreamIncompleteError` for a stream ending with unified `other` and no provider finish reason. This error uses bounded stream recovery, distinct from a complete pure-empty response's `emptyOutput` budget. Preserve request/candidate/judge scope precedence, the system-agent cap, tool-side-effect replay guards and main-only retry publication. Non-GPT reasoning-only output retains scoped bounded continuation; upstream's global reasoning-only-final policy is not adopted. Historical raw-less `other` messages remain readable by content, and MaxMode excludes live incomplete candidates while retaining raw finish on accepted replay.
-
-- 2026-11-11: pure-empty `InvalidOutputError` retries under its own `emptyOutput` budget instead of the server budget, superseding the 2026-10-22 persistent pure-empty budget for main and ordinary actors. `decide` still reports `kind: "server"` and adds `emptyOutput: true`; `budgetFor` routes that flag to `config.emptyOutput` after the scope (request, max-candidate, max-judge), host-class, network and rate-limit checks, so retry parts, status events and the SDK `kind` enum are unchanged. Default: bounded, `EMPTY_OUTPUT_MAX_RETRIES` (8) retries, no wall-clock deadline, server delays (2 s doubling to 30 s). `retry.server` no longer affects empty output; `retry.emptyOutput` (global or `provider.<id>.retry`) configures it, and `mode: "persistent"` restores the previous behavior. Exhaustion ends the turn with `InvalidOutputError` and keeps the retry record (existing processor path). The system-agent cap still applies on top. Why: the request was accepted, so every empty attempt is billed. In production (2026-11-03..11, main and ordinary actors, one gateway), 9 of 12 recovered streaks recovered within 8 retries, while 26 unrecovered streaks averaged 22 retries (up to 51) before a cancel or a newer input ended them; one main turn spent 33 retries in 17 minutes on a 322K-token context. Upstream (`XiaomiMiMo/MiMo-Code`) keeps empty output on the persistent server budget. Evidence: `test/session/retry.test.ts` "InvalidOutputError retries under the bounded emptyOutput budget, not the server budget" (defaults, persistent-server independence, opt-in persistence, provider precedence, scope precedence) and "policy gives up on endless empty output after the emptyOutput count" (stops after `EMPTY_OUTPUT_MAX_RETRIES + 1` attempts under a persistent server budget); `test/session/invalid-output-continuation.test.ts` "endless empty output stops at the default bound even under a persistent server budget" makes `EMPTY_OUTPUT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`. With the `budgetFor` routing removed, the integration test reaches the late scripted answer (12 requests instead of 9) and both unit tests fail on their assertions. The endless-retry cancellation test and the system-agent test now opt into `emptyOutput: { mode: "persistent" }` explicitly. Configs that bounded empty output through `retry.server` stop doing so: the two processor cleanup cases in `test/session/processor-effect.test.ts` and the checkpoint-writer failure case in `test/actor/spawn.test.ts` now set `retry.emptyOutput` instead.
-
-- 2026-11-02: background system agents (`SYSTEM_SPAWNED_AGENT_TYPES`: checkpoint writer, dream, distill) retry within a bounded budget whatever the configured mode: at most `SYSTEM_AGENT_MAX_RETRIES` (4) retries within `SYSTEM_AGENT_RETRY_DEADLINE_MS` (5 min), keeping the class's delays (`SessionRetry.boundForSystemAgent`, passed as the stream policy's `cap`, which applies after the network and persistent-host constraints that otherwise reset a budget to persistent, and in the request ladder of `llm.ts`). They get another chance on their own schedule (the next checkpoint threshold or pass), so a persistent budget only held their slot. In production a checkpoint writer whose model kept returning empty output retried for about 21 hours, held the writer slot and froze the parent's checkpoint watermark. Main and ordinary actors keep the 2026-10-22 persistent pure-empty budget. Evidence: `test/session/invalid-output-continuation.test.ts` "checkpoint-writer gives up on endless empty output within its bounded budget" makes `SYSTEM_AGENT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`; without the bound it keeps retrying until the scripted answer. `test/session/retry.test.ts` "a system-agent cap bounds network and persistent-host retries" stops an `ECONNRESET` and a persistent host error after 4 retries, and fails when the cap is applied before those constraints. "checkpoint-writer bounds request retries before provider output even when configured persistent" sends 503 under persistent request and server budgets and stops after `(SYSTEM_AGENT_MAX_RETRIES + 1)²` requests (each bounded processor attempt runs a bounded request ladder); without the request-ladder cap it reaches the scripted answer.
-
-- 2026-10-28 quota synchronization: adopt terminal handling for complete HTTP429/code429/type limitation/exact quota exhausted signals in SessionRetry.decide, independent of provider identity and preserved through serialization. Host decisions retain precedence; SDK normalization is unchanged. Adapt the incoming ordinary429 test to the existing bounded request budget and persistent live-step rate-limit budget. Classification and all other retry contracts remain unchanged; see [C01](upstream-sync-2026-10-28-ebd06ee2.md).
-
-- 2026-10-22 live advancement: pure-empty InvalidOutputError uses the persistent server live-step budget, with explicit bounded overrides and cancellation still effective. The retrySafe/tool-residue/non-length/non-structured guards remain; reasoning-only output keeps bounded actor-scoped continuation and atomic provenance. Request and stream retries persist per-actor records, while global status and RetryAttempt stay main-only; ephemeral/quiet MaxMode scopes remain isolated. Summary retry/fallback ownership remains under FD-010/011/012.
-
-- 2026-10-21 synchronization: upstream `8fd65328` checks `retryConstraint(error) === "terminal"` before the `exhausted`/`unavailable` capacity heuristic in `decide`. HTTP403 membership and subscription-quota refusals and HTTP402 balance refusals now make one request and settle as an assistant API error instead of persistent server recovery. The fork had the same order, so the moved line is the whole change. Budget resolution, scope isolation and main-only publication are unchanged. Upstream `a7440d13` also changes the empty-attempt cleanup that the 2026-10-20 bullet below describes: the assistant identity is kept and only its parts are removed (FC-009). Evidence: `title-first-turn.test.ts` TP-REFUSAL-01, `retry.test.ts`, `test/error/host-registry.test.ts`.
-
-- 2026-10-20 post-sync correction: the processor's stream retry callback now
-  applies the main-agent boundary to both retry status and `RetryAttempt`
-  publication. The earlier code guarded only status, so ordinary actor
-  pure-empty retries could emit session-global events despite this contract.
-  HTTP/SSE fixture regressions check successful main and actor retries,
-  main status/event publication and the absence of both for the actor.
-
-- 2026-10-20 synchronization: classify `InvalidOutputError` as retryable unknown and let `SessionRetry.policy` own a genuinely empty conversation attempt only when it is replay-safe, tool-free, non-structured and not a length finish. Remove the empty attempt and recreate its assistant shell before retry; exhaustion persists the terminal error, and no repair user is injected for this clean case. Reasoning-only output, incomplete checkpoint completion and tool/settlement residue retain fork bounded continuation and atomic source/task ownership rather than losing useful history or replaying side effects. Candidate/judge budgets, main-only retry publication and the MaxMode tool-free final step remain. Summary assistants remain under FD-010/FD-011/FD-012 and the separate compaction retry bound.
-
-- 2026-10-14 synchronization: upstream `002cb4c9` lets request-phase retries publish `session.status{retry}` through the processor's `setRetry`, and runner, loop and stream busy writes no longer replace a retry row. Adopted for durable main requests only, keeping the fork's main-only `RetryAttempt` guard and status lock. The visible attempt now continues across phases (request 1, stream 2) while `phaseAttempt` restarts; subagent and ensemble retries stay out of session status. Evidence: `test/session/processor-effect.test.ts`, `status-retry-map.test.ts`, `retry-density-invalid-baseurl.test.ts`.
-
-- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1871` (honor `toolChoice` on MaxMode's final step, opened 2026-07-23) is withdrawn. Upstream's `useMaxMode` gate still lacks the `!isLastStep` term, so the behavior remains fork-only under this entry's final-step contract; the PR predates the `packages/cli` rename and is not resubmitted. Its head branch `fix/maxmode-laststep-toolchoice` is deleted from the fork.
-
-- 2026-10-02 synchronization: upstream `ac04af98` deletes `docs/architecture/retry-coordinator.md` with its other non-spec documents. The fork rewrote that file as this entry's retry-policy and configuration reference, so it stays as fork documentation.
-
-- 2026-09-17 synchronization: Retain bounded server/rate-limit defaults and scope-first request/candidate/judge budgets against upstream persistent defaults. Adopt expanded transport classification and processor-owned visible retry status. Request retries publish diagnostics only for durable main requests; ensemble calls suppress that diagnostic stream. Jitter precedence, bounded network fallback, immutable instructions, side-effect replay guards and MaxMode final-step enforcement remain.
 
 - Current default policy: server and rate-limit live-step recovery now use
   persistent retry without a deadline, matching network and upstream defaults.
@@ -2030,7 +1959,48 @@ own source list remains the complete watch surface.
   MaxMode cannot continue tool calls beyond the final-step boundary. Candidate
   and judge calls use bounded configurable retry with fresh attempt-local
   accumulators. Eligible subagents may execute MaxMode, but only the main agent
-  may publish session-global retry status or `RetryAttempt` events.
+  may publish session-global retry status or `RetryAttempt` events; the
+  processor's stream retry callback applies that boundary to both. Request-phase
+  retries of durable main requests publish `session.status{retry}` through the
+  processor's `setRetry` (upstream `002cb4c9`), and the visible attempt
+  continues across phases while `phaseAttempt` restarts; subagent and ensemble
+  retries stay out of session status, and request retries publish diagnostics
+  only for durable main requests. Request and stream retries persist per-actor
+  records.
+- Retry classification: a complete terminal signal is terminal before any
+  capacity heuristic (`retryConstraint(error) === "terminal"` precedes
+  `exhausted`/`unavailable`, upstream `8fd65328`), so HTTP 403 membership or
+  subscription refusals and HTTP 402 balance refusals make one request and
+  settle as an assistant API error; complete HTTP 429, `code`/`type` limitation
+  and exact quota-exhausted signals are terminal regardless of provider and
+  survive serialization, with host decisions taking precedence. Ordinary 429
+  keeps the bounded request budget and the persistent live-step rate-limit
+  budget. `InvalidOutputError` is retryable unknown: `SessionRetry.policy` owns a
+  genuinely empty attempt only when it is replay-safe, tool-free,
+  non-structured and not a length finish, removes that attempt's parts and
+  retries without injecting a repair user, and persists the terminal error on
+  exhaustion. Reasoning-only output (non-GPT), incomplete checkpoint completion
+  and tool or settlement residue keep the fork's bounded, actor-scoped
+  continuation with atomic source and task ownership; upstream's global
+  reasoning-only-final policy is not adopted. A stream that ends with unified
+  `other` and no provider finish reason raises `StreamIncompleteError` (live
+  `rawFinish`), which uses bounded stream recovery, not the `emptyOutput`
+  budget; historical raw-less `other` messages stay readable by content, and
+  MaxMode excludes live incomplete candidates while keeping the raw finish on
+  accepted replay. Summary assistants stay with FD-010–FD-012.
+- Background system agents (`SYSTEM_SPAWNED_AGENT_TYPES`: checkpoint writer,
+  dream, distill) retry within `SYSTEM_AGENT_MAX_RETRIES` (4) and
+  `SYSTEM_AGENT_RETRY_DEADLINE_MS` (5 minutes) whatever the configured mode,
+  keeping the class's delays. `SessionRetry.boundForSystemAgent` is passed as
+  the stream policy's `cap`, applied after the network and persistent-host
+  constraints that would otherwise reset a budget to persistent, and also caps
+  the request ladder in `llm.ts`. They retry on their own schedule instead (the
+  next threshold or pass); a persistent budget once held a writer slot for
+  about 21 hours. Upstream's `MIMOCODE_EMPTY_STEP_DROP_LIMIT` (`flag/flag.ts`,
+  `942de16e`) has no reader here: the 2026-11-13 synchronization adapted its
+  bound into the `emptyOutput` budget and this cap, so `dropEmptyAssistant` and
+  its counter are absent and setting the variable does nothing. A sync that
+  brings back a reader must decide which bound governs.
 - Configuration delta: `session/retry.ts` resolves top-level jitter as each
   budget's default. Priority from lowest to highest is global top-level jitter, global budget jitter,
   provider top-level jitter, then provider budget jitter. Switching network,
@@ -2057,7 +2027,13 @@ own source list remains the complete watch surface.
   Upstream routes pure-empty `InvalidOutputError` to the persistent server
   budget; the fork's `emptyOutput` budget (config key, `RetryDecision.emptyOutput`
   flag and `budgetFor` branch) is fork-only and must survive syncs that touch
-  `decide` or `budgetFor`.
+  `decide` or `budgetFor`. `decide` still reports `kind: "server"` and adds
+  `emptyOutput: true`, and `budgetFor` routes it after the scope, host-class,
+  network and rate-limit checks, so retry parts, status events and the SDK
+  `kind` enum match upstream. Upstream's `useMaxMode` gate still lacks the
+  `!isLastStep` term (the 2026-07-23 upstream PR #1871 was withdrawn), so the
+  final-step contract stays fork-only. `docs/architecture/retry-coordinator.md`,
+  which upstream deleted, is this entry's fork-maintained policy reference.
 - Watch surfaces: `packages/cli/src/session/max-mode.ts`,
   `packages/cli/src/session/prompt.ts`,
   `packages/cli/src/session/retry.ts`, `packages/cli/src/config/retry.ts`,
@@ -2069,7 +2045,18 @@ own source list remains the complete watch surface.
   `packages/cli/test/session/prompt-effect.test.ts`, step-budget coverage in
   `packages/cli/test/session/max-mode.test.ts`, and candidate/judge
   EConnReset coverage in `packages/cli/test/session/max-mode-econnreset.test.ts`
-  at main behavior.
+  at main behavior. Named carriers: `retry.test.ts` "InvalidOutputError retries
+  under the bounded emptyOutput budget, not the server budget", "policy gives up
+  on endless empty output after the emptyOutput count" and "a system-agent cap
+  bounds network and persistent-host retries"; `invalid-output-continuation.test.ts`
+  "endless empty output stops at the default bound even under a persistent
+  server budget" and the checkpoint-writer bound cases (removing the
+  `budgetFor` routing or the cap fails them); `title-first-turn.test.ts`
+  TP-REFUSAL-01 and `test/error/host-registry.test.ts` (terminal refusals);
+  `processor-effect.test.ts`, `status-retry-map.test.ts` and
+  `retry-density-invalid-baseurl.test.ts` (phase-continuous main status); and
+  HTTP/SSE fixtures that require main status and events but neither for an
+  actor retry.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
 - Retirement condition: MaxMode itself consumes and enforces the final-step
