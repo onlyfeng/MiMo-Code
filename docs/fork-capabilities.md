@@ -114,88 +114,6 @@ entry's own source list remains the complete watch surface.
 
 ### FC-001 — linearized actor generations and persistent-peer lifecycle
 
-- 2026-11-26 alignment review: `actor/spawn.ts` delivers terminal notifications through the shared `makeTerminalNotifier` (`actor/notification.ts`), as upstream's spawn does, instead of two hand-written copies. The fork keeps only its delivery target around the call: `withNotificationTarget` runs it inside the parent's Instance and run-disposal scope, and the caller's early background, system-agent, mode and disposal checks stay in place. The notifier takes the caller's `actor` (no registry read inside another Instance) and publishes its toast through the injected `Bus` service, so the toast reaches the Instance the delivery runs in. A resumed persistent turn now notifies as a `continuation`, without a toast, matching the woken-peer path (`test/actor/spawn-notification.test.ts`) and the 2026-09-15 note below; spawn-turn and cancel-owner deliveries keep their toasts. The unused `captureNotificationTarget` helper is removed.
-
-- 2026-11-26 alignment review: three upstream helpers ship here without a production caller, and their upstream tests exercise only the helper: `MessageV2.planResumeTrim` and `assertResumeModelBoundary` (unused since the 2026-10-14 note below; covered by `test/session/message-v2.test.ts` and one `test/session/processor-effect.test.ts` case), and `resolveCurrentAgent` in `server/routes/instance/session.ts` (covered by `test/server/summarize-route-main-slice.test.ts`). The fork's `/summarize` route goes through `SessionPrompt.startSummarize`, which repeats the main-slice lookup inline because it also needs that user's id and task. `test/server/summarize-agent-main-slice.test.ts` drives the real route with a newer user message on a subagent lane and requires the compaction boundary to carry the main slice's agent; reading the agent from every lane fails it on that assertion. A passing upstream helper test is not evidence for the fork's path.
-
-- 2026-11-16 synchronization: adopt process-wide live-claim run tracking and monotonic run ids across every prompt entry. A run with no surviving claimed input interrupts instead of consuming retry supersession indefinitely. Settlement releases the live marker even when acknowledgement fails or there is nothing to acknowledge. Owned acceptance, frozen authority, lane identity and generation checks remain. See C09 in [the sync record](upstream-sync-2026-11-16.md).
-
-- 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
-
-- 2026-10-22 live advancement: a newly accepted lane input supersedes a failing retry step through the existing claim/consume/task and run-approval boundaries. Recovery keeps its locked parent and does not observe the new-input watcher. Successful cleanup removes retry parts but retains assistant identities referenced by durable first-delivery receipts. Tests cover lower-ID admission, supersession, receipt anchors, recovery and retained authority.
-
-- 2026-10-21 synchronization: upstream `88673c41` deletes `recall-reminder.test.ts`, its only consumer of the `actor` hint, and moves the `hasActorTool` predicate cases into `test/tool/actor-subagent-gating.test.ts` with upstream's "an unresolvable agent keeps the tool" case. The fork keeps PR #53's fail-closed result: that moved case asserts `hasActorTool(undefined) === false`, and `ToolRegistry.available` remains the only production caller.
-
-- 2026-10-20 post-sync convergence: remove the retired inbox wake's optional
-  Runner join/admission arguments, `runLoop` inbox-deferral argument and
-  `CancelEpoch` wake holds. The durable scheduler now owns that work; the
-  synchronous session cancellation epoch, per-run generation, acquisition
-  checks and owned cleanup remain. Session fork reads its source-message
-  snapshot before destination creation and reuses it for cutoff validation
-  and subsequent busy-agent inspection, while retaining the transaction's
-  fresh rendered-order copy. Instance-owned cron cleanup discovered during
-  final CI is recorded under FC-007.
-
-- 2026-10-20 synchronization: adopt upstream `949a3bcc`'s durable input receipts and lane scheduler, replacing the old `Inbox.send`/drain/wake implementation and the async-only queue contract. `Controller.accept` commits the complete user message and parts with its receipt, preserving fork generated-part replay checks, provenance, task binding and ownership validation. Receipt states are `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes distinguish success, assistant error, interruption and never-ran input. First delivery fixes input placement, while terminal receipt retention and GC replace destructive drain deletion. `session.receipt.updated` replaces `InboxArrived`; accepted-only consumers inspect the committed user input, not legacy row content. The API retains the `inboxID` result field for actor callers as a receipt identifier. Earlier dated send/drain/wake and async-only descriptions below are historical where superseded by this review.
-- The scheduler owns each `(sessionID, actorID)` lane, claim extension and idle re-kicks. The synchronous `/message` route streams 200 when admitted idle and returns 202 plus the persisted user and `receiptId` when busy; `/prompt_async` returns 202 with `receiptId`, or 204 when no turn is admitted. Receipt lookup is session-scoped. Strict internal `startPrompt`/command/shell/summarize/recovery occupation remains independently guarded; the HTTP queue fallback does not weaken those atomic entry points. `noReply` persists history without accepting, claiming or scheduling a turn, and cannot replace a queued task's authority. Cancellation advances the persisted queue epoch before signalling execution, settles accepted unclaimed input as `never_ran`, and cannot restart an old-epoch wake. Such a queued prompt returns its original user rather than manufacturing an aborted assistant. Resume checks queue epoch as well as the retained actor/runner generation before occupation.
-- Main completion automatically waits for owned subagent executions and legacy live runners. New input wakes the wait without cancelling the child; a receipt-only wake cannot move the current input frontier backward. Explicit actor wait observes execution and input revisions; timeout preserves a discoverable running child and returns structured state. Generation handoff, persistent-peer retirement, frozen context, exactly one terminal notice and close-abort-join remain fork-owned. Seedless main input can remain accepted without spinning or inventing a model; a later valid prompt may consume it. Only a positively known peer uses the configured-model fallback.
-- Queue rendering is shared by model requests, checkpoint context, post-hook trajectories, goal judging and fork/export/import projections. Accepted but unconsumed input remains hidden; consumed inputs retain first-delivery order, including caller IDs older than a current frontier. A checkpoint boundary must not have its continuation authority displaced by reconstructing an older consumed input. Structured completion stays attached to its original caller even if a later prompt is consumed in the same lane run. A newly admitted user may settle an older unfinished error while preserving that error. Atomic replay, task inheritance, fail-closed public actor recovery, invocation approval and generation ownership remain active. Evidence and accepted-source CI: [thirteen-capability record](upstream-sync-2026-10-20.md).
-
-- 2026-10-15 follow-up (closes the pre-admission cancel gap): `SessionRunState.cancel` first advances a per-session `CancelEpoch` (`packages/cli/src/session/cancel-epoch.ts`) synchronously. `Inbox.wake` records that epoch before its first suspension and passes it as the loop input's `cancelEpoch`; the main-agent inbox loop hands it to `SessionRunState.ensureRunning`, which gives `Runner.ensureRunning` an `admit` predicate evaluated inside the same atomic transition as `canStart`, both on entry and after `onBusy`. A wake whose epoch moved is refused with an interrupt before it starts or joins a run, so no model request is made and its inbox row stays durable for the next ordinary run; a wake scheduled after the cancel records the new epoch and runs normally. Non-main receivers keep their `ActorExecution` path (`exec.cancelled`), and `LoopInput` stays internal (no HTTP/SDK change). Upstream's "abort immediately after send cannot let a queued wake restart the receiver" case is now carried verbatim; removing the admission predicate makes it fail again. `Session.remove` releases the removed session's epoch beside its other process-wide session state, deferred while a scheduled wake still holds it: `Inbox.wake` records the epoch and takes a `CancelEpoch.hold` together with its instance claim and releases both when the wake exits, because dropping the entry earlier would read as the initial epoch and admit a wake recorded before a cancel (`test/session/cancel-epoch.test.ts`).
-
-- 2026-10-15 synchronization: upstream `f82fa60a` makes a scheduled inbox wake hold an `Instance.claim` until its fiber exits. Adapted into `Inbox.wake`, the single entry for `send` and `wakePending`: the claim is taken on the current service instance before receiver lookup and instance preparation, and claim, preparation, `EffectBridge` fork and exit-observer registration form one uninterruptible handoff; the outer wake fiber starts immediately and the bridged receiver loop keeps its own instance and run-disposal marker. Known gap at that point (closed by the follow-up below): a cancel issued after `send` returns but before the bridged loop reaches Runner admission did not stop that wake, because the bridge (`Effect.runFork`) and the `InstanceState` lookup in `SessionRunState.runner` suspend before admission, so `SessionRunState.cancel` finds no busy runner. The gap predates this range (reproduced on `a7d242df` without disposal: the receiver issues a second model request); upstream closes it by synchronous admission and asserts it in `wake-instance-handoff.test.ts` ("abort immediately after send cannot let a queued wake restart the receiver"), which the fork did not carry until the pre-admission cancellation path below existed. Evidence: `test/inbox/wake-instance-handoff.test.ts` (five adopted cases), `test/inbox/` and `test/actor/cancel-notification.test.ts`.
-
-- 2026-10-14 synchronization: upstream `002cb4c9` rebuilds resume around an exact reviewed target and a history trim that restarts from the parent user. The trim and parent restart are not adopted: resume still settles the selected assistant in its admission transaction and continues from it, so `MessageV2.planResumeTrim` and `assertResumeModelBoundary` ship unused. Adopted into `startResumeTurn`: `POST /session/:id/resume` accepts an exact `assistantMessageID` (exclusive with `userMessageID`, also forwarded to actor resume); a pending question or permission in the session refuses resume with 409 before occupation and again at admission; admission runs before `SessionRunState`'s orphan sweep through the new `startOwned` `admit` argument, so a rejected or cancelled admission writes nothing; a Stop before admission reports 404 from `POST /session/:id/resume` while `startResume` keeps reporting the interruption; and an optional host execution `attempt` is prepared, rechecked, admitted before the settlement commit, gated on `beforeWork` and finished when the run fiber exits (`Runner.startOwned` now exposes `awaitExit`), with `ExecutionScope` on main model calls. Actor resume refuses `attempt`. An empty provider stop is a candidate even after completion or a later error, until an abandonment settles it with `MessageAbortedError`; a completed errored assistant with delivered output stays settled as before. Residue cleanup skips summary and structured-output assistants. Model tools now run in the processor's tool scope, which execution cleanup closes and joins, so `Actor.cancel` called from a tool delegates to the service scope and waits interruptibly exactly as a direct execution hook does; without that, a peer cancelling its own spawn through the `actor` tool deadlocked (`test/actor/self-cancel.test.ts`). Evidence: `test/server/session-recovery.test.ts` (exact-target matrix, host attempt lifecycle, empty-stop matrix), `test/effect/runner.test.ts`, `test/session/invalid-output-continuation.test.ts`.
-
-- 2026-10-13 registry correction: `packages/cli/src/agent/config.ts` and `packages/shared/src/util/encode.ts` join the watch surfaces. Both were already fork-different (`hasActorTool` fails closed for an unresolvable caller since PR #53; `compareUtf8Bytes` is the SQLite BINARY tie-break the chronology consumers use) but no entry named them, so a path-based sync review could not find them. No behavior changes.
-
-- 2026-10-04 synchronization: upstream `6babeb0b` adds an `Instance.updateIdle` barrier for explicit provider refreshes. A refresh returns `pending` while any request, execution claim, disposal or failed cleanup exists, so live Actor and session executions defer it. While a refresh is applying, new requests wait and `Instance.claim` throws `InstanceBusyError` exactly as upstream; only the explicit refresh endpoint opens that window and no TUI path calls it. Actor generation ownership and terminal claims are unchanged.
-
-- 2026-10-02 synchronization: upstream `698f0f29` deletes the committed `packages/sdk/openapi.json`; the SDK build now writes a scratch copy at that path and removes it. The published actor-recovery contract is asserted on the runtime OpenAPI document and carried by the generated v2 SDK, so the snapshot leaves this entry's surfaces.
-
-- 2026-09-30 synchronization: an interrupt-only exit while a run-loop step is still preparing (after `sessions.createMessage` commits the assistant, before stream cleanup owns it — snapshot capture, language resolution, tool resolution) now persists `MessageAbortedError("Aborted")` and publishes `Session.Event.Error` before SessionRunState publishes idle. An assistant that the processor already errored or completed is untouched. The assistant still has no `time.completed`, so it stays a recovery candidate exactly as a stream-phase abort does; the next admitted user's orphan sweep keeps that error rather than writing the generic abandonment message. `test/session/prompt-effect.test.ts` covers both preparation boundaries and the following turn.
-
-- 2026-09-19 synchronization: Main resume captures a cancellation epoch before atomic admission, then cascades only eligible same-session subagents through Actor.recovery/resume. No registry-only or released-context takeover; child supervisors retain task/model/context ownership and terminal publication. Pending admission is bounded and withdrawn on Stop or timeout.
-
-- 2026-09-17 synchronization: Empty-residue recovery deletes parent-scoped shells and binds any task within the existing immediate admission transaction. Ownership handoff precedes postcommit publication; failed/busy/stale/cancelled admission cannot clean up. Useful assistant output retains settlement and continuation. Recovery still selects the latest same-actor candidate; completed abandoned errors are not revived. The parent user is never fabricated or rewritten except the existing authorized task binding.
-
-- 2026-09-10 title authority: inherit transactional title revisions and protected
-  manual titles across imports, replay and HTTP conflicts. First genuine input
-  commits a deterministic fallback before detached generation through the
-  existing promptWork/send admission and queue handoff. Recovery alone does not
-  retitle historical turns. This changes no Actor generation or task ownership.
-
-- 2026-09-15 execution completion: spawn reserves an ActorExecution during
-  admission and retains it through postStop and terminal publication. Blocking
-  run/outcome/wait, persistence and parent notification observe the preserved
-  main result with postStop warnings after housekeeping; background spawn still
-  returns its identity after admission. Inbox continuations cannot overtake it.
-  Cancellation closes execution admission, invalidates queued acquisition
-  tickets, captures the selected execution, and interrupts/joins it through
-  retirement. Old tickets cannot restart after the barrier opens; fresh valid
-  generations and other sessions remain independent. A reserved worker cancelled
-  before startup skips its model call through the protected finalizer path. A cancellation-owned generation is published
-  by the execution; the cancelling owner waits rather than publishing early.
-  Notification receipts are read after that join. A completed turn cannot hide
-  cancellation of subsequently queued work; an already-cancelled turn does not
-  receive a duplicate notice. Failed-send fallback remains. Owner acquisition and cleanup installation are
-  masked together, while a follower's wait remains interruptible. Direct Effect
-  hooks on an active execution fiber delegate cancellation to the existing
-  service scope and wait interruptibly, including self/ancestor cancellation
-  from a finalizer. External callers still join complete cleanup. Model tool
-  calls already use independent Promise-bridge fibers; their interface is unchanged.
-  Runner installs its exit finalizer before its child can be interrupted, then
-  keeps the start wait and actual work interruptible. This prevents a child that
-  exits before its first instruction from leaving the runner's done signal open.
-  See [the lifecycle evidence](actor-lifecycle-alignment-2026-09-15.md).
-
-- 2026-09-13 terminal publisher (historical partial fix): continuations gained
-  a receipt recording whether their terminal envelope was actually published;
-  failed sends do not suppress fallback notification. That receipt and its
-  queued-work distinction remain. The former unjoined publication-to-receipt
-  window is closed by the 2026-09-15 execution join, replacing the earlier
-  decision to defer upstream's cancellation shape.
-
 - Status: active
 - Canonical owner: fork `main` actor/inbox runtime
 - Observable contract: generation ownership, terminal claims, cancellation
@@ -300,6 +218,139 @@ entry's own source list remains the complete watch surface.
   and TUI `routes/session/{plan-switch.ts,index.tsx}` under `packages/cli`.
   Tests include actor-owned-lifecycle, actor-exec-lifecycle, plan-approval,
   exec-interaction and real TUI plan-switch events.
+- Input queue and lanes (upstream `949a3bcc`, adopted 2026-10-20): durable
+  input receipts and the lane scheduler replace the former `Inbox.send`, drain
+  and wake implementation. `Controller.accept` commits the complete user
+  message and parts with its receipt, keeping the fork's generated-part replay
+  checks, provenance, task binding and ownership validation. Receipt states are
+  `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes
+  distinguish success, assistant error, interruption and never-ran input. First
+  delivery fixes input placement; terminal receipts are retained and garbage
+  collected rather than deleted by a drain. `session.receipt.updated` replaces
+  `InboxArrived`, accepted-only consumers inspect the committed user input, and
+  the API keeps the `inboxID` result field for actor callers as the receipt
+  identifier. The scheduler owns wake work; the synchronous session
+  cancellation epoch (`CancelEpoch`), per-run generation, acquisition checks and
+  owned cleanup remain.
+  - The scheduler owns each `(sessionID, actorID)` lane, claim extension and idle re-kicks. The synchronous `/message` route streams 200 when admitted idle and returns 202 plus the persisted user and `receiptId` when busy; `/prompt_async` returns 202 with `receiptId`, or 204 when no turn is admitted. Receipt lookup is session-scoped. Strict internal `startPrompt`/command/shell/summarize/recovery occupation remains independently guarded; the HTTP queue fallback does not weaken those atomic entry points. `noReply` persists history without accepting, claiming or scheduling a turn, and cannot replace a queued task's authority. Cancellation advances the persisted queue epoch before signalling execution, settles accepted unclaimed input as `never_ran`, and cannot restart an old-epoch wake. Such a queued prompt returns its original user rather than manufacturing an aborted assistant. Resume checks queue epoch as well as the retained actor/runner generation before occupation.
+  - Main completion automatically waits for owned subagent executions and legacy live runners. New input wakes the wait without cancelling the child; a receipt-only wake cannot move the current input frontier backward. Explicit actor wait observes execution and input revisions; timeout preserves a discoverable running child and returns structured state. Generation handoff, persistent-peer retirement, frozen context, exactly one terminal notice and close-abort-join remain fork-owned. Seedless main input can remain accepted without spinning or inventing a model; a later valid prompt may consume it. Only a positively known peer uses the configured-model fallback.
+  - Queue rendering is shared by model requests, checkpoint context, post-hook trajectories, goal judging and fork/export/import projections. Accepted but unconsumed input remains hidden; consumed inputs retain first-delivery order, including caller IDs older than a current frontier. A checkpoint boundary must not have its continuation authority displaced by reconstructing an older consumed input. Structured completion stays attached to its original caller even if a later prompt is consumed in the same lane run. A newly admitted user may settle an older unfinished error while preserving that error. Atomic replay, task inheritance, fail-closed public actor recovery, invocation approval and generation ownership remain active. Evidence and accepted-source CI: [thirteen-capability record](upstream-sync-2026-10-20.md).
+- Run tracking and retry supersession: live-claim run tracking is process-wide,
+  with monotonic run ids across every prompt entry. A run with no surviving
+  claimed input interrupts instead of consuming retry supersession
+  indefinitely, and settlement releases the live marker even when
+  acknowledgement fails or there is nothing to acknowledge. A newly accepted
+  lane input supersedes a failing retry step through the claim, consume, task
+  and run-approval boundaries; recovery keeps its locked parent and does not
+  observe that watcher. Successful cleanup removes retry parts but keeps
+  assistant identities referenced by durable first-delivery receipts.
+- Resume and recovery admission: resume settles the selected assistant inside
+  its admission transaction and continues from it; upstream `002cb4c9`'s history
+  trim and parent-user restart are not adopted. `POST /session/:id/resume`
+  accepts an exact `assistantMessageID` (exclusive with `userMessageID`, also
+  forwarded to actor resume). A pending question or permission refuses resume
+  with 409 before occupation and again at admission. Admission runs before
+  `SessionRunState`'s orphan sweep through `startOwned`'s `admit` argument, so a
+  rejected or cancelled admission writes nothing; a Stop before admission
+  reports 404 from the route while `startResume` reports the interruption. An
+  optional host execution `attempt` is prepared, rechecked, admitted before the
+  settlement commit, gated on `beforeWork` and finished when the run fiber exits
+  (`Runner.startOwned` exposes `awaitExit`); main model calls carry
+  `ExecutionScope`, and actor resume refuses `attempt`. Main resume captures a
+  cancellation epoch before atomic admission, then cascades only to eligible
+  same-session subagents through `Actor` recovery/resume: no registry-only or
+  released-context takeover, child supervisors keep task, model and context
+  ownership and terminal publication, and pending admission is bounded and
+  withdrawn on Stop or timeout. An optional model override goes through the
+  single `startResumeTurn` admission path and is resolved before
+  `commitRecoveryCandidate`, so an unresolvable model settles nothing; the
+  classification skip uses the candidate the runner actually settled.
+  Upstream's `resume`/`resumeBackground` remain absent.
+- Recovery candidates and settlement: `time.completed` is the settlement
+  marker. A step-level `time.completed` does not prove the round finished, so a
+  turn that stopped on `tool-calls` or `length` is a candidate while a clean
+  `stop`/`other` turn is not; settling an already-errored assistant is
+  idempotent, and a settled errored assistant is not a candidate again (upstream
+  keeps it one). The settlement guard is "completed and errored", and the
+  `expectedParentID` candidate-identity check runs before any write. An empty
+  provider stop stays a candidate, even after completion or a later error,
+  until an abandonment settles it with `MessageAbortedError`; a completed
+  errored assistant with delivered output stays settled. An interrupt-only exit
+  while a run-loop step is still preparing (after the assistant is created,
+  before stream cleanup owns it) persists `MessageAbortedError("Aborted")` and
+  publishes `Session.Event.Error` before idle; the assistant keeps no
+  `time.completed`, so it stays a candidate, and the next admitted user's orphan
+  sweep keeps that error. Empty-residue recovery deletes parent-scoped shells
+  and binds any task inside the immediate admission transaction, skipping
+  summary and structured-output assistants; ownership handoff precedes
+  postcommit publication, and failed, busy, stale or cancelled admission cannot
+  clean up. Recovery selects the latest same-actor candidate, does not revive a
+  completed abandoned error, and never fabricates or rewrites the parent user
+  except for an authorized task binding. Late subtask metadata after settlement
+  leaves the persisted tool part unchanged.
+- Execution, cancellation and notification: spawn reserves an `ActorExecution`
+  during admission and keeps it through postStop and terminal publication.
+  Blocking run/outcome/wait, persistence and parent notification observe the
+  preserved main result with postStop warnings after housekeeping; background
+  spawn returns its identity after admission, and inbox continuations cannot
+  overtake it. Cancellation closes execution admission, invalidates queued
+  acquisition tickets, then captures, interrupts and joins the selected
+  execution through retirement; old tickets cannot restart after the barrier
+  opens, while fresh generations and other sessions stay independent. A
+  reserved worker cancelled before startup skips its model call. The execution
+  publishes a cancellation-owned generation and the cancelling owner waits;
+  notification receipts are read after that join, a completed turn cannot hide
+  cancellation of later queued work, and an already-cancelled turn gets no
+  duplicate notice. Continuation receipts record whether the terminal envelope
+  was actually published, so a failed send does not suppress the fallback
+  notice. Owner acquisition and cleanup installation are masked together while
+  a follower's wait stays interruptible. Effect hooks on an active execution
+  fiber, and model tools (which run in the processor's tool scope that execution
+  cleanup closes and joins), delegate cancellation to the service scope and wait
+  interruptibly, so an actor cancelling its own spawn through the `actor` tool
+  does not deadlock. Runner installs its exit finalizer before its child can be
+  interrupted. Session abort cancels every runner and registered actor in the
+  session; terminal cancellation is durable and drains into the parent's main
+  history without automatic wake or toast. Quiet delivery follows execution,
+  generation and cancellation-episode ownership, and runner keys nest by exact
+  session and actor identity. Terminal notifications go through upstream's
+  shared `makeTerminalNotifier` (`actor/notification.ts`): `withNotificationTarget`
+  runs it inside the parent's Instance and run-disposal scope, the caller passes
+  the `actor` it already holds, and the toast goes through the injected `Bus`
+  service. Spawn-turn and cancel-owner deliveries toast; a resumed persistent
+  turn notifies as a `continuation` without a toast, like a woken peer.
+- Message chronology and atomic commits: caller IDs are identity keys, not
+  admission order. `createMessage` allocates an actor-local monotonic committed
+  timestamp; metadata updates keep the creation time and completion cannot
+  precede it. `commitUserMessage` and `commitUserMessageIfLatest` commit a user
+  or derived user with all its parts, validating session, actor and part
+  ownership, and the latest-user condition shares that immediate transaction.
+  A same-owner prompt retry may reuse producer-generated part IDs only when the
+  complete persisted content matches: anonymous parts match by relative order,
+  explicit IDs and persisted content stay strict, reordered explicit parts are
+  equivalent after canonical sorting, and runtime-added parts make a later
+  replay conflict; this is not a lifetime replay receipt. Shell writes and
+  streamed assistant/tool output stay outside that transaction. Fork, revert and
+  cursor consumers use chronological positions with UTF-8 ID ties matching
+  SQLite BINARY (`compareUtf8Bytes`). Session IDs are upstream's marker-free
+  descending form in the same `ses` namespace; existing `ses_-…` IDs stay valid,
+  and message descending IDs keep their chronology marker.
+- Other carried rules: summarize stays in `SessionPrompt.startSummarize` with
+  its owned main runner, atomic `createIfLatest`, task identity and commit
+  receipt; it validates the model before mutation, removes unprojected
+  boundaries on exit, and verifies the projection after the runner completes,
+  including the cancellation fallback, so a cancelled compaction never reports
+  success. `MessageV2.planResumeTrim`, `assertResumeModelBoundary` and the
+  route's `resolveCurrentAgent` ship without a production caller, so their
+  upstream tests do not cover the fork's path. Session fork reads its
+  source-message snapshot before creating the destination and reuses it for
+  cutoff validation and busy-agent inspection, keeping the transaction's fresh
+  rendered-order copy. `hasActorTool(undefined)` is `false` (fail closed, PR #53)
+  and `ToolRegistry.available` is its only production caller. Title revisions
+  are transactional and manual titles stay protected across imports, replay and
+  HTTP conflicts; the first genuine input commits a deterministic fallback
+  title before detached generation, and recovery alone does not retitle
+  historical turns.
 - Upstream relationship: adopts upstream durable receipts, lane scheduling and
   automatic subagent waiting, plus typed exclusive Runner admission and
   actor-scoped `replace-agent`, while retaining the stronger
@@ -307,13 +358,6 @@ entry's own source list remains the complete watch surface.
   evidence. Public actor recovery adapts upstream's `agentID` selector through
   the existing constrained actor lifecycle, without caller-supplied task
   replacement or detached background resume.
-- 2026-09-18 synchronization: session abort cancels every runner and registered
-  Actor in the target session. Terminal cancellation remains durable and is
-  drained into parent main history without automatic wake or toast. Quiet
-  delivery follows execution/generation and cancellation-episode ownership,
-  including a quiet follower joining a registry-only cancel. Runner keys are
-  nested by exact session and actor identity; leases, admission, retirement,
-  disposal checks and terminal-delivery deduplication remain authoritative.
 - Watch surfaces: `packages/cli/src/actor/`,
   `packages/cli/src/agent/config.ts` (`hasActorTool` fails closed for an
   unresolvable caller, PR #53),
@@ -347,52 +391,20 @@ entry's own source list remains the complete watch surface.
   handoff, stale-continuation/compaction, cancel, and per-user task-binding tests,
   default-main and constrained actor-selector OpenAPI regressions, replace-agent actor-scope regressions, and
   actor/session tool tests at the reviewed main behavior.
-- 2026-09-07 recovery-timing review: adapted upstream early settlement inside
-  `startResume` validation rather than before the fork's atomic admission.
-  `test/session/prompt-effect.test.ts` observes the old assistant already
-  completed while `session.pre` blocks the new loop; it covers subsequent
-  success, partial-context retention, finalizer idempotence, real
-  non-retryable-error recovery, and unchanged messages on all three rejected or
-  cancelled admission paths. Main-only identity and locale propagation remain
-  unchanged.
-- 2026-09-05 subtask review: adopted terminal-state assignment and the
-  running-only metadata guard. A real cancellation regression calls late
-  metadata after settlement and requires the entire persisted tool part to
-  remain unchanged. Prompt queue admission, task binding, and atomic derived
-  user creation remain unchanged.
+  The carried rules above are covered by `test/server/session-recovery.test.ts`
+  (exact-target, host-attempt, empty-stop and candidate-predicate matrices),
+  `test/session/prompt-sweep.test.ts` (settlement boundary),
+  `test/effect/runner.test.ts`, `test/session/invalid-output-continuation.test.ts`,
+  `test/actor/self-cancel.test.ts`, `test/actor/spawn-notification.test.ts`,
+  `test/server/summarize-agent-main-slice.test.ts` and the HTTP
+  cancelled-compaction case, `test/tool/actor-subagent-gating.test.ts`
+  (`hasActorTool`), `test/inbox/queue-controller.test.ts`,
+  `test/session/cancel-epoch.test.ts`, and the step-preparation and
+  resume-timing cases of `test/session/prompt-effect.test.ts`. The published
+  actor-recovery contract is asserted on the runtime OpenAPI document; the
+  committed `packages/sdk/openapi.json` is gone since upstream `698f0f29`.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
-- 2026-08-28 review: adopted strict spawn/run argument rejection and the
-  existing `send` follow-up path while preserving caller-resolution,
-  generation, persistent wake, and frozen-context fail-closed contracts.
-- 2026-09-02 session-ID format review: adopted marker-free descending session
-  IDs while retaining the same `ses` namespace, opaque lookup semantics, and
-  lifecycle/admission/resume ownership. Existing `ses_-...` identifiers remain
-  valid inputs; message descending IDs deliberately retain their chronology
-  marker.
-- 2026-09-03 correction: `prompt_async` had been routed through `startPrompt`
-  since `1cfe7efc`, which made the whole of `promptWork` — `createUserMessage`
-  included — the admitted work, so a busy session answered 409 and never
-  persisted the message. The TUI's queue depends on that message existing, so
-  typing during a turn silently lost the input. Admission for the fire-and-forget
-  route is now the upstream `prompt` path again; the synchronous `/message`,
-  `/init`, `/summarize`, `/command`, and resume routes keep `startRunning`,
-  which is what the zombie-runner hardening in `1cfe7efc` was for.
-- 2026-09-04 closing-window correction (historical follower implementation, replaced by durable lane receipts on 2026-10-20): a persisted prompt that joins an older
-  successful, failed, or non-assistant runner result hands off through the
-  existing `run` path until an assistant covers it. Pure interruption and a
-  shared `MessageAbortedError` stop handoff; a joined failure is retried once,
-  while failure from work this caller actually started is preserved. Coverage
-  uses actor transcript order and assistant `parentID`, without tickets, tail
-  movement, new Runner state, cancellation generation, or detached delivery.
-  Optional task authority is persisted with each user row and resolved from the
-  actor-scoped user actually selected by the loop, not from whichever queued
-  caller wins successor admission; derived synthetic users preserve the binding.
-  Old assistant results remain durable, but a derived synthetic/control user or
-  compaction follow-up is committed only while its source user is still latest
-  for the actor. That check, the message, and all of its parts share one immediate
-  database transaction. Pre-persistence prompt parsing, caller interruption,
-  process disposal, and durable exactly-once delivery remain outside this contract.
 - Retirement condition: upstream provides equivalent generation ownership,
   typed atomic main prompt/command/init/shell/summarize/recovery/resume
   admission, default-main and constrained public actor recovery identity, equivalent constrained
@@ -401,93 +413,7 @@ entry's own source list remains the complete watch surface.
   guarantees plus positive known-peer evidence for parent identity replacement,
   with behavior-focused regressions.
 
-- 2026-09-12 wake-routing retirement (historical): a woken non-main turn moved
-  to ActorExecution and runTurn instead of the fork wake generation. Spawn's
-  execution claim was deferred after a timeout was attributed to a nested actor
-  sharing its key. The 2026-09-15 review withdraws that causal claim: with the
-  corrected InboxArrived observation, the nested primary case and actual
-  spawn-before-continuation ordering pass. Spawn now holds the same execution
-  claim. Earlier removed wake-generation-specific tests remain historical;
-  generation ownership, terminal claims and disposal provenance remain shared
-  contracts for spawn and actor resume. The two remaining quarantines are now
-  active; no upstream PR is opened for this fork correction.
-- 2026-09-11 recovery-predicate and resume-override review: adopted the part of
-  upstream's allowlist predicate that is a genuine fix — a step-level
-  `time.completed` does not prove the round finished, so a turn that stopped on
-  `tool-calls` or `length` is a candidate again, while a clean `stop`/`other`
-  turn is not — and its idempotent settlement of an already-errored assistant.
-  Upstream additionally keeps every errored message a candidate even after it is
-  settled; that is not taken. `time.completed` remains this entry's settlement
-  marker: the processor leaves an errored turn without it so recovery can find
-  it, and `sweepOrphanAssistants`/`abandonRecoveredAssistant` set it when a new
-  user admission or a resume abandons the turn, which is what "until
-  recovery/resume or a newly admitted user turn abandons and completes it"
-  means above. The settlement guard is now "completed and errored" rather than
-  "completed" so a `tool-calls`/`length` candidate that already carries
-  `time.completed` can still be settled; the fork's `expectedParentID`
-  candidate-identity check is unchanged and still runs before any write. Upstream's `resume` / `resumeBackground` remain absent:
-  the optional model override is plumbed through the single `startResumeTurn`
-  admission path, resolved before `commitRecoveryCandidate` so an unresolvable
-  model settles nothing, and the classification skip uses the candidate the
-  runner actually settled rather than the caller's argument. `packages/sdk/`
-  artifacts are regenerated from the merged route; FD-009 owns the actor
-  frozen-identity refusal. Evidence:
-  `packages/cli/test/server/session-recovery.test.ts` predicate matrix plus
-  the two fork-owned cases, plus `packages/cli/test/session/prompt-sweep.test.ts`
-  for the settlement boundary; the predicate is mutation-checked from both
-  sides, since the fork's older exclusion loses the `tool-calls`/`length` fix and
-  upstream's exclusion loses the settlement contract.
-
-- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
-  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
-  The retained spawn task namespace, synchronous commit/ownership boundary and
-  metadata-only background updates preserve existing task and message sources.
-  HTTP/SDK/tool publication and actual provider/transaction regressions are
-  recorded in the shared history; no cross-restart recovery is introduced.
-
-- 2026-09-15 retired-path cleanup: production inbox turns use ActorExecution
-  and SessionPrompt. The unused `Actor.runPersistentTurn`, private
-  `continueTurn` and sole-consumer `WakeSourceDisposal` are removed. Existing
-  `finishPersistentTurn` and `acquireWake` remain because resume uses them.
-  Ten old tests were individually mapped to actual Inbox/cancellation/lock
-  paths or explicitly retired obsolete DTO/owner-follower semantics; the
-  independent ten-case regression passed. Real continuation notifications
-  arrive through the parent Inbox without a toast. This does not reinstate the
-  deleted testing entry's notification policy. See F09 in
-  [the implementation report](audit-followups-2026-09-15.md).
-
-- 2026-09-15 shared chronology/admission (message identity/atomic replay retained; the drain/deletion implementation below was replaced on 2026-10-20): caller IDs are identity keys, not
-  admission order. `createMessage` allocates an actor-local monotonic committed
-  timestamp; metadata updates preserve creation time and completion cannot
-  precede it. User and derived-user message/parts submitted through
-  `commitUserMessage` or `commitUserMessageIfLatest` are committed together
-  with session/actor/part ownership validation; latest-user conditional
-  admission shares that transaction. Same-owner prompt retries may reuse
-  producer-generated part IDs only when the complete current persisted content
-  matches. Anonymous parts match by relative order; explicit IDs and complete
-  persisted content/metadata remain strict. Reordering explicitly identified
-  input parts can be equivalent after canonical sorting. Runtime-added
-  parts can make a later replay conflict. This is not a lifetime replay receipt.
-  Inbox draining commits its synthetic user message, all rendered parts and the
-  selected queue deletion in one immediate transaction. After asynchronous seed
-  resolution, admission rechecks cancellation, persistent-peer retirement and
-  the still-present receiver rows under that write lock. Concurrent drains or GC
-  cannot replay a previously selected row. Failed writes leave the whole batch
-  queued; postcommit observers see the complete transcript and consumed queue.
-  A publication callback failure preserves the committed drain count, while
-  Effect interruption still propagates. This guarantees queue-to-transcript
-  atomicity, not exactly-once model execution or durable event delivery. See
-  [the crash/reopen evidence](inbox-crash-consistency-2026-09-15.md).
-  Shell message/parts writes and streamed assistant/tool output remain outside
-  the `commitUserMessage*` transaction.
-  Fork/revert and cursor
-  consumers use chronological positions, with UTF-8 ID ties matching SQLite
-  BINARY. Producer and transaction regressions are recorded under F06 in
-  [the implementation report](audit-followups-2026-09-15.md).
-
 ### FC-024 — boot reconciliation reports a delivered claim as interrupted
-
-- 2026-11-16 synchronization: a still-live run in this process survives controller/Instance replacement and is excluded from same-epoch crash reconciliation. Stale-epoch fencing still cancels input. Actual orphaned consumed claims retain `interrupted`, unconsumed claims `never_ran`; crash fixtures explicitly withdraw their live marker, and the new live/orphan mixed regression runs alongside the consumed-outcome case.
 
 - Status: active
 - Canonical owner: fork `main` inbox boot recovery in
@@ -500,6 +426,11 @@ entry's own source list remains the complete watch surface.
     they stay `never_ran`.
   - This is the rule `cancelInputs` in the same file already applies when a
     session stops.
+  - A run still live in this process survives controller or Instance
+    replacement and is excluded from same-epoch crash reconciliation; stale-epoch
+    fencing still cancels its input. Crash fixtures withdraw their live marker
+    explicitly, and a mixed live/orphan regression runs beside the
+    consumed-outcome case.
 - Motivation: `reconcileOnBoot` wrote `never_ran` for every claimed row, so a
   sender reading the receipt after a crash could not tell an input the model had
   already seen and partly acted on from one it never received. Recovery rules
