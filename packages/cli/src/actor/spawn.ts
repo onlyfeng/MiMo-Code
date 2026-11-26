@@ -547,8 +547,7 @@ export const layer = Layer.effect(
         const notify = (
           status: TerminalStatus,
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string; warnings?: string[] },
-        ) =>
-          Effect.gen(function* () {
+        ) => Effect.gen(function* () {
             const source = yield* RunDisposal
             if (isRunDisposing(source)) return
             if (!input.background || input.agentType === "checkpoint-writer") return
@@ -1083,45 +1082,50 @@ export const layer = Layer.effect(
       // them later. No double-registration: nothing on the first-turn path
       // (prompt.ts) re-registers a peer — it only reads (reg.get) and updates
       // (updateTurn/updateStatus). Prerequisite for T43 (--topic reuse).
-      return yield* admit(input, child.id, child.id, lifecycle, (generation, execution) =>
-        Effect.gen(function* () {
-          yield* actorReg.register({
-            sessionID: child.id,
-            actorID: child.id,
-            mode: "peer",
-            parentActorID: input.parentActorID,
-            agent: input.agentType,
-            description: input.description ?? input.agentType,
-            contextMode: input.context,
-            contextWatermark: undefined,
-            background: input.background,
-            lifecycle,
-            tools: input.tools,
-          })
-          if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.sessionID, instanceRef)
-          return yield* forkWork({
-            runApproval: input.runApproval,
-            sessionID: child.id,
-            parentSessionID: input.sessionID,
-            parentActorID: input.parentActorID,
-            actorID: child.id,
-            agentType: input.agentType,
-            task: input.task,
-            description: input.description,
-            background: input.background,
-            notifyOnCompletion: input.notifyOnCompletion,
-            expectedEpoch,
-            actorMode: "peer",
-            model: input.model,
-            variant: input.variant,
-            lifecycle,
-            generation,
-            execution,
-            task_id: input.task_id,
-            format: input.format,
-            ...(instanceRef ? { instanceRef } : {}),
-          })
-        }),
+      return yield* admit(
+        input,
+        child.id,
+        child.id,
+        lifecycle,
+        (generation, execution) =>
+          Effect.gen(function* () {
+            yield* actorReg.register({
+              sessionID: child.id,
+              actorID: child.id,
+              mode: "peer",
+              parentActorID: input.parentActorID,
+              agent: input.agentType,
+              description: input.description ?? input.agentType,
+              contextMode: input.context,
+              contextWatermark: undefined,
+              background: input.background,
+              lifecycle,
+              tools: input.tools,
+            })
+            if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.sessionID, instanceRef)
+            return yield* forkWork({
+              runApproval: input.runApproval,
+              sessionID: child.id,
+              parentSessionID: input.sessionID,
+              parentActorID: input.parentActorID,
+              actorID: child.id,
+              agentType: input.agentType,
+              task: input.task,
+              description: input.description,
+              background: input.background,
+              notifyOnCompletion: input.notifyOnCompletion,
+              expectedEpoch,
+              actorMode: "peer",
+              model: input.model,
+              variant: input.variant,
+              lifecycle,
+              generation,
+              execution,
+              task_id: input.task_id,
+              format: input.format,
+              ...(instanceRef ? { instanceRef } : {}),
+            })
+          }),
         instanceRef?.directory,
       )
     })
@@ -1131,63 +1135,69 @@ export const layer = Layer.effect(
       const key = actorKey(input.sessionID, actorID)
       const lifecycle = input.lifecycle ?? "ephemeral"
 
-      return yield* admit(input, input.sessionID, actorID, lifecycle, (generation, execution) =>
-        Effect.gen(function* () {
-          const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
-          yield* actorReg.register({
-            sessionID: input.sessionID,
-            actorID,
-            mode: "subagent",
-            parentActorID: input.parentActorID,
-            agent: input.agentType,
-            description: input.description ?? input.agentType,
-            contextMode: input.context,
-            contextWatermark: watermark,
-            background: input.background,
-            lifecycle,
-            tools: input.tools,
-          })
+      return yield* admit(
+        input,
+        input.sessionID,
+        actorID,
+        lifecycle,
+        (generation, execution) =>
+          Effect.gen(function* () {
+            const watermark = input.context === "full" ? yield* session.lastMainMessageID(input.sessionID) : undefined
+            yield* actorReg.register({
+              sessionID: input.sessionID,
+              actorID,
+              mode: "subagent",
+              parentActorID: input.parentActorID,
+              agent: input.agentType,
+              description: input.description ?? input.agentType,
+              contextMode: input.context,
+              contextWatermark: watermark,
+              background: input.background,
+              lifecycle,
+              tools: input.tools,
+            })
 
-          // The actor now EXISTS in the registry. Hand the caller its id before the
-          // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
-          // Synchronous + best-effort: a throwing callback must not fail the spawn.
-          if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
-          if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.parentSessionID ?? input.sessionID)
+            // The actor now EXISTS in the registry. Hand the caller its id before the
+            // work fiber detaches below, so a concurrent reclaim can see it (MR104 #2).
+            // Synchronous + best-effort: a throwing callback must not fail the spawn.
+            if (input.onActorID) yield* Effect.sync(() => input.onActorID!(actorID)).pipe(Effect.ignore)
+            if (input.forkContext) yield* retainForkContext(key, input.forkContext, input.parentSessionID ?? input.sessionID)
 
-          // Auto-inject return-format instruction for lifecycle-managed subagents.
-          // Agents with an explicit completionGate keep the Status/Summary header
-          // instruction even when they provide a dedicated system prompt.
-          const agentInfo = yield* agents.get(input.agentType)
-          const gateEligible =
-            agentInfo?.mode === "subagent" &&
-            (agentInfo.completionGate === true || (!agentInfo.prompt && input.agentType !== "checkpoint-writer"))
-          return yield* forkWork({
-            runApproval: input.runApproval,
-            sessionID: input.sessionID,
-            parentSessionID: input.parentSessionID ?? input.sessionID,
-            parentActorID: input.parentActorID,
-            actorID,
-            agentType: input.agentType,
-            task: gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task,
-            description: input.description,
-            background: input.background,
-            notifyOnCompletion: input.notifyOnCompletion,
-            expectedEpoch,
-            actorMode: "subagent",
-            model: input.model,
-            variant: input.variant,
-            lifecycle,
-            generation,
-            execution,
-            task_id: input.task_id,
-            format: input.format,
-          })
-        }),
+            // Auto-inject return-format instruction for lifecycle-managed subagents.
+            // Agents with an explicit completionGate keep the Status/Summary header
+            // instruction even when they provide a dedicated system prompt.
+            const agentInfo = yield* agents.get(input.agentType)
+            const gateEligible =
+              agentInfo?.mode === "subagent" &&
+              (agentInfo.completionGate === true || (!agentInfo.prompt && input.agentType !== "checkpoint-writer"))
+            return yield* forkWork({
+              runApproval: input.runApproval,
+              sessionID: input.sessionID,
+              parentSessionID: input.parentSessionID ?? input.sessionID,
+              parentActorID: input.parentActorID,
+              actorID,
+              agentType: input.agentType,
+              task: gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task,
+              description: input.description,
+              background: input.background,
+              notifyOnCompletion: input.notifyOnCompletion,
+              expectedEpoch,
+              actorMode: "subagent",
+              model: input.model,
+              variant: input.variant,
+              lifecycle,
+              generation,
+              execution,
+              task_id: input.task_id,
+              format: input.format,
+            })
+          }),
       )
     })
 
     const spawnImpl = Effect.fn("Actor.spawn.impl")(function* (input: SpawnInput) {
       const tq = inboxControllerRef.current
+      // Bind delivery to the parent's epoch before any child execution can exist.
       const expectedEpoch = tq ? yield* tq.getEpoch(input.parentSessionID ?? input.sessionID) : undefined
       if (input.mode === "peer") return yield* spawnPeer(input, expectedEpoch)
       return yield* spawnSubagent(input, expectedEpoch)
@@ -1818,7 +1828,7 @@ export const layer = Layer.effect(
         yield* lifecycleState.markGroupAbort(actorKey(sessionID, actorID))
         const execution = yield* executions.current(sessionID, actorID)
         if (execution) execution.groupAbort = true
-      })
+    })
     const impl = Service.of({ spawn, recovery, resume, markGroupAbort, cancel, getForkContext, markTerminalNotified })
     const restorePromptActor = sessionPrompt.bindActor?.(impl)
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
