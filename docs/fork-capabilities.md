@@ -1172,26 +1172,6 @@ own source list remains the complete watch surface.
 
 ## FC-004 — MCP configuration and connection lifecycle
 
-- 2026-11-25 synchronization: upstream `c538fab3` adds each connected server's request-exposed always-direct tools to readiness (`directTools`) and their names to server reminder metadata (`directToolNames`), which joins the fingerprint only when present and the removal diff of the next reminder. `announcedMcpReminders` validates `directToolNames` like `toolNames`, so a malformed historical value is skipped without erasing an earlier valid state instead of throwing in `mcpReminderMarker` or corrupting the removal list. Direct tools come from the same request-authorized set that exposes them top-level; readiness still grants no invocation authority. Evidence: `test/tool/mcp-tool-search.test.ts` ("malformed historical reminder metadata cannot erase valid state or break replay" fails without the check; "always-direct MCP tools in status and reminders"), `test/session/prompt-effect.test.ts`. See C01–C03 in [the synchronization record](upstream-sync-2026-11-25.md).
-
-- 2026-11-24 synchronization: upstream `81a37ab5` adds form-mode elicitation (`mcp/elicitation-form.ts`) and associates server requests with the originating call. `convertMcpTool` adds the call id to the turn-lifecycle `_meta` of `tools/call` and passes the call, turn and message ids and an optional recorder to `McpElicitation.beginCall`; a request that matches no call or several calls is rejected with -32602. The request-authorized `executeMcp` wrapper in `session/prompt.ts`, shared by direct calls, `mcp_tool_use` dispatch and exec's `execMcpTools`, supplies the assistant `messageID` and the session's elicitation recorder beside the fork's progress presentation. Pending Claude imports, `auto_connect`/`enabled` precedence, URL validation and request isolation are unchanged. Evidence: `test/mcp/elicitation.test.ts`, `test/mcp/elicitation-form.test.ts`, `test/mcp/lifecycle.test.ts`. See C02–C03 in [the synchronization record](upstream-sync-2026-11-24.md).
-
-- 2026-11-04 synchronization: upstream `bfd5a2f4` reverses the 2026-10-31 execution-source filter. MCP/LSP/formatter and Claude imports again use ordinary configuration sources; `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS` remains a plugin-only boundary and `config/host.ts` is removed. The native control-overrides argument, pending defaults and explicit `auto_connect`/`enabled` precedence remain. FD-013 owns the retained source/persistence deviation: shared config loading retains fresh TOML parsing and models-only refresh without migration writes; `Config.update` retains raw stored JSONC validation and literal reference persistence. The updated positive project-source and persistence tests in `test/config/config.test.ts`, pending Claude import test and real Node plugin-host tests cover these decisions. The following 2026-10-31 paragraph is historical, not the current source policy.
-
-- 2026-10-31 synchronization: upstream `7bc7dc3a` adds the host execution policy (`config/host.ts`). On the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`, MCP sections from sources outside `MIMOCODE_CONFIG_DIR` and host-injected content are dropped before merging, so their startup controls never reach the Claude import merge. `mergeClaudeMcp` keeps the fork's control-overrides argument and returns before reading a Claude file from a rejected source. A host-source `auto_connect: true` therefore cannot supply startup authority to a project `.claude.json` transport; the leftover transportless control is ignored. Ordinary Bun CLI loading, pending imports and `auto_connect`/`enabled` precedence are unchanged. Evidence: `test/mcp/claude-auto-connect.test.ts` (`host execution policy skips a project Claude import…`, which fails if the guard is removed), `test/mcp/project-config-execution.test.ts`, and the host-policy cases in `test/config/config.test.ts`.
-
-- 2026-10-28 synchronization: local and remote MCP config accept optional `alwaysDirectTools`; sanitized server-local names select top-level tools outside deferred search/use, without changing host override precedence, connection lifecycle or startup controls. Config arrays use the existing mutable schema convention so ACP accepts the regenerated SDK types. FD-006 retains execution and frozen authority.
-
-- 2026-10-20 live catch-up through `4e58a801`: optional `MCP.readiness()` reads current configured-server status and tool definitions without awaiting connection settlement or starting a connection. Pending Claude imports, `auto_connect` precedence, ownership and refresh lifetime remain unchanged. The prompt intersects readiness tools with the existing request-authorized search/dispatch catalog, reports latest outcomes at user boundaries and never turns connection readiness into invocation authority. Malformed historical reminder metadata is ignored without erasing an earlier valid state.
-
-- 2026-10-20 synchronization: adopt sticky MCP deferral and fixed search/use entries through connection churn and an initially empty catalog. Search always sees the live authorized catalog, while changed catalog announcements wait for the next user-turn boundary. This does not auto-connect pending Claude imports or broaden connection authority. FD-005/FD-006 own resolved harness, dispatch and frozen implementation authority; the old conversation-loaded membership is now only a legacy snapshot compatibility carrier.
-
-- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1269` (keep Claude imports pending until connect, opened 2026-06-24) is withdrawn. Upstream still has no `auto_connect` and has since rewritten `mcp/index.ts`; the fork keeps the pending-import contract here, with `test/mcp/lifecycle.test.ts` and `test/mcp/claude-auto-connect.test.ts` as its evidence, and does not resubmit. Its head branch `codex/upstream-mcp-claude-pending-connect` is deleted from the fork.
-
-- 2026-10-13 synchronization: upstream `2f373289` connects startup MCP servers in a background fiber; `MCP.tools()` waits at most three seconds and every other accessor awaits the settled state. Claude imports without explicit `auto_connect: true`, and entries with `auto_connect: false`, are still never attempted at startup. Upstream's new cleanup deletes a `pending` placeholder that an attempt left behind; it now skips those entries, so their pending status survives settlement. Removing the guard fails `test/mcp/lifecycle.test.ts` ("Claude Code local MCP server is pending until explicitly connected") and `test/mcp/claude-auto-connect.test.ts`. Upstream `463cbb28` makes MCP deferral the default for every function-calling model; request-local loaded membership and frozen seeding are unchanged (FD-005 note).
-
-- 2026-10-04 synchronization: the models-only Config reload behind upstream's provider refresh skips Claude MCP import, plugin origins, command/agent scans and dependency installation, and publishes only the model keys. The ordinary path keeps the fork's native-override argument to `mergeClaudeMcp`, so pending imports and explicit `auto_connect` are unchanged; MCP configuration changes still require a restart.
-
 - Status: active
 - Canonical owner: fork `main` MCP runtime
 - Observable contract: remote MCP URLs must parse as HTTP(S); malformed or
@@ -1212,12 +1192,44 @@ own source list remains the complete watch surface.
   compact mode, authorized MCP wrappers remain available through exec and
   compatible hidden direct calls, without requiring an invisible search call.
   Request-disabled tools never enter a warm frozen executable pool. Deferred
-  harnesses retain the fixed search/use entries across catalog changes.
+  harnesses retain the fixed search/use entries across catalog changes, and
+  search always sees the live authorized catalog while changed-catalog
+  announcements wait for the next user-turn boundary.
+  Startup connects servers in a background fiber (upstream `2f373289`;
+  `MCP.tools()` waits at most three seconds). Claude imports without an explicit
+  `auto_connect: true`, and entries with `auto_connect: false`, are never
+  attempted at startup, and upstream's settlement cleanup skips their `pending`
+  placeholders so that status survives. `MCP.readiness()` reads current status
+  and tool definitions without awaiting settlement or starting a connection;
+  the prompt intersects readiness tools with the request-authorized catalog,
+  reports the latest outcomes at user boundaries, and never turns readiness into
+  invocation authority. Readiness `directTools` (upstream `c538fab3`) come from
+  the same request-authorized set that exposes them top-level.
+  `announcedMcpReminders` validates replayed historical reminder metadata field
+  by field (`toolNames`, `directToolNames`): a malformed value is skipped
+  without erasing an earlier valid state, instead of throwing in
+  `mcpReminderMarker` or corrupting the removal list. Every array field upstream
+  adds to that metadata needs the same check.
+  Local and remote MCP config accept optional `alwaysDirectTools`: sanitized
+  server-local names select top-level tools outside deferred search/use (FD-006
+  owns their execution authority), and config arrays use the mutable schema
+  convention so ACP accepts the regenerated SDK types. Server requests are
+  associated with the originating call (upstream `81a37ab5`); the shared
+  `executeMcp` wrapper (FD-006) supplies the `messageID` and elicitation
+  recorder. MCP, LSP, formatter and Claude-import configuration use ordinary
+  configuration sources again (upstream `bfd5a2f4` reversed the 2026-10-31
+  execution-source filter); `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS` is a plugin-only
+  boundary, and `mergeClaudeMcp` keeps the fork's control-overrides argument.
+  The models-only reload behind provider refresh skips Claude MCP import, so
+  MCP configuration changes still require a restart.
 - POLICY-01 carrier review: request-pinned MCP membership remains unchanged;
   same-named MCP tools cannot acquire canonical Actor/plan control identity or
   its commit callback. Imported-server and transport policies are unchanged.
 - Upstream relationship: adapts released automatic connection through explicit
   per-entry configuration; retains fork validation and lifecycle hardening.
+  Upstream has no `auto_connect`; the 2026-06-24 upstream PR for pending Claude
+  imports (#1269) was withdrawn. Usage and source precedence:
+  [Claude MCP auto-connect](claude-mcp-autoconnect.md).
 - Watch surfaces: `packages/cli/src/mcp/index.ts`,
   `packages/cli/src/config/mcp.ts`, `packages/cli/src/config/config.ts`,
   `packages/cli/src/mcp/oauth-callback.ts`,
@@ -1232,40 +1244,24 @@ own source list remains the complete watch surface.
   `packages/cli/test/mcp/stdio-exit-observe.test.ts`, and frozen
   prefix/tool-search regressions prove URL rejection, pending imports, OAuth
   callback/connection behavior, redacted exit diagnosis, and request isolation
-  at the reviewed main behavior.
-- 2026-09-15 real protocol evidence: `test/mcp/real-transport-oauth.test.ts`
-  launches an isolated non-test child using the actual MCP SDK HTTP transport
-  and a self-owned OAuth issuer. Resource/issuer discovery, DCR, S256 PKCE,
-  callback, read-only tool execution, token refresh and pending-auth cancellation
-  pass on loopback and a self-owned local RFC1918 interface. This is concrete lab
-  evidence, not enterprise IdP/proxy/TLS interoperability or a new fork-wide
-  private-network policy. DC-NET-002 remains compat-owned. See the
-  [runtime evidence](runtime-validation-2026-09-15.md).
-- 2026-09-08 selected integration: `auto_connect` explicitly enables a selected
-  imported server while retaining pending defaults and disabled precedence.
-  The real-transport regression runs in an isolated child process to avoid
-  unrelated suites' process-wide MCP SDK mocks. Usage and source precedence
-  are documented in [Claude MCP auto-connect](claude-mcp-autoconnect.md).
+  at the reviewed main behavior. `test/mcp/real-transport-oauth.test.ts` runs
+  the actual MCP SDK HTTP transport and a self-owned OAuth issuer in an isolated
+  non-test child (discovery, DCR, S256 PKCE, callback, refresh, cancellation;
+  lab evidence, not enterprise IdP interoperability, see the
+  [runtime evidence](runtime-validation-2026-09-15.md)).
+  `test/tool/mcp-tool-search.test.ts` covers malformed historical reminder
+  metadata and always-direct status; `test/mcp/elicitation.test.ts` and
+  `test/mcp/elicitation-form.test.ts` cover call association;
+  `test/config/config.test.ts` covers project sources and the pending Claude
+  import, with real Node plugin-host tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
-- 2026-09-01 OAuth branding review: adopted upstream's MiMoCode callback-page
-  and dynamic-registration literals. This is a clean carrier overlap only;
-  URL validation, pending-import state, request isolation, bounded diagnostics,
-  and secret redaction are unchanged.
 - Retirement condition: upstream matches URL validation, explicit import auto-connect and pending-import
   lifecycle, request isolation, and frozen membership; model identity and tool
   authority still satisfy FD-005 and FD-006.
 
 ## FC-005 — permission-consistent skill discovery and invocation
 
-- 2026-11-26 alignment review: `isSkillCatalogReminder` in `session/skill-catalog.ts` has no caller here. Legacy catalog recognition goes through `isLegacySkillCatalogPart` and `isGeneratedSkillCatalog`, which match the proven historical format rather than a substring. The export stays as upstream ships it.
-
-- 2026-11-21 synchronization: adopt upstream `128adcb7` live discovery and
-  persisted user-turn catalog reminders (entry plus fingerprinted delta).
-  System-tail generation and schema-3 catalog freezing retire. The shipped
-  `20260908000000_session_prefix_skill_catalog` migration is unchanged; its
-  column and type remain historical readers. See [the synchronization
-  record](upstream-sync-2026-11-21.md) and [historical layout and migration](skill-catalog-system-tail.md).
 - Status: active
 - Canonical owner: fork `main` skill/session runtime
 - Observable contract: catalog visibility, skill search and loading use
@@ -1309,7 +1305,15 @@ own source list remains the complete watch surface.
   including one whose catalog text was empty. Every other frozen byte stays.
   Historical v2 and recognized generated
   user catalogs are suppressed in projection; stored history is never
-  rewritten, quotations and loaded `<skill_content>` survive.
+  rewritten, quotations and loaded `<skill_content>` survive. Legacy catalog
+  recognition goes through `isLegacySkillCatalogPart` and
+  `isGeneratedSkillCatalog`, which match the proven historical format rather
+  than a substring; upstream's `isSkillCatalogReminder` ships without a caller.
+  Discovery is live and catalogs are persisted user-turn reminders (upstream
+  `128adcb7`, adopted 2026-11-21); system-tail generation and schema-3 catalog
+  freezing are retired, while the shipped
+  `20260908000000_session_prefix_skill_catalog` migration, its column and type
+  remain as historical readers ([historical layout and migration](skill-catalog-system-tail.md)).
 - Upstream relationship: adopts live scan, reminder/delta placement, prefix
   rotation and structured-output placement; retains stronger shared
   authorization, producer lifetime and historical recognition, and adds the
@@ -1366,21 +1370,17 @@ own source list remains the complete watch surface.
 
 ## FC-006 — instance-local plugin memory-write decision
 
-- 2026-10-14 synchronization: upstream `002cb4c9` runs `tool.execute.before`/`after` hooks through `ToolSettlement`, so Stop waits for an admitted hook and a file hook's timeout still joins its promise. Adopted unchanged; `plugin/index.ts` still differs from upstream only by the `actor.postStop` `memoryWriteEnabled` injection.
-
-- 2026-10-13 synchronization: upstream `4fcfe1b7` serves the plugin SDK from the host and removes per-directory dependency installs with `Config.waitForDependencies`. The fork's 2026-09-26 file-plugin dependency wait therefore has nothing to wait for and retires with its `pathToFileURL` import; `plugin/index.ts` now differs from upstream only by the `actor.postStop` `memoryWriteEnabled` injection, which is unchanged.
-
-- 2026-10-04 synchronization: `Plugin.list({ initialize: false })` lets provider refresh reuse initialized hooks without loading plugins. The `actor.postStop` `memoryWriteEnabled` injection reads the live configuration; memory keys are not refreshed, so the decision is unchanged.
-
-- 2026-10-02 synchronization: upstream `50b505a3` removes the private `src/ext` overlay loader from `plugin/index.ts` and its `url` import. The fork's 2026-09-26 file-plugin dependency-wait check still calls `pathToFileURL`, so the merge restores that import. The `actor.postStop` `memoryWriteEnabled` injection is unchanged.
-
 - Status: active
 - Canonical owner: fork `main` plugin service and plugin API
 - Observable contract: the subagent progress checker receives
   `memoryWriteEnabled` from the same instance-local configuration service used
   by memory write gates. It does not depend on an HTTP config round trip that
   can reject a valid out-of-cwd worktree; an absent value remains fail-open for
-  manual hook calls.
+  manual hook calls. `plugin/index.ts` differs from upstream only by this
+  `actor.postStop` injection. It sits on upstream's `registerHook` path and
+  guarded loops, reads the live configuration, and is not refreshed by
+  provider refresh (`Plugin.list({ initialize: false })` reuses initialized
+  hooks). Hooks run through upstream's `ToolSettlement`.
 - Upstream relationship: fork integration hardening for the existing progress
   checker.
 - Watch surfaces: `packages/cli/src/plugin/index.ts`,
@@ -1400,40 +1400,12 @@ own source list remains the complete watch surface.
   distinguishes this chain from the earlier direct-hook tests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `d5798519cd1227ab4061bd69ef9efc5f483b74d8`.
-- 2026-09-10 hook-validation review: upstream `1493f7813e3041e9da2ea52738940591d03ed8a8`,
-  merged by `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`, routes every registration
-  path through `registerHook` and guards the trigger, config and event loops, so
-  a plugin resolving to a non-object is skipped with a warning. FC-006's
-  instance-local `memoryWriteEnabled` injection into the `actor.postStop`
-  aggregate is preserved on top of the rewritten loops, including its fail-open
-  behavior when the value is absent.
 
 - Retirement condition: the progress-checker hook no longer writes memory or
   upstream supplies an equivalent instance-local decision without HTTP/cwd
   coupling.
 
 ## FC-007 — protected roots, fixed instance cwd, inert SDK event, deletion boundaries, and optional context
-
-- 2026-11-26 alignment review: the opt-in Auto-Worktree notice retires, adopting upstream `71a12699` (#2413), which removed the automatic isolation policy. The 2026-09-17 synchronization (C08) had kept the notice as a registered opt-in with no other rationale, and no known configuration enables it. Removed: `tool/auto-worktree-hint.ts`, the notice in `SessionPrompt` reminders, Bash's write and git-mutation detection with its `fileWrite`/`mainWorktreeHits` metadata, exec's retained `mainWorktreeHits` evidence, the `auto_worktree` config key and SDK field, the bundled `config.md` row, and the four notice/scan/bash-write/config suites. As upstream does, a config that still sets `auto_worktree` loads with the key dropped (`test/config/config.test.ts`), and `auto_worktree_hint_sent` stays as an inert column. The SSH timeout note (FC-032), deletion overlap checks and nested-record manifests are unchanged.
-
-- 2026-10-20 post-sync CI correction: CronBridge mounts now belong to the
-  InstanceState generation that started them. A long-lived application Layer
-  previously retained its scheduler after instance disposal, allowing it to
-  consume later session tasks from the process-wide pool. Disposal marks its
-  owner closed and stops that owner's exact handle; an old generation cannot
-  stop a replacement mount. Ownership is registered outside the lifecycle
-  lock and rechecked immediately before publishing a mount, so concurrent
-  start/dispose cannot leave a late scheduler. Existing Layer cleanup,
-  reentrant stop behavior, scheduling policy and test deadlines remain.
-  This does not add a stronger join guarantee for every concurrent stop
-  finalizer. Real disposal/reopen, in-flight start/dispose and replacement
-  ownership regressions cover the boundary.
-
-- 2026-10-14 synchronization: upstream `002cb4c9` forks `InstanceState` initialization into the cache entry's scope behind a `Deferred`, so cancelling one caller cannot interrupt a shared initialization and invalidation waits for it to exit. Adapted onto the fork's generation-keyed cache: the lookup resolves its context by generation and provides `InstanceRef` and `WorkspaceRef` explicitly, and a disposed generation still refuses new entries (upstream's dispose case asserts that refusal). Disposal can now interrupt a Bus state that is still initializing, so the detached `Bus.publish` helper (used fire-and-forget by sync events) treats an interrupt-only exit as a no-op instead of an unhandled rejection that ended the process (`test/inbox/drain-crash-reopen.test.ts`). Registry correction: `packages/cli/src/effect/instance-state.ts` was already fork-different (generation keys, per-directory context sets, disposed-instance refusal) but unlisted, and joins the watch surfaces. Evidence: `test/effect/instance-state.test.ts`.
-
-- 2026-10-04 synchronization: upstream `6babeb0b` adds `Instance.updateIdle`, the `updating` admission barrier and an `expected` owner for `Instance.provide`. Protected-root and filesystem-root rejection, instance generations, `peek` and the stale-context `dispose()` path are unchanged; an `expected` owner that is closing, absent or not the cached context is rejected by identity.
-
-- 2026-09-17 synchronization: Upstream removed automatic isolation and its notice. Retain this owner's explicit opt-in post-success notice, config and mutation metadata; reject the intermediate hard write gate. Adopt removal of the unused conflict-detection auto-create route and regenerate its SDK/OpenAPI removal. Ordinary explicit worktree operations remain. The notice is independent of auto-creation.
 
 - Status: active
 - Canonical owner: fork `main` instance and Bash path-safety boundary
@@ -1459,7 +1431,24 @@ own source list remains the complete watch surface.
   CLI run reply. The existing temporary-only path remains separate and still
   passes through ordinary Bash/external-directory authorization.
   Optional context lookup supports pre-install state without weakening the
-  throwing accessor used by ordinary runtime paths.
+  throwing accessor used by ordinary runtime paths. Bash keeps `pathsOverlap`,
+  `tmpOnlyDelete` and explicit delete approval under upstream's token-budget
+  truncation; full output stays archived and `metadata.truncated` prevents
+  wrapper re-truncation. The opt-in Auto-Worktree notice retired on
+  2026-11-26 with upstream `71a12699`: a config that still sets `auto_worktree`
+  loads with the key dropped, and `auto_worktree_hint_sent` is an inert column.
+  Instance generations: `InstanceState`'s cache is keyed by generation. Upstream's
+  `Deferred` initialization in the entry's scope is adapted onto it: the lookup
+  resolves its context by generation and provides `InstanceRef` and
+  `WorkspaceRef` explicitly, and a disposed generation refuses new entries.
+  Disposal can interrupt a Bus still initializing, so the detached
+  `Bus.publish` helper treats an interrupt-only exit as a no-op. An `expected`
+  owner for `Instance.provide` that is closing, absent or not the cached context
+  is rejected by identity. CronBridge mounts belong to the InstanceState
+  generation that started them: disposal stops that owner's exact handle, an old
+  generation cannot stop a replacement, and ownership is registered outside the
+  lifecycle lock and rechecked immediately before a mount is published. The
+  capability API's directory and token policy is FD-004's.
 - Upstream relationship: adopts the shared fixed-instance-cwd simplification
   and inert SDK event compatibility while retaining fork root and deletion
   safety hardening; FD-001 separately owns startup delete approval and the
@@ -1493,27 +1482,11 @@ own source list remains the complete watch surface.
   `test/permission/auto-approve-delete.test.ts` under `packages/cli` cover
   the deny-first deletion path, dangerous-startup grant, and single deletion
   confirmation; run lifecycle evidence belongs to FC-001/FD-001.
-- 2026-09-05 Bash-output review: accepted token-budget truncation while
-  retaining `pathsOverlap`, `tmpOnlyDelete`, explicit delete approval, and
-  immutable instance-cwd handling. Full output remains archived independently
-  of the inline preview; `metadata.truncated` prevents wrapper re-truncation.
-- 2026-09-07 explicit model API review (historical; superseded by FD-004's
-  2026-09-14 retirement): capability discovery and token-scoped
-  model API admission use a fixed startup directory. Requests cannot select a
-  different directory or workspace; the new Node token export is opt-in host
-  functionality. FD-004 remains the canonical listener/auth owner. Coverage:
-  `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
-- POLICY-03 carrier review (historical model-token containment; superseded
-  by FD-004's 2026-09-14 retirement): TUI-generated Basic authentication is distinct
-  from operator configuration. Both instance-route directory guards and the
-  non-loopback bind guard preserve their operator-origin policy; automatic
-  credentials cannot authorize a broader directory. Model tokens retain their
-  exact startup directory and reject workspace switching regardless of Basic
-  credentials. Existing orchestrator and explicit noAuth exceptions retain
-  their original scope. The fixed-cwd and deletion contracts above are unchanged.
-  Current `/v1` token checks run inside the route after instance bootstrap;
-  operator-password servers follow upstream's directory policy. The historical
-  no-workspace/pre-bootstrap clauses do not describe today's capability API.
+  `test/effect/instance-state.test.ts` covers the generation-keyed cache,
+  `test/inbox/drain-crash-reopen.test.ts` the interrupt-only Bus exit, the cron
+  bridge integration suite real disposal/reopen, in-flight start/dispose and
+  replacement ownership, and `test/config/config.test.ts` the dropped
+  `auto_worktree` key.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
 - Retirement condition: upstream retains fixed instance cwd and supplies
@@ -1521,13 +1494,6 @@ own source list remains the complete watch surface.
   containment, fixed-cwd relative file-tool resolution, MultiEdit normalization,
   deletion, and optional-context semantics without forbidding legitimate
   temporary projects.
-
-- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
-  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
-  The retained spawn task namespace, synchronous commit/ownership boundary and
-  metadata-only background updates preserve existing task and message sources.
-  HTTP/SDK/tool publication and actual provider/transaction regressions are
-  recorded in the shared history; no cross-restart recovery is introduced.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
