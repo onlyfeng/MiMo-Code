@@ -114,6 +114,8 @@ entry's own source list remains the complete watch surface.
 
 ### FC-001 — linearized actor generations and persistent-peer lifecycle
 
+- 2026-11-26 alignment review: three upstream helpers ship here without a production caller, and their upstream tests exercise only the helper: `MessageV2.planResumeTrim` and `assertResumeModelBoundary` (unused since the 2026-10-14 note below; covered by `test/session/message-v2.test.ts` and one `test/session/processor-effect.test.ts` case), and `resolveCurrentAgent` in `server/routes/instance/session.ts` (covered by `test/server/summarize-route-main-slice.test.ts`). The fork's `/summarize` route goes through `SessionPrompt.startSummarize`, which repeats the main-slice lookup inline because it also needs that user's id and task. `test/server/summarize-agent-main-slice.test.ts` drives the real route with a newer user message on a subagent lane and requires the compaction boundary to carry the main slice's agent; reading the agent from every lane fails it on that assertion. A passing upstream helper test is not evidence for the fork's path.
+
 - 2026-11-16 synchronization: adopt process-wide live-claim run tracking and monotonic run ids across every prompt entry. A run with no surviving claimed input interrupts instead of consuming retry supersession indefinitely. Settlement releases the live marker even when acknowledgement fails or there is nothing to acknowledge. Owned acceptance, frozen authority, lane identity and generation checks remain. See C09 in [the sync record](upstream-sync-2026-11-16.md).
 
 - 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
@@ -1319,6 +1321,8 @@ own source list remains the complete watch surface.
 
 ## FC-005 — permission-consistent skill discovery and invocation
 
+- 2026-11-26 alignment review: `isSkillCatalogReminder` in `session/skill-catalog.ts` has no caller here. Legacy catalog recognition goes through `isLegacySkillCatalogPart` and `isGeneratedSkillCatalog`, which match the proven historical format rather than a substring. The export stays as upstream ships it.
+
 - 2026-11-21 synchronization: adopt upstream `128adcb7` live discovery and
   persisted user-turn catalog reminders (entry plus fingerprinted delta).
   System-tail generation and schema-3 catalog freezing retire. The shipped
@@ -2249,6 +2253,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   an explicit governance decision and every repository-facing route is updated.
 
 ## FC-013 — retry budget resolution and MaxMode final-step enforcement
+
+- 2026-11-26 alignment review: upstream's `MIMOCODE_EMPTY_STEP_DROP_LIMIT` (`flag/flag.ts`, from `942de16e`) has no reader here. Upstream uses it to bound consecutive `dropEmptyAssistant` drops; the 2026-11-13 synchronization (C04) adapted that bound into the count-bounded `emptyOutput` budget and the background system-agent cap instead, so `dropEmptyAssistant` and its counter are absent. The definition stays byte-identical to upstream, so setting the variable has no effect. A synchronization that brings back a reader must decide which bound governs.
 
 - 2026-11-13 synchronization: adopt live `rawFinish` propagation and `StreamIncompleteError` for a stream ending with unified `other` and no provider finish reason. This error uses bounded stream recovery, distinct from a complete pure-empty response's `emptyOutput` budget. Preserve request/candidate/judge scope precedence, the system-agent cap, tool-side-effect replay guards and main-only retry publication. Non-GPT reasoning-only output retains scoped bounded continuation; upstream's global reasoning-only-final policy is not adopted. Historical raw-less `other` messages remain readable by content, and MaxMode excludes live incomplete candidates while retaining raw finish on accepted replay.
 
