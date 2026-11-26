@@ -2112,12 +2112,6 @@ own source list remains the complete watch surface.
 
 ## FC-015 — bounded compaction context and upstream ratio trigger
 
-- 2026-10-30 synchronization: Adopt boundary-model summary selection and failed/interrupted cleanup without changing chronological tails, pending external admission or frozen-prefix sizing. Compat retains active-only frozen tool membership and its tail budget under DC-CONTEXT-001.
-
-- 2026-10-21 synchronization: upstream `6f83cd0e` stops rewriting persisted parts to shrink context. Turn-end prune and `stripNonEssential`, `SessionCompaction.prune`, rebuild-time microcompact, `Overflow.pressureLevel`/`contextPressureLevel`, the `compaction.prune` key and `MIMOCODE_DISABLE_PRUNE` are removed; a config that still sets `compaction.prune` loads with one warning. Adopted unchanged; the fork's `observedToolParts` protection inside `SessionCompaction.prune` retires with that function. Rows already marked `time.compacted` still project the cleared placeholder. Checkpoint thresholds keep resolving against `usable()`, and the ratio trigger, bounded projection, frozen prefix and `toolChoice: "none"` are unchanged. The fork keeps `auto_worktree` in `normalizeLoadedConfig`; only the prune hunk is taken from that conflict. Evidence: `test/session/turn-end-lossless.test.ts`, `rebuild-boundary-lossless.test.ts`, `legacy-compacted-row.test.ts`, `overflow.test.ts`, `test/config/config.test.ts`.
-
-- 2026-10-16 synchronization: upstream `bf0563dd` copies every non-`compaction` part verbatim in the overflow replay, including media `file` parts, so the replayed user message and the next model turn keep the image; the summarization request still strips media under overflow. Adopted into the fork's atomic replay commit without touching the bounded projection, ratio trigger, frozen prefix reuse or FD-011's `toolChoice: "none"`. Evidence: `test/session/prompt-effect.test.ts` (keeps replayed media), `test/session/compaction-projection.test.ts`, `test/session/compaction-reasoning-fallback.test.ts`, `test/session/compaction-tool-choice.test.ts`.
-
 - Status: active
 - Canonical owner: shared `main` overflow and compaction boundary
 - Observable contract: `compaction.max_context` has precedence over
@@ -2144,45 +2138,44 @@ own source list remains the complete watch surface.
   advertised subset. Its file manifest includes retained validated terminal
   nested exec effects within the snapshot budget; these read-only views never
   create tool-execution authority.
-- 2026-09-15 shared chronological projections: rebuild tails, recovery usage,
-  checkpoint context and persisted loop-streak spans resolve actual message
-  positions rather than lexical ID ranges. Missing/reversed checkpoint bounds
-  retain live messages through both context filtering and later tail collapse;
-  the transient invalid range is not written back to storage. TUI buckets use
-  the same `(created, UTF-8 ID)` order and undo hydration follows pagination
-  through its exact boundary, preserving that boundary during live updates.
-  After authoritative single-session or list updates clear revert, each actor
-  bucket returns to its normal 100-message limit and all evicted cached parts
-  are removed. Normal message upserts likewise remove the entire excess prefix.
-  Active revert still retains hydrated history; the real SyncProvider event and
-  bootstrap regressions in `test/cli/tui/revert-cache.test.tsx` cover this change.
-  Main's existing footer compares a locally resolved watermark and remains
-  pending when it cannot resolve one. The extra checkpoint-coverage HTTP/SDK
-  and TUI cache protocol stays owned by DC-CONTEXT-001 on compat.
-  Additional carriers: `session/session.ts`, `message-v2.ts`, `checkpoint.ts`,
-  `tail-digest.ts`, `revert.ts`, `prompt/loop-streak.ts`, shared UTF-8 ordering,
-  and TUI sync/session/model utilities. Real SQL pagination, atomic admission,
-  composed projection and TUI state-helper tests bind these paths; no
-  interactive terminal playtest is claimed.
-- 2026-09-15 concurrent admission review: pending external requests are scoped
-  by session and actor until their message and parts commit or admission ends.
-  Compaction waits for that actor's pending admissions before and after inserting
-  an automatic continuation; a newer committed request removes the exact stale
-  continuation and its parts. Failed/interrupted admission releases the wait,
-  and another actor's pending request does not block this actor. Snapshot tails
-  use message identity and the actual chronological endpoint rather than an
-  array length shared across different views. Real MCP gates cover pre-insert,
-  post-insert, failure, cross-actor and interruption paths, including a second
-  compaction while a cancelled resource remains unresolved. No additional tool
-  authority or compat preflight policy is introduced.
-- 2026-11-21 synchronization: compaction is the third `getFrozen` consumer.
-  Its projection suppresses historical generated catalogs and preserves current
-  reminder metadata; its system excludes the retired catalog. The next context
-  window receives an entry reminder. Ratio-only triggering, bounded projection,
-  summary recovery/retry and `toolChoice: "none"` remain intact (FD-010/011/012).
+  Compaction is the third `getFrozen` consumer: its projection suppresses
+  historical generated catalogs and keeps current reminder metadata, its system
+  excludes the retired catalog, and the next context window receives an entry
+  reminder. Overflow replay copies every non-`compaction` part verbatim,
+  including media (FC-009), while the summarization request itself strips media
+  under overflow. Rows already marked `time.compacted` still project the cleared
+  placeholder, a config that still sets the removed `compaction.prune` loads
+  with one warning, and checkpoint thresholds resolve against `usable()`.
+  `/status` labels the ratio gap `headroom`; the buffer setting only validates
+  configured budgets.
+  Chronological projections: rebuild tails, recovery usage, checkpoint context
+  and persisted loop-streak spans resolve actual message positions rather than
+  lexical ID ranges. Missing or reversed checkpoint bounds keep live messages
+  through context filtering and later tail collapse, and the transient invalid
+  range is never written back. TUI buckets use the same `(created, UTF-8 ID)`
+  order; undo hydration follows pagination through its exact boundary. Once an
+  authoritative update clears revert, each actor bucket returns to its
+  100-message limit and evicted cached parts are removed, and ordinary upserts
+  also remove the whole excess prefix; an active revert keeps hydrated history.
+  Main's footer stays pending when it cannot resolve a local watermark;
+  DC-CONTEXT-001 owns compat's extra checkpoint-coverage protocol.
+  Concurrent admission: pending external requests are scoped by session and
+  actor until their message and parts commit or admission ends. Compaction
+  waits for that actor's pending admissions before and after inserting an
+  automatic continuation, and a newer committed request removes the exact stale
+  continuation and its parts; a failed or interrupted admission releases the
+  wait, and another actor's pending request does not block. Snapshot tails use
+  message identity and the actual chronological endpoint, not an array length
+  shared across views.
 - Upstream relationship: adopts upstream's max-context controls and ratio-only
   trigger. The retained fork adaptations concern bounded projection, frozen
-  request identity, and no-tool summaries, not extra trigger headroom.
+  request identity, and no-tool summaries, not extra trigger headroom. Upstream
+  `6f83cd0e` removed persisted-part pruning (turn-end prune, `stripNonEssential`,
+  `SessionCompaction.prune`, rebuild-time microcompact, pressure levels and
+  `MIMOCODE_DISABLE_PRUNE`), and the fork's `observedToolParts` protection
+  inside `SessionCompaction.prune` retired with it. Upstream's boundary-model
+  summary selection and failed/interrupted cleanup are adopted; compat keeps
+  active-only frozen tool membership and its tail budget under DC-CONTEXT-001.
 - Watch surfaces: `packages/cli/src/config/config.ts`,
   `packages/cli/src/flag/flag.ts`,
   `packages/cli/src/session/overflow.ts`,
@@ -2209,39 +2202,12 @@ own source list remains the complete watch surface.
   was additionally compared with release `2a0eb706e95a77cba34a319e9f11f33f26d4450c`
   and upstream `0abfeba186191c1a361cf3f27b802e9d29bf0fdc`; this named-behavior
   adoption does not advance the overall upstream review baseline.
-- 2026-08-28 review: adopted the explicit empty checkpoint threshold ladder
-  from upstream's fixture retune, but rejected its 50K usage and flat-ratio
-  explanation because both would hide removal of the reserve boundary.
-- 2026-09-02 generated-contract review: adopted the missing published
-  `CompactionPart.projection` schema and the deprecated `tail_turns` description
-  by regenerating from fork source. The `preserve_recent_tokens` description
-  retained the then-current at-most-40K plus reserve-safe effective-window bound.
-- 2026-09-08 policy adjustment: supersedes the retained reserve trigger from
-  the 2026-08-27/28 reviews at the user's request. The 33K and 20K constants
-  came from upstream; the fork had retained the old cutoff when upstream moved
-  to the ratio. No fork feature was identified as requiring that extra cutoff.
-  The projection description now refers to the ratio trigger, and the buffer
-  description explicitly limits its role to configured-budget validation.
-- 2026-09-08 PR #80 review follow-up: `/status` labels the ratio gap as
-  `headroom`, while the active Compose specification records the ratio formula
-  and marks former reserve formulas and live measurements as historical.
 - Retirement condition: upstream preserves equivalent configuration precedence,
   value grammar, provider caps, zero restoration, ratio triggers, bounded
   frozen-prefix projection, and no-tool summaries, with behavior-focused
   regressions.
 
-- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
-  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
-  The retained spawn task namespace, synchronous commit/ownership boundary and
-  metadata-only background updates preserve existing task and message sources.
-  HTTP/SDK/tool publication and actual provider/transaction regressions are
-  recorded in the shared history; no cross-restart recovery is introduced.
-
 ## FC-016 — owned voice results and grapheme-safe Prompt editing
-
-- 2026-10-29 synchronization: upstream `3e92e0d8` makes `resolveCredentials` walk the Xiaomi family (token-plan clusters before `xiaomi`) when a configured family provider has no key, with per-cluster default base URLs. Adopted unchanged: credentials are chosen before any request starts, so Prompt ownership, stop/drain and grapheme offsets are unchanged. `test/cli/tui/voice.test.ts` covers the fallback beside the existing lifecycle cases.
-
-- 2026-10-21 synchronization: upstream `786151b3` changes the default voice control model to `xiaomi/mimo-v2.6-flash` (request fallback `mimo-v2.6-flash`); ASR stays on `mimo-v2.5-asr`. Adopted with the schema description and generated SDK text. Prompt ownership, stop/drain and grapheme offsets are unchanged; `test/cli/tui/voice.test.ts` covers the new default.
 
 - Status: active
 - Canonical owner: shared `main` TUI voice/editor boundary
@@ -2284,16 +2250,6 @@ own source list remains the complete watch surface.
   regressions.
 
 ## FC-017 — faithful and bounded history previews
-
-- 2026-10-30 registry correction: the legacy retry-part normalization adopted on 2026-10-22 (below) joins the observable contract, watch surfaces, Tests/evidence and retirement condition. `packages/cli/src/session/retry-record.ts` and its read-boundary callers were already fork-different, but no entry named them, so a path-based sync review could not find them. No behavior changes.
-
-- 2026-10-22 live advancement: new retry records expose phase/scope/kind/message/next and both timestamps. Historical schema-valid error-based retry rows normalize at hydration, import and replay boundaries without weakening the public schema or editing shipped SQL. Legacy message and response content remain searchable through bounded NUL-safe projections; export redacts the resulting message. Replay normalizes the original event object before storage and publication. Reverse-ID and UTF8 tie-break tests enforce parent chronology and actor/session isolation.
-
-- 2026-10-14 synchronization: upstream `6ba6a625` makes the shipped `20261011000000_history_fts_kind` and `20261012000000_history_cjk_unigram` migrations replay-safe (`CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`) and routes `Database.Client()` through `migrateReplaySafe`. Adopted unchanged: both migrations are upstream-owned and were byte-identical to upstream, the edits change no schema, and drizzle selects migrations by journal name, so the AGENTS.md rule against editing shipped migrations (which protects applied journals) is not engaged. FC-017's projection, media and preview bounds are untouched. Evidence: `test/history/fts-kind-idempotent.test.ts`, `test/history/fts-kind-boot.e2e.test.ts` and every other `test/history/` file.
-
-- 2026-10-13 synchronization: upstream `5f55525c` restores `history_fts.kind` with a dual-column body/body_idx index, two new migrations and a background re-extract. The merge is clean and touches neither `projection.ts` nor `media.ts`; NUL, preview-budget and attachment-locator tests in `test/history/` pass.
-
-- 2026-09-17 synchronization: Adopt shared tool-result previews and resumable migration version 6, including legacy chunk deduplication and Node SQLite query planning. Projection/media retain the registered SQL NUL, field/list budget and attachment-locator rules. This index preview is separate from raw history retrieval.
 
 - Status: active; explicit owner added by the 2026-09-15 code audit for already accepted fixes.
 - Canonical owner: fork `main` history projection; inherited unchanged by `dev/compat`.
@@ -2537,11 +2493,6 @@ own source list remains the complete watch surface.
 - Upstream relationship: upstream `7bc7dc3a` resolves the variant the same way.
   Fork fix of shared code. Both branches use the `main` resolver. The
   `dev/compat` model-selection preview calls it too (DC-TUI-001).
-- 2026-11-02: rebuild boundaries kept the model but dropped the variant. After
-  every checkpoint rebuild, inbox deliveries copied the boundary's model and ran
-  at the default, and reopening the session showed no variant. In one
-  multi-agent workspace five sessions lost `max` or `xhigh` this way at their
-  first rebuild and never got it back.
 - Watch surfaces: `previousModel`, `lastModel`, `continuedVariant`,
   `agentVariant`, `createUserMessage`, `shell` and `command` in
   `packages/cli/src/session/prompt.ts`; `resolveDrainSeed` in
@@ -3027,8 +2978,6 @@ own source list remains the complete watch surface.
 
 ## FC-042 — a bounded agent stops on a rejected request, not on the compaction trigger
 
-- 2026-11-04 reminder synchronization (`10b03cf0`, validated): `isBoundedComputation` moves earlier in the loop so session-environment injection uses the same `native && hidden` predicate. The processor's `compactsOnUsage: !isBoundedComputation`, provider-overflow termination and step budgets are retained.
-
 - Status: active
 - Canonical owner: fork `main` — `compactsOnUsage` in the processor `Input`
   (`packages/cli/src/session/processor.ts`), passed as `!isBoundedComputation`
@@ -3042,6 +2991,9 @@ own source list remains the complete watch surface.
     after that one request with `ContextOverflowError` (unchanged).
   - Agents with context management are unchanged: the trigger routes them to
     compaction/checkpoint recovery.
+  - `isBoundedComputation` is computed early in the loop, so session-environment
+    injection (FD-009) uses the same `native && hidden` predicate as
+    `compactsOnUsage`.
 - Motivation: bounded agents have no compaction, so the trigger could only end
   them. With `compaction.max_context: "272K"` on gpt-6-astra (window 1.05M) the
   checkpoint writer was failed at 244.8K on steps the provider had accepted:
@@ -3175,8 +3127,6 @@ own source list remains the complete watch surface.
 
 ## FC-050 — old oversized environment prefixes are rebuilt
 
-- 2026-11-13 synchronization: adopt the unified environment from `e3592f0e`, which no longer renders Claude-specific git status or recent commits. The production status-generation deviation retires. Keep `GitStatusPrompt.oversized` and `SessionPrefixSnapshot.get` recovery for historical persisted prefixes until such data no longer needs to be read.
-
 - Status: active
 - Canonical owner: fork `main` — historical environment recognition in
   `packages/cli/src/session/git-status.ts` and its use in
@@ -3292,8 +3242,6 @@ own source list remains the complete watch surface.
 
 ## FC-053 — a config provider on `@ai-sdk/xai` uses Responses, and an OpenAI-compatible reasoning model keeps its effort
 
-- 2026-11-13 synchronization: adopt declared model output limits, sampling and effort capabilities from `c9c91d7b`, including the 128K missing-output default and removal of name-derived defaults. Preserve the three FC-053 routing/options corrections and FC-025 Grok operation flattening. Tests now declare their effort lists explicitly; actual Responses requests prove configured/small effort, encrypted reasoning and explicit opt-out. An `xhigh` config on the pinned xAI adapter is explicitly rejected before any HTTP request; no silent downgrade or dependency upgrade is introduced.
-
 - Status: active
 - Canonical owner: fork `main` — the loader fallback in `Provider.getLanguage`
   (`packages/cli/src/provider/provider.ts`), and `sdkKey` and
@@ -3337,7 +3285,11 @@ own source list remains the complete watch surface.
   Strict-tool defaults are unchanged; `@ai-sdk/xai` stays out of
   `EXPLICIT_NON_STRICT_TOOL_SDKS` for the reason recorded beside that list.
   FC-025 matches Grok on its model id, so its `operation` flattening applies
-  on either SDK and is independent of this routing.
+  on either SDK and is independent of this routing. Upstream's declared model
+  output limits, sampling and effort capabilities (`c9c91d7b`, adopted
+  2026-11-13) apply on top of these corrections; an `xhigh` config on the
+  pinned xAI adapter is rejected before any HTTP request, with no silent
+  downgrade or dependency upgrade.
 - Upstream relationship: upstream `3a12665a` has neither the `@ai-sdk/xai`
   fallback nor the `sdkKey` entry nor the reasoning default. Fork fix;
   `dev/compat` inherits it.
