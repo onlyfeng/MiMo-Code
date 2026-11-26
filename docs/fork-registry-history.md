@@ -3650,3 +3650,331 @@ The one-commit review advances from `81a37ab596e5ee4d086697df81731a06817e2237` t
 ## 2026-11-26 closed image attachment reminder
 
 The one-commit review advances from `c538fab349373356623acea5bb80defa7fc279c0` to `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` (upstream pull request #2867). C01 adopts the closed `<system-reminder>` for user image attachments and C02 adapts its append-only placement on main `d1039edaa94528da317b8668a2e244ec5fa98c9b`: the fork's read-time `orderUserParts` now moves only a legacy envelope ending in `## My request:`. Compat `75e37ed2f052e20f7b14a98caee44e7baaed1cf0` inherits both through a clean merge. FC-009 gains a dated note; no entry changes its contract. See [the synchronization record](upstream-sync-2026-11-26.md).
+
+## 2026-11-26 registry consolidation: FD dated notes
+
+Moved verbatim from `docs/upstream-deviations.md` at main `2b5c7cfea7faa26b189e809a5f747a0d11bc836f`, grouped by entry in their original order. Rules from these notes that were still in force were folded into the entry's fields in the same commit, after checking them against the code; notes describing superseded or retired behavior (the WebSearch sidecar, model-inferred harness selection, the tool-schema experiment, the fork model API) were not folded. The FD-004 block that opens "Two containment call sites" is an undated paragraph describing the 2026-09-14 alignment; its `MIMOCODE_SERVER_OPERATOR_PASSWORD` getter was removed on 2026-11-26. This is a pure registry commit: it changes no decision, behavior reference, owner or retirement condition, and advances neither the `Upstream` nor the `Main behavior` reference. Paths are as the notes wrote them.
+
+### FD-001 (3 notes)
+
+- 2026-10-22 live advancement: superseding a failing retry does not directly execute accepted input. The existing lane claim, owned task selection and RunApproval handoff select its authority on the next loop; recovery does not enable this watcher. Checkpoint/compaction and reasoning-only continuations retain their atomic source/task/run boundaries.
+
+- 2026-10-20 synchronization: durable queue acceptance grants no run approval. A received input becomes the request source only when its lane owns and consumes it; an unrelated accepted user closes the previous approval scope when selected. Checkpoint, compaction and bounded continuations retain authority only through the existing owned commit path. Queue scheduling and long-lived MCP bridges cannot lend a former caller's scope. The checkpoint and compaction real-tool permission regressions retain both correlation assertions and distinct continuation parents.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` makes server-initiated MCP sampling hold an execution claim on its owning instance and rejects a callback whose owner is closing, absent or replaced. The fork keeps `RunApproval.provide(undefined)` around the whole claimed request, so a long-lived connection bridge still cannot lend a CLI run's approval scope to sampling. `test/mcp/sampling.test.ts`, `test/mcp/sampling-e2e.test.ts` and upstream's `test/provider/refresh-boundaries.test.ts` pass.
+
+### FD-002 (4 notes)
+
+- 2026-11-21 synchronization: the catalog leaves the frozen system tail and
+  arrives as user-turn reminders; FC-005 owns historical schema-3/v2 retirement.
+  Instruction files retain default-on delivery, disable event/payload parity
+  and actor scope. Their bytes stay frozen in the prefix until a tools-hash
+  rotation rebuilds it, which is upstream's rule again: the fork had kept them
+  across rotations only for the system-tail catalog. Retries of one request
+  never rotate, so the immutable retry set is unchanged. POLICY-04's prior
+  layout is historical; see
+  [historical layout and migration](skill-catalog-system-tail.md).
+
+- 2026-08-27 follow-up: adopted the main/peer scope but separated identity
+  replacement from checkpoint responsibility. The former requires positive
+  main/registered-peer evidence; the latter retains its deliberate fail-open.
+
+- 2026-09-01 registry narrowing: default-on instruction delivery is now an
+  adopted shared capability. FD-002 remains active only for disable UI/payload
+  parity, immutable retry sets, and fail-closed replacement of unknown actors.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+### FD-004 (5 notes)
+
+- 2026-11-26 alignment review (pull request #273): `flag/flag.ts` returns to upstream's password block. The operator password is read live from `process.env`, the generated one stays in module state, and the fork-only `MIMOCODE_SERVER_OPERATOR_PASSWORD` getter, its load-time snapshot and the `Flag.MIMOCODE_SERVER_PASSWORD` setter are gone. The non-loopback bind guard in `server/server.ts` reads upstream's `MIMOCODE_SERVER_PASSWORD_SUPPLIED`. The old getter and `SUPPLIED` read the same variable, so the guard is unchanged: a generated listener credential still cannot authorize a non-loopback bind. The setter existed only for tests, and the snapshot had made the fork rewrite upstream's `test/server/project-init-git.test.ts`; that test is upstream's again apart from its `root: "cwd"` fixture. `test/cli/tui/worker-listener.test.ts` now sets the operator password in the environment, as an operator does, and asserts `SUPPLIED`.
+
+- 2026-10-13 diff minimization: the three retained corrections keep their code and tests but their explanatory comments shrink to a pointer at this entry, which already carries the full reasoning. `llm-server/completions.ts` is now a pure four-line insertion (upstream's layering comment is restored verbatim, the `model.options` line carries its own two-line note); `server/server.ts` and `cli/cmd/llm-server.ts` drop 2 and 15 comment lines respectively. Re-verified while trimming: upstream's root `@mimo-ai/sdk` is the legacy v1 client (78 operations, not regenerated by `packages/sdk/script/build.ts`, which writes only `src/v2/gen`) while v2 has 142, and `session.prompt_async` is the one operation whose id is not a callable method name on either client; both halves of the `cli/cmd/generate.ts` `codeSample` correction therefore stand. `test/llm-server/streaming.test.ts`, `test/cli/cmd/serve-advertise.test.ts`, `test/cli/llm-server-revoke.test.ts` and `test/server/openapi-code-samples.test.ts` pass unchanged.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` keeps each Effect HTTP API operation inside an instance execution claim until it completes, fails or is interrupted. `routes/instance/httpapi/server.ts` stays byte-for-byte upstream; that router is mounted only under the opt-in `MIMOCODE_EXPERIMENTAL_HTTPAPI`, so the default Hono instance routes are unaffected.
+
+- 2026-09-14 structural retirement: the fork's parallel model API is gone.
+  `server/model-api.ts`, `server/api-request.ts` and
+  `src/llm-server/{images,input-audio,provider-options,sdk,scope,models,error}.ts`
+  are removed. Upstream mounts `CapabilityRoutes` inside `InstanceRoutes` at
+  `/v1` with the same two routes, the same mandatory scoped bearer token, and a
+  `protocol.ts` that already accepts `image_url` and `input_audio`. Checked
+  rather than assumed: those modules were a second implementation of what
+  upstream ships.
+
+- Two containment call sites were aligned rather than kept. Both
+  `routes/instance/middleware.ts` and `routes/instance/httpapi/server.ts` read
+  `MIMOCODE_SERVER_OPERATOR_PASSWORD` where upstream reads
+  `MIMOCODE_SERVER_PASSWORD_SUPPLIED`. Checked rather than assumed: in
+  `flag/flag.ts` both getters read the same `operatorServerPassword` variable,
+  one returning the string and the other `Boolean()` of it, so the two guards
+  are the same test. The fork's spelling bought nothing and cost upstream's
+  comment, which is the only place the "who supplied the credential" rule is
+  written down — including its reasoning about `/v1` bypassing basic auth.
+  `routes/instance/index.ts` differed only in where the capability import and
+  route sat in their lists; that is pure future conflict, so it is aligned too.
+
+### FD-005 (23 notes)
+
+- 2026-11-21 synchronization: The live skill set never rebuilds agent permission or changes profile-key inputs; explicit session harness precedence remains.
+
+- 2026-11-13 synchronization: adopt upstream `e3592f0e`'s unified default prompt and model-independent Codex opt-in. Retain the fork resolver and explicit session precedence: session `codex`/`default` wins, otherwise process true selects Codex, otherwise default. Model ids, API ids, families and legacy `harness_model` declarations no longer select the harness. The profile policy generation changes consistently for capture, ordinary requests and compaction, preventing reuse of a prior model-selected frozen prompt under the new policy. Historical inference notes below describe the policy before this synchronization. FD-006's authorized implementation pool and direct controls remain active; FC-050 retains recovery of old oversized prefixes.
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): MCP synthetic parts are tagged with `{ key: "mcp", rev: mcpReminderMarker(meta) }` while retaining `metadata.mcpReminder` for announcement diffs and deferral evidence, including legacy parts. Readiness remains distinct from request authorization; shared announcement budgets, escaping, frozen membership/schema checks and hidden direct-call rules are unchanged. The Claude environment names `Shell.acceptable()` without changing resolved harness/template selection or the dynamic system-prompt gate.
+
+- 2026-10-30 registry correction: the synchronization below left two sidecar-era references in this entry. `packages/cli/src/tool/websearch/index.ts` leaves the watch surfaces: main's file is identical to upstream and resolves no model identity. The local-SSE `test/tool/websearch.test.ts` evidence leaves Tests/evidence: upstream `d0684a3d` deleted that test with the sidecar. No behavior changes.
+
+- 2026-10-30 synchronization: Adopt `d0684a3d`: remove the Xiaomi WebSearch sidecar and its resolved-API-id clause. Every provider needs explicit Exa enablement on main; compat additionally exposes configured native/fallback routes under DC-WEBSEARCH-001. Harness/prompt/toolset/retry identity remains active.
+
+- 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens the WebSearch sidecar and tool gate from the literal `xiaomi` to `isXiaomiFamilyProvider`. The sidecar authenticates with the model's own provider key and still sends the resolved `model.api.id`, so this contract now covers the whole family. Harness, prompt, discovery, toolset and retry identity resolution read model identity, not the credential provider, and are unchanged; family-wide large-model output defaults and in-house vision ordering select no harness. Evidence: `test/tool/websearch.test.ts` (token-plan sidecar), `test/tool/registry-toolset.test.ts` (family exposure), `test/tool/harness-alias.test.ts`, `test/provider/provider.test.ts`.
+
+- 2026-10-26 synchronization: upstream `0fe2cbbc` removes `isMimoOrSmartModel` and `resolveModelNpm`, so a MiMo-named id keeps the model or provider `npm` it declares; only an undeclared SDK falls back to `@ai-sdk/openai-compatible`. FD-005 never owned transport after the 2026-09-13 retirement, and the harness, prompt, discovery, toolset and retry identity resolution is unchanged. Upstream `18adffc9` also drops the `claude` PATH probe from the Anthropic environment block in `session/system.ts`; harness-resolved prompt selection there is untouched. Evidence: `test/provider/provider.test.ts`, `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/system.test.ts`.
+
+- 2026-10-20 live catch-up through `4e58a801`: readiness is a non-blocking connection snapshot, not an authorization catalog. Live and prefix capture share actual reminder/search/use evidence, including legacy announcements. Silent `auto` may re-evaluate without that evidence; no auxiliary user-history marker preserves a cache choice. Entry and latest per-server outcomes share one budget and show only request-visible tools. Keep resolved harness identity, frozen membership/schema gates, output/diagnostic escaping and the fixed dispatcher. This narrows the initial empty-catalog sticky description below.
+
+- 2026-10-20 synchronization: adopt `cd72e855`'s fixed `mcp_tool_use` dispatcher, sticky deferral (including an empty catalog) and turn-boundary catalog announcements. Both live resolution and `buildLLMRequestPrefix` use the same resolved harness and history evidence; fetched schemas no longer enter the provider-facing active tool set. Search is a schema/context optimization, not authorization. Keep MCP output tag neutralization and full request/frozen schema gates. New snapshots record the fixed dispatcher plus the authorized hidden implementation pool, with empty loaded membership. Legacy snapshots without the dispatcher may use only the captured active/loaded MCP names intersected with frozen membership and matching live schemas. FD-006 retains authorized hidden Codex direct execution. Evidence: `test/session/llm-request-prefix.test.ts`, MCP cases in `test/session/prompt-effect.test.ts`, `test/session/codex-compact.test.ts` and `test/tool/mcp-tool-search.test.ts`.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` moves MCP result normalization into a settlement-aware `normalizeResult` and drops its `neutralizeHarnessTags` call, while `prompt.ts` still imports the helper and no upstream test covers MCP output escaping. The fork keeps escaping MCP text output inside the same `normalizeResult`, as adopted with lazy loading on 2026-10-13, so a server cannot forge `<system-reminder>`-style harness tags through a tool result. Retire this difference when upstream restores the call.
+
+- 2026-10-13 synchronization: upstream `463cbb28` replaces `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` with `MIMOCODE_MCP_TOOL_SEARCH` deferral modes and forces deferral through `mcpToolSearchMode` when its own GPT-name shortcut sees a GPT identity. The fork's `mcpToolSearchMode` instead asks `resolveHarnessMode`, so explicit session modes, the process selector, trusted `harness_model` aliases and the MiMo/GPT-4/OSS vetoes decide Codex deferral exactly as they decide prompt and toolset. Prefix capture passes the same resolved mode to `buildLLMRequestPrefix`, which now applies the same deferral threshold and conversation-scoped loading as the live request. Evidence: `test/tool/gpt.test.ts`, `test/tool/harness-alias.test.ts`, `test/session/llm-request-prefix.test.ts` and the GPT default-harness cases in `test/session/prompt-effect.test.ts`.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds an instance-preserving model refresh (`POST /global/provider/refresh`). Its Config candidate and committed configuration are new objects, while harness alias trust is keyed by the parsed configuration object, so the unadapted merge deleted every declared `harness_model` on the first refresh, and also on a Provider's first read after a refresh that found it cold. `Config.prepareModelRefresh` now attaches the fresh models-only parse's declarations to both objects: a refresh keeps a still-declared alias and drops a removed one, and plugin `config` hooks, which still run on the candidate, cannot grant trust. Evidence: `test/provider/refresh-harness.test.ts` fails both cases on the unadapted merge and passes both with the adaptation.
+
+- 2026-10-02 synchronization: upstream `50b505a3` drops the free `mimo-auto` alias from the MiMo npm pin and its image capability override, and the TUI's no-match default now prefers `xiaomi/mimo-v2.6-pro`. No fork classifier names `mimo-auto`, so harness, prompt, discovery, toolset and retry identity resolution is unchanged; like the 2026-09-02 default-model review, the starting-model choice precedes this boundary.
+
+- 2026-09-10 config integration: host defaults merge underneath explicit user
+  values before the effective parsed configuration's trusted harness declarations
+  are captured. The small_model compatibility alias applies only when lite is
+  absent; mutable plugin hooks still cannot grant or replace harness authority.
+
+- 2026-09-13 transport retirement: upstream `294328d7`/`b6a1008c`/`cfa07fe8`
+  remove the `xiaomi` custom loader and pin any MiMo or `mimo-auto` id to
+  `@ai-sdk/openai-compatible`. The fork had extended `usesMimoResponsesApi` into
+  a multi-value resolver and routed PTC identities to `sdk.responses`. Adopted
+  upstream's shape and retired that routing with `isMimoModel`,
+  `usesMimoResponsesApi`, their tests, and the `xiaomi transport selection uses
+the complete resolved model identity` case. FD-005 keeps only identity
+  resolution for prompt, discovery, toolset and retry policy; it no longer owns
+  API transport. Verified: `test/provider/` + `test/tool/gpt.test.ts` 581 pass.
+
+- 2026-08-27 review: adopted upstream PTC transport detection through the
+  complete resolved identity while keeping transport and harness/toolset as
+  separate decisions. MiMo v2.5 precedence remains authoritative even when an
+  alias looks PTC-like.
+
+- 2026-09-01 tri-state follow-up: adapted `MIMOCODE_CODEX_MODE` from a Boolean
+  force-on switch to a tri-state resolved mode: unset preserves model inference,
+  explicit true forces the Codex prompt/toolset, and explicit false forces the
+  default harness and native non-Codex prompt/toolset even for GPT identities.
+  Session-explicit mode remains authoritative. Transport selection and the
+  independent MCP-search opt-in do not infer or override the harness/toolset.
+  Main behavior: `0899a4802dd65c1ca98e68722a7ee0c017e5cb7c`.
+
+- 2026-09-01 upstream convergence review: upstream `cce933568906ae670decf9a081618ebf25aa8afe`,
+  merged by `d17e176ba179ea2568cdf5020bb65011aaf86493`, now recognizes an explicit
+  process-level false for automatic GPT selection. Its helper still gives that
+  process value and generic GPT aliases precedence over explicit session modes
+  and omits the fork's complete-identity and MiMo precedence. The merge therefore
+  retains `resolveHarnessMode`, the fork schema descriptions, and the stronger
+  positive/negative tests as the canonical partial-duplicate resolution.
+
+- 2026-09-02 default-model review: adopted upstream's live-registry validation,
+  recent-first selection, stable usable-chat fallback, and one-time stale-config
+  warning from `4f723f9988c15e31ec31f92fb23c478eb4f66218`. This selects a viable
+  starting model without changing FD-005's later resolved-identity, harness,
+  prompt, discovery, toolset, retry, or transport decision.
+
+- 2026-09-02 generated-description review: upstream's regenerated harness text
+  still omits explicit session precedence. The merge therefore regenerated from
+  fork source and retained the FD-005 description in published OpenAPI and the
+  JavaScript SDK instead of accepting the conflicting generated text.
+
+- 2026-09-02 WebSearch convergence review: adopted upstream's use of the
+  current request's `model.api.id` for Xiaomi sidecar requests instead of a
+  hard-coded MiMo identifier. This preserves FD-005's resolved model identity
+  through the sidecar without changing harness precedence, prompt/tool
+  selection, transport classification, or alias-conflict handling.
+
+- 2026-09-10 Xiaomi SDK-split review: adopted upstream `fc25fed05ee63e74ad157196afbdffcf0d61efe3`,
+  merged by `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`. The bundled Copilot fork
+  now serves `responses()` only, while chat comes from the stock
+  `@ai-sdk/openai-compatible` model, so Xiaomi `reasoning_content` reaches the
+  stream as reasoning parts instead of being dropped by a parser that only knows
+  Copilot's `reasoning_text`. This narrows upstream toward FD-005's position and
+  changes no selection authority: the fork's custom xiaomi loader still chooses
+  `responses()` versus `languageModel()` from the complete resolved identity,
+  and both members exist on the composed SDK object.
+
+- 2026-09-15 debug carrier correction: `cli/cmd/debug/agent.ts` now passes
+  the resolved `harness_model` to registry discovery, matching actual requests
+  and the experimental tool-list route. Eight real CLI subprocess cases cover
+  trusted opaque aliases, untrusted API aliases, GPT-4/OSS/MiMo vetoes and explicit
+  selectors. This closes the diagnostic carrier defect identified by the audit;
+  it does not change harness policy or validate `debug --tool` execution.
+  The unused fourth `CustomModelLoader` argument is removed under F09 in
+  [the implementation report](audit-followups-2026-09-15.md); the closed loader
+  table has no reader of that argument and preserves its three used arguments.
+
+### FD-006 (15 notes)
+
+- 2026-11-26 alignment review (pull request #273): the standalone read/glob/grep experiment carrier retires. `packages/cli/script/experiments/tool-schema*.ts`, `test/experiments/tool-schema.test.ts` and `test/experiments/tool-schema-runner.test.ts` are deleted, and `tsconfig.scripts.json` is upstream's again. The experiment ran once on 2026-09-07, was superseded the next day by upstream's production compact mode, and had no production consumer, yet refactors still had to carry it. Its method and results stay in [the historical evaluation](experiments/tool-schema-2026-09-07.md); the code is recoverable from `6fe784092fed596eea8d5382d85c9713ed96a378`. No production surface or contract of this entry changes.
+
+- 2026-11-24 synchronization: upstream `81a37ab5` passes the nested context's `messageID` and the session's `onMcpElicitation` recorder (read from `ctx.extra`) into exec's MCP calls. The passthrough is kept in `tool-script.ts`, but in the fork exec's MCP entries are `execMcpTools`, built on the same `executeMcp` wrapper in `session/prompt.ts` as direct and `mcp_tool_use` calls; that wrapper replaces `experimental_context` and itself supplies the assistant `messageID` and the recorder, so an elicitation raised inside a script is recorded and associated with the nested call id. The fork's nested pipeline (request-pinned pool, permission, hooks, settlement and closed intake) is unchanged; the recorder grants no tool or execution authority. See C03 in [the synchronization record](upstream-sync-2026-11-24.md).
+
+- 2026-10-28 synchronization: config-declared always-direct MCP tools join the top-level active set and remain available through exec, while excluded from deferred search/dispatch. The rejection condition retains GPT hidden direct calls and legacy frozen exceptions beside the new always-direct exception. Current permission, whitelist and frozen schema/membership checks still gate all paths. See C01 in [the sync record](upstream-sync-2026-10-28.md).
+
+- 2026-10-20 synchronization: deferred non-Codex MCP calls use `mcp_tool_use`; its request-local dispatch map runs the underlying permission, hook, settlement, truncation and metrics pipeline. Argument checks run after the before-hook; the processor gate/part stays `mcp_tool_use`, while permission and metrics identify the actual MCP tool. The dispatcher is explicitly captured despite being built outside the registry. It cannot expand a full-context actor's frozen implementation pool or schemas. Codex keeps its authorized hidden direct calls and `exec` path; only non-Codex deferred direct calls are rejected. Older direct snapshots keep their captured active/loaded intersection rather than gaining the new gateway. Tests cover new and legacy snapshots with both matching and changed schemas.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` settles exec through `ToolSettlement`, tracks host calls and passes an abort signal to `evalScript`. The fork's nested lifecycle (closed intake, abort, `withSlot.close`, joined admitted calls and VM disposal) stays authoritative; the script now settles through `ToolSettlement`, records a `cancelled` exec result for the processor, and a nested guest interrupted by Stop that had already settled reports its real result through its own settlement reference instead of an interruption error. `workflow/sandbox.ts` returns to upstream bytes because its signal abort is equivalent to the fork's earlier implementation. Evidence: `test/tool/tool-script.test.ts`, `test/workflow/sandbox.test.ts` and the exec cases of `test/session/tool-gate-cancel.test.ts`.
+
+- 2026-09-15 standalone experiment cleanup: `disposeExperimentRuntime` closes
+  its owned log sink after the global runtime and database. Reusable
+  `runExperiment` calls retain their existing lifecycle. The isolated
+  `test/experiments/tool-schema-runner.test.ts` child verifies queued records,
+  completed log naming, no post-cleanup append and natural exit within the
+  original budget. This fixes a proven log cleanup omission; the earlier
+  intermittent CI exit-143 observation was not reproduced or attributed to a
+  confirmed root cause. Evidence is recorded in [RV04](runtime-validation-2026-09-15.md#rv04独立实验日志资源清理).
+
+- 2026-09-08 POLICY-01: the selected single capability (N=1) aligns nested
+  Actor/question/plan composition with source
+  `0abfeba186191c1a361cf3f27b802e9d29bf0fdc` and released v0.1.14
+  `2a0eb706e95a77cba34a319e9f11f33f26d4450c`, without advancing the overall
+  upstream baseline. Runtime/tests and guidance: `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
+  `test/tool/actor-owned-lifecycle.test.ts`, `actor-exec-lifecycle.test.ts`,
+  `control-origin.test.ts`, `plan-approval.test.ts`, real
+  `test/session/exec-interaction.test.ts`, and TUI plan-switch event tests
+  cover the new boundaries. Local evidence and accepted-source CI are
+  recorded in [the history](fork-registry-history.md#2026-09-08-policy-01-full-authorized-exec-composition).
+
+- 2026-09-08 actor composition (earlier narrowed policy): `test/tool/actor-exec.test.ts` exercises
+  real inbox/status calls in JSON and shell invocation modes, trusted sender
+  identity, subagent parent routing, post-hook action rejection, MCP-name
+  fallback rejection and cancellation without a late send. The live Codex
+  tests prove direct actor plus narrowed nested declarations, a committed
+  InboxArrived event and no send when actor is disabled in the request.
+
+- 2026-09-08 selected integration: the explicit user decision supersedes the
+  earlier blanket production compact/shell rejection in the dated notes below.
+  FD-006 remains active for the residual authority, control-entry, schema,
+  cancellation, media and budget differences.
+
+- 2026-09-11 attachment-bound review: upstream now bounds every inline
+  attachment where it is produced — the read tool, user prompt attachments and
+  MCP result normalization — at `MIMOCODE_MAX_ATTACHMENT_SIZE` (50 MB default).
+  That gate sits above this entry's relay boundary and does not change it: the
+  host still relays at most eight authorized attachments totaling 10 MiB
+  encoded data and still reports omissions, so the stricter relay bound remains
+  the one nested execution observes. `src/tool/tool-script.ts` is unchanged.
+
+- 2026-09-05 Bash-output review: adopted the shared default of 30,000
+  approximate output tokens and the unified head/tail preview with an archived
+  output path. This changes direct Bash output only; nested shell exclusions,
+  permission attribution, code-size gates, and timeout units remain intact.
+
+- 2026-08-27 review: the incoming MiMo toolset gate was routed through FD-005's
+  resolved identity. The compact single-exec authority model remains rejected;
+  direct permission-visible tools and nested actor/shell/control exclusions are
+  unchanged.
+
+- 2026-08-25 fixed-cwd review: adopted removal of mutable session cwd and the
+  `change_directory` tool. Relative file paths resolve against immutable
+  `Instance.directory`; cross-directory work uses absolute paths or an explicit
+  `workdir`. This does not broaden nested actor, shell,
+  `exec_command`, or control-tool authority. FC-007 owns the positive fixed
+  instance-cwd contract. The inert `SessionCwd.Event.Changed` declaration is
+  retained only for SDK compatibility; no setter, clear path, or event
+  publisher restores mutable cwd authority.
+
+- 2026-08-25 review: adopted replayable nested parts and live child lifecycle
+  updates while retaining the nested actor/shell/control exclusions. Early
+  termination now closes admission, aborts running calls, rejects queued calls,
+  joins cleanup, and persists only a bounded terminal snapshot.
+
+- 2026-08-23 review: adopted the new upstream custom-exec wrapper
+  normalization. Rejected the nested `bash`/`exec_command` bridge and its typo
+  repair because they cross the authority boundary. The raw code size gate is
+  retained before and after normalization.
+
+### FD-009 (12 notes)
+
+- 2026-11-21 synchronization: Cold/warm capture removes historical catalogs through getFrozen while retaining fail-closed admission, pin ownership and complete native tool contracts.
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): add the receiving session's environment only to an unsent own user message. It neither recaptures nor changes the frozen system, tools, permissions, model identity or parent history. A non-bounded full-context child can retain the parent's reminder and receive its own; duplicate content in that request is accepted. Missing or empty capture still fails closed, and native hidden bounded agents receive no new session-environment part.
+
+- 2026-11-01: FC-002 changes how the `prefix-capture-ref.ts` slot is registered (live captors, so disposing one layer no longer clears another's). The fail-closed admission decision is unchanged.
+
+- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1870` (scope `forkContext` by session, opened 2026-07-23) is closed as superseded; upstream `actor/spawn.ts` now keys the map through `forkContextKey(sessionID, actorID)`, which is the isolation the PR asked for. Its head branch `fix/forkctx-session-scope` is deleted from the fork.
+
+- 2026-09-19 synchronization: Automatic subagent resume uses the same retained current-instance full-context admission as explicit Actor recovery. Upstream registry-only ephemeral recovery is not adopted; missing context remains unavailable and guidance states that limit.
+
+- 2026-09-15 model-entry alignment: main adopts upstream `799bc409` and
+  exposes neither `context` nor dependent persistent creation on actor spawn/run.
+  The earlier upstream model-entry failure (missing `ForkContext`) was already
+  corrected here; the removal follows the approved branch ownership policy.
+  Dev/compat owns the explicit model-facing extension. Checkpoint writers,
+  session-ask fork queries and qualifying existing actor recovery continue to
+  use this shared frozen-context contract; removing the model parameter does
+  not retire their admission or native-schema checks.
+
+- 2026-09-08 POLICY-01: real cold capture, JSON roundtrip, full-context Actor
+  and SDK execution cover matching native schemas, changed agent enums,
+  legacy shell rejection and exact legacy JSON compatibility. The request
+  wire excludes nativeInputSchema. Existing full/active membership and model
+  identity checks remain independent of the new native contract.
+
+- 2026-08-28 review: adopted removal of the unimplemented `actor_id` resume
+  argument from actor `spawn` and `run`. Follow-up work uses `send` only while
+  the actor remains reusable. A completed ephemeral `context: "full"` actor has
+  released its frozen context, so a later send fails closed and a fresh spawn
+  is required; no live-context fallback is introduced.
+
+- 2026-08-27 review: upstream session/actor-scoped fork context is an
+  equivalent duplicate. The fork retains its stronger generation, cancellation,
+  frozen-membership, and lifecycle implementation rather than adding a second
+  context map or weakening fail-closed admission.
+
+- 2026-09-12 wake-routing note: FC-001 retired its continuation wake-generation
+  routing in favour of upstream's `ActorExecution` claim. Frozen-context capture
+  and the resolved-model/harness identity checks are unaffected: actor recovery
+  and resume still validate the frozen identity before admission, and the
+  retirement changes only which primitive serializes a woken turn.
+
+- 2026-09-11 resume model-override review: upstream's new resume model override
+  would replace the model a recovered turn runs on. A frozen actor keeps its
+  original resolved identity, so the HTTP route refuses an override for a
+  non-main `agentID` rather than applying it, and the run loop's existing
+  `resumeIdentity` comparison still fails closed behind that refusal. Main
+  resume, which has no frozen identity, accepts the override.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+### FD-010 (3 notes)
+
+- 2026-11-21 synchronization: Catalog transport changes only; think-only summary recovery and rollback boundaries remain.
+
+- 2026-10-30 synchronization: Adopt `2491aae5` failure/interruption cleanup around the complete compaction effect. Keep reasoning acceptance and rejection of filtered/error output; an unprojected boundary is removed and an interrupted summary is marked aborted. The summarize outcome test exhausts both empty attempts under FD-012.
+
+- 2026-10-20 synchronization: conversation pure-empty retries move to `SessionRetry.policy`; summary assistants remain owned here and by FD-011/FD-012. Keep reasoning-summary acceptance, content-filter/error rejection and the compaction-specific empty retry bound. No compaction owner retires.
+
+### FD-011 (2 notes)
+
+- 2026-11-21 synchronization: Compaction consumes the catalog-free frozen prefix and still sends toolChoice "none"; the ported system-tail suite retains its literal wire assertion.
+
+- 2026-10-30 synchronization: The requested boundary model drives summary/prefix/tail selection. Frozen tool membership and `toolChoice: "none"` remain; cleanup creates no summary-time tool authority.
+
+### FD-012 (2 notes)
+
+- 2026-11-21 synchronization: Catalog transport changes only; the empty-step retry limit and rollback behavior remain.
+
+- 2026-10-30 synchronization: Keep the bounded empty-summary retry. Adapt the incoming HTTP rollback fixture to queue two empty responses, so it tests exhausted rollback instead of the successful retry.
