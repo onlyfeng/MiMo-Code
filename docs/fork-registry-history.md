@@ -3646,3 +3646,7 @@ The one-commit review advances from `2c76c13c85ef41fe206f9a54d1d0e9da97319cfb` t
 ## 2026-11-25 always-direct MCP status
 
 The one-commit review advances from `81a37ab596e5ee4d086697df81731a06817e2237` to `c538fab349373356623acea5bb80defa7fc279c0` (upstream pull request #2863). C01–C03 adopt always-direct MCP tools in readiness, server reminders, the `mcp_tool_search` status and the `mcp_tool_use` rejection on main `b9499a965e10f906f2a2ead5e0698e243cd0ce54`, with FC-004's replay validation extended to the new `directToolNames` field; compat `c70dfa435437a0dd49a4d60aa5946d02cffb227c` inherits them through a clean merge. FC-004 gains a dated note; no entry changes its contract. See [the synchronization record](upstream-sync-2026-11-25.md).
+
+## 2026-11-26 closed image attachment reminder
+
+The one-commit review advances from `c538fab349373356623acea5bb80defa7fc279c0` to `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` (upstream pull request #2867). C01 adopts the closed `<system-reminder>` for user image attachments and C02 adapts its append-only placement on main `d1039edaa94528da317b8668a2e244ec5fa98c9b`: the fork's read-time `orderUserParts` now moves only a legacy envelope ending in `## My request:`. Compat `75e37ed2f052e20f7b14a98caee44e7baaed1cf0` inherits both through a clean merge. FC-009 gains a dated note; no entry changes its contract. See [the synchronization record](upstream-sync-2026-11-26.md).
