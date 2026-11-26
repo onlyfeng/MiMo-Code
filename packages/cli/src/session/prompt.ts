@@ -780,7 +780,7 @@ export const layer = Layer.effect(
     const actorRegistry = yield* ActorRegistry.Service
     const executions = yield* ActorExecution.Service
     const inbox = yield* Inbox.Service
-    const notifyTerminal = makeTerminalNotifier({ inbox, registry: actorRegistry, sessions })
+    const notifyTerminal = makeTerminalNotifier({ inbox, registry: actorRegistry, sessions, bus })
     let boundActor: ActorInterface | undefined
     const bindActor = (actor: ActorInterface) => {
       const previous = boundActor

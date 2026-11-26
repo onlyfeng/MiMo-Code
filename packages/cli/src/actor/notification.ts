@@ -8,6 +8,11 @@ import { renderActorNotification } from "@/inbox/render"
 import type { SessionID } from "@/session/schema"
 import type { Service as SessionService } from "@/session/session"
 import type { Interface as Registry } from "./registry"
+import type { Actor } from "./schema"
+
+/** The registry fields a terminal notification reads. */
+export type TerminalActor = Pick<Actor, "background" | "agent" | "description" | "parentActorID"> &
+  Partial<Pick<Actor, "mode">>
 
 export interface TerminalNotification extends AdmissionGuard {
   wake?: boolean
@@ -22,6 +27,12 @@ export interface TerminalNotification extends AdmissionGuard {
   reportedStatus?: string
   reportedSummary?: string
   warnings?: string[]
+  /**
+   * The actor as the caller already holds it. When given, the registry is not
+   * read, so a caller delivering inside another Instance (spawn.ts's
+   * notification target) does not look the actor up there.
+   */
+  actor?: TerminalActor
 }
 
 /**
@@ -35,10 +46,11 @@ export function makeTerminalNotifier(deps: {
   inbox: Inbox
   registry: Registry
   sessions: Pick<SessionService["Service"], "get">
+  bus: Pick<Bus.Interface, "publish">
 }) {
   return (input: TerminalNotification) =>
     Effect.gen(function* () {
-      const actor = yield* deps.registry.get(input.sessionID, input.actorID)
+      const actor = input.actor ?? (yield* deps.registry.get(input.sessionID, input.actorID))
       if (!actor?.background) return false
       if (input.source === "spawn" ? actor.agent === "checkpoint-writer" : SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent))
         return false
@@ -64,12 +76,14 @@ export function makeTerminalNotifier(deps: {
         }),
       }, { deferKick: input.deferKick || input.wake === false, isCancelled: input.isCancelled, expectedEpoch: input.expectedEpoch })
       if (input.source === "continuation" || input.deferKick || input.wake === false) return true
-      yield* Effect.promise(() =>
-        Bus.publish(TuiEvent.ToastShow, {
+      // Publish through the injected service so the toast reaches the Instance
+      // this fiber runs in; a caller may deliver inside the parent's Instance.
+      yield* deps.bus
+        .publish(TuiEvent.ToastShow, {
           message: `Child "${actor.description}" ${input.status}`,
           variant: input.status === "completed" ? "success" : input.status === "cancelled" ? "info" : "error",
-        }),
-      ).pipe(Effect.ignore)
+        })
+        .pipe(Effect.ignoreCause)
       return true
     }).pipe(
       // Keep upstream's cause handling and log wording verbatim — `ignoreCause`

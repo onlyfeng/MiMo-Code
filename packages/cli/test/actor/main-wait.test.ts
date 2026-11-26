@@ -1913,7 +1913,7 @@ describe("main automatically waits for subagent executions", () => {
       const waitParts = sessions.messages({ sessionID: session.id }).pipe(Effect.map((messages) =>
         messages.flatMap((message) => message.parts).filter((part) => part.type === "tool" && part.tool === "actor")))
       yield* until(waitParts.pipe(Effect.map((parts) => parts.some((part) => part.type === "tool" && part.state.status === "running"))))
-      yield* makeTerminalNotifier({ inbox, registry, sessions })({
+      yield* makeTerminalNotifier({ inbox, registry, sessions, bus: yield* Bus.Service })({
         sessionID: session.id, actorID: "child-a", source: "spawn", status: "failed", result: "PARTIAL-DELIVERY",
       })
       yield* Effect.sleep("50 millis")
@@ -1951,7 +1951,7 @@ describe("main automatically waits for subagent executions", () => {
         messages.some((message) => message.parts.some((part) => part.type === "tool" && part.tool === "actor" && part.state.status === "running")))))
       else yield* waiting(session.id)
       yield* complete(second)
-      yield* makeTerminalNotifier({ inbox, registry, sessions })({
+      yield* makeTerminalNotifier({ inbox, registry, sessions, bus: yield* Bus.Service })({
         sessionID: session.id, actorID: "child-b", source: "spawn", status: "completed", result: "CHILD-B-COMPLETED",
       })
       yield* llm.wait(2).pipe(Effect.timeout("5 seconds"))
