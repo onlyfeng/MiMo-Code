@@ -1531,210 +1531,6 @@ own source list remains the complete watch surface.
 
 ## FC-008 — bounded workflow cleanup and targeted CI quarantine
 
-- 2026-11-26 alignment review: the 2026-11-16 decision to keep stable path-hash shards was re-measured. On the green dispatch for `fe97a67a` the four hash shards carried 372 s, 245 s, 175 s and 348 s of JUnit test time; upstream's duration-weighted split (`script/test-shard.ts`, shipped here unused) fed the same per-file times gives 288 s each. That saves about 84 s of wall-clock per run and no runner minutes, since the total is unchanged, while every added test file or weight refresh would move files between shards. The hash split stays; revisit if a shard job approaches its 12-minute step budget (shard 1 took 409 s). The upstream files stay byte-identical, and `test/script/test-shard.test.ts` covers only the unused tool.
-
-- 2026-11-24 synchronization: upstream `81a37ab5` splits `Question.ask` into an internal `raise` plus `askElicitation`, adds an optional `elicitation` request to questions, and lets a reply carry `source`, `reason` and a structured `elicitation` answer. The POLICY-01 Question lifecycle is unchanged: registration still refuses a closed generation inside the acquire/use/release lifetime, abort and release still go through `dismiss`, and `reply` stays uninterruptible and publishes `Replied` through the captured publisher before completing the waiter, which now receives the whole `Replied` payload instead of the answers alone. `ask` still resolves with the answers. Removing the payload fields fails two cases of `test/mcp/elicitation.test.ts` ("form choices are answered, exposed on the question and recorded", "structured replies are validated against the schema"); `test/question/lifecycle.test.ts`, `test/question/question.test.ts` and `test/cli/tui/question-lifecycle.test.tsx` pass. See C01 in [the synchronization record](upstream-sync-2026-11-24.md).
-
-- 2026-11-22 test home isolation: Bun caches `os.homedir()` at process start, so the HOME set by `test/preload.ts` never reached it. Instead, about 30 production call sites read the developer's real home: `instruction.ts` put the real `~/.claude/CLAUDE.md` into every test system prompt. Two `prompt-skill-command-multi`/`prompt-effect` cases failed locally because of it, and CI runners have no such file. The preload now also points `os.homedir()` at the isolated home. `test/fixture/fixture-root.test.ts` "os.homedir() follows the preload's isolated HOME" fails without it. Limit: a named `import { homedir }` keeps Bun's original binding; only `cron/loop-file.ts` (`~/loop.md`) uses one.
-- 2026-11-22 stall visibility: `test/lib/effect.ts` reports the first bounded flush that misses its 1-second budget in each process, as a GitHub `::warning::` annotation in Actions. A stalled shared log queue therefore appears as a warning rather than only as later tests running a second slower. FC-054 bounds the stall itself.
-
-- 2026-11-22 isolation: `test/bus/bus-integration.test.ts` runs in its own discovery-checked, report-verified `bus-integration` job. It shares hash shard 3/4 with `lsp/client.test.ts`, while upstream's duration split keeps the two apart. On Linux runners, the stall begins when its last two tests finish; both dispose a directory with a busy SSE and cancel its reader. An instrumented dispatch showed that the logger's next `append` called `stream.write` and its callback never arrived: the stream was open, with 76 bytes buffered and no drain pending. Every later bounded flush (`test/lib/effect.ts`, 1 s) then paid its full budget, and about 210 shard-3 tests each ran about one second slower. `Log.init` in `lsp/client`'s `beforeEach` waited behind 26,000 queued writes until its 120-second hook timeout, and the shard overran its 12-minute budget. This is upstream's unexplained log-queue stall (`33943835` isolated `subagent-resume-negatives` for it); the fork's hash shards had brought this trigger and an unbounded waiter into one process. Neither effect reproduces on macOS. The lost write callback inside Bun's file stream remains unexplained; production `Log.shutdown` waits on the same queue. Discovery now also requires this file.
-
-- 2026-11-16 synchronization: keep stable path-hash shards, tsx discovery, zero-case inputs, strict JUnit coverage and Windows acceptance. Run `subagent-resume-negatives` in its own discovery-checked/report-verified job after upstream identified its shared log-queue pollution. Adopt bounded best-effort test-log flush and catalog-only fetch spying. Keep the three incoming timing-bound cases executable; local outcomes and limits are in C07 of [the sync record](upstream-sync-2026-11-16.md). The weighted splitter is available as a tested utility but does not replace this fork contract. Correct the locked `@npmcli/agent@4.0.2` patch and test actual proxy transport.
-
-- 2026-11-13 synchronization: adopt provider stream-error logging that destructures the actual error and records only its cause summary, excluding `requestBodyValues`. The real request-marker regression passes; logger clone isolation remains FC-022. This adopts upstream privacy behavior and creates no new fork deviation. Local Windows exec fixture path/symlink failures are recorded separately from opt-in migration failures and require clean CI evidence.
-
-- 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
-
-- 2026-11-04 CI correction: the main-lane and subagent hanging-retry steer fixtures now release their deliberately pending HTTP reply only during cleanup, before awaiting the scripted server stop. Client abort does not cancel a JavaScript fetch-handler Promise. Production lifecycle behavior, all steer assertions and original test timeouts are unchanged; see the [sync evidence](upstream-sync-2026-11-04.md).
-
-- 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
-
-- 2026-10-27 synchronization: adopt the lighter two-child/two-agent global concurrency regression while keeping the existing 60-second two-level-resume budget. The Windows runtime job additionally runs `test/installation/launcher.test.ts` with a 120-second per-test cap and preserves its log in the existing artifact, so the incoming PATH-shadow/system-tar regression executes on Windows rather than only skipping on Linux/macOS. No production workflow semaphore or cleanup boundary changes.
-
-- 2026-10-22 synchronization validation: `.github/actions/setup-bun/action.yml` exposes npm's bundled `node-gyp` on a job-temporary PATH before locked installation. A runner may execute the trusted tree-sitter-powershell native install script even though the CLI uses its WASM asset. Repeated CI ENOENT established that no build executable was available; this setup reuses the existing npm dependency without adding installs, changing the lockfile, widening trust or altering product module resolution.
-
-- 2026-10-14 synchronization: upstream `002cb4c9` adds `abortSignal` to `Question.ask`'s input and passes `ctx.abort` from the question and plan tools. It replaces the fork's second-argument signal; the POLICY-01 lifecycle (closed-generation admission, captured publisher, single `Rejected` through `dismiss`) is unchanged, and an abort now dismisses and then awaits the request so a reply already in flight wins. The detached `Bus.publish` helper now ignores an interrupt-only exit from instance disposal (see the FC-007 note). Evidence: `test/question/question.test.ts`, `test/question/lifecycle.test.ts`, `test/cli/tui/question-lifecycle.test.tsx`, `test/tool/plan.test.ts`.
-
-- 2026-10-13 format alignment, second pass: the first pass only reverted hunks that were formatting in their entirety and only looked at `packages/cli/src`. This pass covers every modified `ts`/`tsx`/`md` file outside `docs/` (273, including the 143 modified test files) and reaches formatting noise inside mixed hunks: a three-way merge of ours = upstream bytes, base = `prettier(upstream)`, theirs = `prettier(fork)` keeps upstream's bytes wherever the fork only reformatted, after which only the hunks whose restored block is a contiguous substring of the upstream file are kept, and files the merge cannot stitch fall back to the single-hunk test at `-U0` granularity. Two guards: the result must be Prettier-equivalent to the fork file, and a hunk whose first line changes indentation is never restored, because upstream's indentation of a block only fits upstream's nesting (upstream's own `prompt.ts` skill-mention block is mis-indented, and the fork keeps its corrected form rather than inherit that). Outcome: 24 files, 433 fewer changed lines and 274 fewer hunks against upstream `b258d28f` (3061 → 2787), `test/mcp/host.test.ts` byte-identical to upstream again, and the realigned `prompt-effect.test.ts` diff drops from 370 hunks to 168 with two restored lines. The remaining difference is semantic: over the same 273 files the raw diff (39.6K changed lines) is already smaller than the Prettier-normalized diff of the two trees (40.2K), and the per-file excess that remains (648 lines in `session/prompt.ts`, under 100 anywhere else) sits where the fork changed code that upstream itself keeps un-formatted, which no byte-level revert can remove. Changed test files pass locally except one `actor-subagent-gating` case that fails identically on the untouched tree whenever `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS` is inherited from an enclosing MiMoCode session, and passes with it unset.
-
-- 2026-10-13 `.gitignore` alignment: the root `.gitignore` is upstream's bytes again, including its inert `.mimocde` entry and missing final newline. Fork PR #51 removed that entry to avoid a blanket `.mimocode/` rule while the repository still tracked assets there; nothing under `.mimocode/` is tracked on either side now and the runtime regenerates its own nested ignore file, so the entry ignores nothing and the two-line difference bought only a conflict surface.
-
-- 2026-10-13 format alignment: 53 fork hunks across 13 `packages/cli/src` files differed from upstream `b258d28f` only by Prettier output (line wrapping, `0.50` → `0.5`, double spaces); upstream does not run Prettier (184 of its 709 `ts/tsx` files fail the repository config) and `bun lint` is oxlint, so those hunks were pure merge-conflict surface. They are reverted to upstream's bytes; `session/overflow.ts` is byte-identical to upstream again. Every touched file is Prettier-equivalent before and after, so runtime behavior is unchanged and the `Main behavior` reference does not advance. `packages/cli/src/cli/cmd/generate.ts` also joins the watch surfaces: it carries the `codeSample` producer recorded under the 2026-09-15 tooling convergence but was not listed.
-
-- 2026-10-13 synchronization: upstream `c68463f2`/`ca056a8e` restore a root `bunfig.toml` that scopes bare root `bun test` to `script/`, isolates HOME/XDG and the database, and refuses `packages/**` test paths. It replaces the fork's `do-not-run-tests-from-root` guard with the same protection. Upstream `4a5e2140` adds `workflow_call` triggers and an unverified shard-4 `script/release.test.ts` step; the fork keeps its `windows_runtime` dispatch input beside `workflow_call` and runs the release script tests in a dedicated `release-script` job with JUnit verification. Default-path validation now clears `MIMOCODE_MCP_TOOL_SEARCH`, which replaced `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`.
-
-- 2026-10-10 Actions usage reduction: GitHub disabled this fork's workflows for Actions usage. Between 2026-06-22 and 2026-10-04 the fork ran 758 `test` workflows; recent ones averaged about 27 runner-minutes (four shards, four isolated jobs, and a Windows job for `dev/compat`). In September 233 of 415 were `pull_request` runs, repeated on every PR push. `test.yml` skips every job of a pull request whose head is a branch of this repository; such a branch dispatches `test` when it needs pre-merge evidence. A pull request from another repository cannot be dispatched by ref, so its Linux jobs still run, under GitHub's read-only fork-PR token; dispatching an untrusted head from a base-repository ref would instead run its workflow with this repository's permissions. All three workflows ignore pushes and pull requests confined to `docs/`; no test, lint or typecheck input lives there. The Windows job runs only on pushes to `dev/compat` and on dispatch with `windows_runtime`, never for a pull request, so its environment record drops the pull-request head SHA. `AGENTS.md` and the upstream-sync skill let a tip without runs because its push changed only `docs/` cite an ancestor's exact-SHA runs after proving the tree outside `docs/` identical. Shard layout, isolation jobs, JUnit verification and step budgets are unchanged.
-
-- 2026-10-04 synchronization: upstream `6babeb0b` runs its two provider refresh suites in separate processes on shard 4/4, because the refresh needs process-wide instance idleness that other session fixtures' detached work can hold. The fork's discovery-checked layout instead adds a `provider-refresh` job that runs `refresh`, `refresh-boundaries` and the fork's `refresh-harness` suite each in its own process with JUnit verification; discovery requires all three, and every other file keeps its hash shard.
-
-- 2026-10-02 synchronization: upstream `f40c76ac` deletes the root `bunfig.toml` with its `[test] root` guard and makes root `bun run test` delegate to `packages/cli`. The fork adopts the delegation but keeps a root `bunfig.toml` with only the guard: Bun reads `bunfig.toml` from the working directory, so a bare root `bun test` would otherwise discover every package test without `packages/cli/bunfig.toml`'s preload and lose the isolated HOME/XDG and fixture roots. Husky and its pre-push typecheck are removed with upstream; CI remains the gate. The isolation `test.yml` keeps its jobs on `packages/cli`. With the committed OpenAPI snapshot deleted by upstream `698f0f29`, root `script/generate.ts` only rebuilds the SDK, and the OpenAPI tests check the runtime and generated documents.
-
-- 2026-09-29 synchronization: upstream removed `packages/enterprise`, so the
-  package-scoped enterprise S3 fixture clause below retires with it; the
-  opencode harness contracts are unchanged. Root typecheck now also checks
-  `tsconfig.scripts.json`, which has no `@/` path mapping. The fork-only
-  `script/experiments/**` carrier imports opencode source through that alias,
-  so the scripts project excludes it, as upstream excludes `generate.ts` and
-  `schema.ts`; `packages/cli/tsconfig.json` keeps checking every experiment
-  file. Upstream also deleted the tracked `.mimocode/.gitignore`. The runtime
-  regenerates an untracked copy that ignores `.gitignore` but not `references/`,
-  so the upstream-sync skill's local re-include is now defensive only.
-
-- 2026-09-29 skill relocation: the fork-only upstream-sync skill follows
-  upstream's project-skill layout from `.mimocode/skills/upstream-sync/` to
-  `.agents/skills/upstream-sync/`, which skill discovery scans unless
-  `MIMOCODE_DISABLE_AGENTS_SKILLS` is set. Nothing ignores `references/` or
-  nested `.gitignore` files under `.agents`, so the local re-include file is
-  removed. Skill content is unchanged; this is a path move of shared process
-  guidance that propagates unchanged into compat.
-
-- 2026-09-27 synchronization: config refresh retains an instance while its
-  main or Actor execution is live. Isolated workflow worktree removal now waits
-  for `server.instance.disposed` from that owning instance before removing the
-  directory; a one-hour timeout releases the listener and reports cleanup
-  failure if the event does not arrive. This
-  preserves in-flight Actor files without extending the workflow caller's
-  bounded settlement. `test/workflow/runtime-worktree.test.ts` and
-  `test/project/instance-dispose.test.ts` cover the lifecycle boundary.
-
-- 2026-09-19 synchronization: The three new subagent-resume suites share the dedicated real-AppRuntime recovery job. Combined unit execution reproduced a missing prefix captor after focused test layers disposed the global reference; discovery requires all four recovery files and JUnit verifies every file. This changes test isolation, not product behavior.
-
-- 2026-09-17 per-run test roots: `test/preload.ts` roots the process-wide data
-  directory (`mimocode-test-data-<pid>`, holding the XDG directories and HOME)
-  under the resolved `os.tmpdir()` again, as upstream does. Its home-directory
-  placement predated `62fd366c`, after which Instance accepts temp-tree project
-  directories such as worktrees under `Global.Path.data`. The temp directory is
-  resolved because macOS's sits behind the `/var` symlink and runtime events
-  report canonical paths: unresolved, three `test/workflow/runtime-worktree.test.ts`
-  cases failed on macOS, which Linux CI's `/tmp` cannot reproduce.
-  Default fixture projects are rooted under the resolved `/var/tmp` on POSIX
-  (then the home directory, the git-free parent of cwd, and temp as fallbacks;
-  Windows keeps those fallbacks). A non-git fixture's worktree is `/`, so config,
-  command and skill discovery walk every ancestor. Measured on macOS: rooted
-  under home, a probe fixture discovered the developer's own `~/.mimocode` and
-  `~/.claude`, and 23 of its 63 skills came from the real home; rooted inside the
-  checkout as upstream does, it loaded the repository's `.mimocode`, and a full
-  6458-case run failed seven fork-only deletion/listener security cases
-  deterministically because their "outside" directory joined the project
-  worktree; rooted under `/var/tmp`, nothing was discovered and the full run
-  passed.
-  CI runners have no such home directories, which is why the home placement
-  stayed green there. The root also stays outside the temp tree: Bash exempts
-  temp-only deletions, so a fixture project there would let the "target outside
-  temp" deletion cases pass through project containment instead. The candidate
-  filter mirrors Instance's current protected paths; its earlier `/root` and
-  `/var` prefixes had been stale since upstream `20b79f71`. `root: "home"` is
-  removed: `test/file/path-traversal.test.ts` passes in upstream's form, so its
-  helper and the shared `~/.mimocode-home-fixtures` directory are gone.
-  `test/fixture/fixture-root.test.ts` requires that nothing discoverable lies
-  above a non-git fixture; with the home root restored it fails, listing the
-  home directories. `outsideGit`
-  fixtures now sit under a per-process `/tmp` root that the preload passes to
-  `test/fixture/fixture.ts`. Every root is `<prefix><pid>`. Preload startup
-  reclaims, best effort, roots whose process no longer exists and never touches
-  another live or EPERM PID, which covers killed and timed-out runs. A root
-  already named for the current PID belongs to a run whose PID was reused; it
-  is removed with retries, and a removal that still fails stops the run instead
-  of letting it inherit that state. afterAll removes the roots
-  synchronously before any timer await; only a root that fails there (Windows
-  EBUSY) takes the existing GC-and-retry path, followed by a last synchronous
-  pass. Under Bun 1.3.14 `bun test` runs no `exit` listeners, stops awaiting
-  afterAll at its first timer when a test file fails to load, and detached
-  Config dependency installs recreate removed paths whenever the hook yields.
-  Before: a concurrent-writer reproduction leaked the data root in 3 of 3 runs,
-  and each probed load-failure run left its root. After: 0 of 6 and 0 of 3. The
-  three roots of a SIGKILLed run were reclaimed by the next run while a
-  concurrently running process kept its own.
-
-- 2026-09-17 tests no longer write into the checkout: a package test run used to
-  leave `.mimocode/package.json`, a lockfile and `node_modules` at the
-  repository root, and `packages/cli/.mimocode/` (`.cron-lock`,
-  `.gitignore`, installed dependencies) inside the checkout. Upstream's copies of
-  the same tests use the same paths. There were two writers. A session boot
-  starts the cron bridge, which is on by default, and its scheduler lock and
-  task file follow `process.cwd()`, which is this package directory. The harness
-  keeps that production path enabled instead of switching cron off. When
-  `process.cwd()/.mimocode` is absent at startup, the preload creates it with a
-  non-recursive mkdir. Only when that call created it does the preload record the
-  directory's identity (device, inode and birth time) in a marker in
-  the temp directory. A directory someone else created, or deleted and
-  recreated, never matches that identity. The owned directory is removed at the
-  end of the run, and a killed run's is reclaimed at the next startup, unless
-  another test process (a live `mimocode-test-data-<pid>` root) or a live
-  foreign `.cron-lock` owner may still use it. A lock that cannot be parsed yet
-  counts as live, because a scheduler opens it before writing its owner, until
-  it has gone a minute without changes. The lock is re-read immediately before
-  the removal, which backs off if the lock changed; what remains is the same
-  check-then-rename interval the scheduler's own takeover has. It is removed only while it holds
-  nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
-  `package.json`, `package-lock.json`, `bun.lock` and `node_modules`). Any
-  other content, such as `scheduled_tasks.json`, hands the directory over by
-  dropping the marker. Without the end-of-run release,
-  `cancel-notification.test.ts` leaves the directory behind. The cron suites
-  stay in upstream's form. The second writer was instances rooted in the repository,
-  which ran config discovery against its `.mimocode` and installed dependencies
-  there. `bash.test.ts`, `webfetch.test.ts` and `websearch.test.ts` now use a git
-  fixture instead of the checkout, and `read.test.ts` reads a copy of its large
-  image from a fixture. Route requests that named no directory booted an
-  instance for `process.cwd()`. The `workflows-route`, `session-messages`,
-  `session-task-route`, `session-select`, `title-authority` and
-  `session-actions` server tests now send their fixture directory on every
-  request. Unauthenticated servers only admit directories under cwd, so those
-  fixtures move under `root: "cwd"`. `worker-listener.test.ts` gives its cwd
-  fixtures a git root and names that directory on the requests that boot an
-  instance (`/config`, and `/v1/models`, whose route bootstraps before checking
-  its token). The writers were located file by file and, for those that only
-  wrote alongside others, by order-preserving bisection of the CI shard order.
-  Before the change, each of those tests left repository artifacts; after it,
-  none did.
-
-- 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
-  a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
-  package declaration and dependencies use `bun ci`, including the shared
-  `.github/actions/setup-bun` composite after the CI reproducibility review.
-  A missing Windows entry
-  fails. The job records event, checkout and PR-head SHAs separately and uploads
-  bounded evidence. DC-PLATFORM-001 owns the actual compat archive/no-rg entry;
-  a skipped main-side Windows job is not a platform acceptance result. Existing
-  Linux jobs and their failure/reporting boundaries are preserved.
-
-- 2026-09-15 quarantine closure: both remaining registered actor cases run
-  normally: postStop failure preserves a successful result with warnings, and
-  inbox waits for the entire spawn execution. The warning test now covers
-  foreground/background and outcome/wait/persistence/parent notice. No new skip
-  replaces either case. Final cancellation regressions cover the Runner
-  pre-first-instruction exit, owner-acquisition interruption, queued execution
-  admission, cancellation before worker startup and direct Effect hook
-  self/ancestor cancellation. Workflow agent timeouts
-  bound the cancellation join to the existing reclaim grace while detached
-  cleanup continues; shared cancellation retains interrupt/join semantics.
-  The dated 2026-09-12 to 2026-09-14 actor quarantine entries, kept in the
-  [shared history](fork-registry-history.md#2026-11-07-registry-normalization), describe their historical snapshots.
-  The separate workflow deadline case is restored. The restored
-  `it.live` case proves the hanging LLM request was consumed, a child worktree
-  and running Instance existed, the exact workflow deadline fired, and the
-  worktree and Instance were disposed. Its former two-second deadline could
-  precede child startup; the test now explicitly gates on startup before testing
-  reclamation. Four workflow/disposal suites pass together (44 tests) and the
-  process exits naturally in that local matrix. PR #129 at `eaf99b8b` subsequently
-  reproduced a 120-second timeout in this case on Linux; other tests continued
-  until the shard's eight-minute budget ended. A second observation located the
-  wait inside workflow settlement after child disposal. Worktree removal can
-  fail as an Effect defect, which the old typed-error ignore did not catch;
-  that failure stranded terminal persistence and the completion signal.
-  Reclaim now logs removal defects and continues publishing the original
-  outcome. Pure interruption still propagates and existing cleanup deadlines
-  remain unchanged. Real removal followed by fault injection proves both
-  deadline and cancellation settle, persist and notify after child disposal.
-  Concurrent reclaim/isolated removal is observed; the exact Git failure in the
-  intermittent Linux run remains an inference, not a captured exception.
-  F03 records default/opt-in and final CI evidence separately in
-  [the implementation report](audit-followups-2026-09-15.md).
-  A separate Runner reentry fixture now uses explicit started/reentered/release
-  signals instead of five/fifty-millisecond timer ordering, preserving the
-  assertion that both waiters share the first execution and emit one warning.
-
 - SDK generation validation captures stdout in a temporary file, matching the
   standard root/SDK build redirect. The pipe fixture could remain alive after
   delivering a complete document on Bun; file capture preserves the actual
@@ -1747,9 +1543,16 @@ own source list remains the complete watch surface.
   when actor cancellation is uninterruptible, while detached cleanup continues.
   Workflow timers, persistence, journal, failure, phase, and log callbacks fork
   through an `EffectBridge` captured from the owning layer, so detached work
-  retains its instance-scoped services. Default-path validation, including
+  retains its instance-scoped services. Config refresh retains an instance
+  while its main or Actor execution is live, and isolated workflow worktree
+  removal waits for `server.instance.disposed` from the owning instance before
+  deleting the directory; after one hour it releases the listener and reports a
+  cleanup failure. Reclaim logs a worktree-removal defect and still persists
+  and publishes the original outcome; pure interruption propagates. Default-path validation, including
   upstream-sync regressions, clears ambient `MIMOCODE_EXPERIMENTAL`,
-  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`, and `MIMOCODE_CODEX_MODE`.
+  `MIMOCODE_MCP_TOOL_SEARCH` (which replaced
+  `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` on 2026-10-13), and
+  `MIMOCODE_CODEX_MODE`.
   Compaction/default-path tests additionally clear
   `MIMOCODE_COMPACTION_MAX_CONTEXT`, `MIMOCODE_COMPACTION_TRIGGER_RATIO`, and
   `MIMOCODE_DISABLE_CHECKPOINT`.
@@ -1784,6 +1587,61 @@ own source list remains the complete watch surface.
   complete passing run cancelled. The budget bounds a hung shard; per-test hangs
   stay capped by the suite's own 120-second timeout, so this raise weakens no
   hang detection and changes no reporting requirement.
+- CI layout: shards keep the stable path hash. Re-measured on 2026-11-26,
+  upstream's duration-weighted split would save about 84 s of wall-clock per run
+  and no runner minutes, while moving files between shards whenever a test file
+  is added; `script/test-shard.ts` ships unused and `test/script/test-shard.test.ts`
+  covers only that tool. Revisit if a shard approaches its 12-minute budget.
+  Dedicated discovery-checked, JUnit-verified jobs run `subagent-resume-negatives`
+  and `test/bus/bus-integration.test.ts` (both trigger upstream's shared
+  log-queue stall: on Linux the bus suite's busy-SSE disposal loses a log write
+  callback, slowing every later test and starving `lsp/client`'s `Log.init`),
+  `provider-refresh` (`refresh`, `refresh-boundaries` and the fork's
+  `refresh-harness`, each in its own process, since a refresh needs process-wide
+  instance idleness), the real stdio observer, and `release-script`
+  (`script/release.test.ts` and `script/build-provenance.test.ts`); discovery
+  requires each of these files. The Windows job runs only on pushes to
+  `dev/compat` and on dispatch with `windows_runtime` (kept beside upstream's
+  `workflow_call`), never for a pull request. It also runs
+  `test/installation/launcher.test.ts` with a 120-second cap, records the event
+  and checkout SHAs, uploads bounded evidence, and fails when its entry is
+  missing; a skipped main-side Windows job is not a platform result, and
+  DC-PLATFORM-001 owns the compat entry. Bun follows the package declaration and
+  dependencies install with `bun ci` through `.github/actions/setup-bun`, which
+  also exposes npm's bundled `node-gyp` on a job-temporary PATH for native
+  install scripts. The locked `@npmcli/agent@4.0.2` patch is tested on actual
+  proxy transport. The root `bunfig.toml` is upstream's: a bare root `bun test`
+  covers only `script/` with isolated HOME/XDG and database and refuses
+  `packages/**` paths. Root `bun run test` delegates to `packages/cli`, and root
+  `script/generate.ts` rebuilds the SDK without formatting the repository; the
+  OpenAPI tests check the runtime and generated documents.
+- Test harness: the preload roots the process-wide data directory
+  (`mimocode-test-data-<pid>`, holding the XDG directories and HOME) under the
+  resolved `os.tmpdir()` and points `os.homedir()` at that home, because Bun
+  caches `os.homedir()` at startup; a named `import { homedir }` keeps the
+  original binding (only `cron/loop-file.ts` uses one). Default fixture projects
+  sit under the resolved `/var/tmp` on POSIX (then home, the git-free parent of
+  cwd and temp as fallbacks; Windows keeps the fallbacks), so nothing
+  discoverable lies above a non-git fixture and the fixture stays outside the
+  temp tree that Bash's temp-only deletion exemption covers. `outsideGit`
+  fixtures sit under a per-process `/tmp` root. Every root is `<prefix><pid>`:
+  startup reclaims roots of dead processes (never a live or EPERM PID) and
+  removes a root already named for a reused current PID or stops the run, and
+  afterAll removes the roots synchronously before any timer await; only a
+  failure there (Windows EBUSY) takes the GC-and-retry path. Tests do not write
+  into the checkout: when `process.cwd()/.mimocode` is absent the preload
+  creates it, records the created directory's identity in a temp marker, and
+  removes it at the end of the run (or reclaims a killed run's) only while it
+  holds nothing beyond runtime artifacts and no live test process or cron-lock
+  owner may still use it. Tool tests use git fixtures, and server route tests
+  name their fixture directory on every request, with those fixtures under
+  `root: "cwd"`. `test/lib/effect.ts` reports the first bounded log flush that
+  misses its 1-second budget in each process as a GitHub `::warning::`.
+  Fixtures that hold an HTTP reply pending release it during cleanup before
+  awaiting the scripted server stop, because client abort does not cancel a
+  fetch-handler Promise; progress-reconcile fixtures use generated unique
+  session IDs. Tests that assert notification routing observe the published
+  event rather than polling rows the system consumes.
 - POLICY-01 Question lifecycle: registration, Asked publication and answer
   waiting share one resource lifetime. Abort, interruption, publication failure
   and instance disposal remove only a still-owned pending question and publish
@@ -1792,23 +1650,20 @@ own source list remains the complete watch surface.
   uses a publisher captured from that generation, reaching typed and wildcard
   subscribers without recreating the disposed instance or clearing a new
   generation's question. Ordinary late Bus publication still rejects disposal.
+  `Question.ask` takes `abortSignal` in its input (upstream `002cb4c9`); an
+  abort dismisses and then awaits the request, so a reply already in flight
+  wins. `reply` stays uninterruptible and publishes `Replied` through the
+  captured publisher before completing the waiter, which receives the whole
+  `Replied` payload (answers plus `source`, `reason` and any structured
+  `elicitation`, upstream `81a37ab5`); `ask` still resolves with the answers.
+  The detached `Bus.publish` helper ignores an interrupt-only exit from
+  instance disposal (FC-007).
   Watch `packages/cli/src/{question,bus}/index.ts` and
   `packages/cli/src/tool/question.ts`;
-  `test/question/lifecycle.test.ts` and real
-  `test/cli/tui/question-lifecycle.test.tsx` cover these consumers.
-- 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
-ownership to the real parent` polled the `InboxTable` row its assertion is
-  about. That row exists to wake the persistent peer it addresses, so the peer's
-  continuation drains it within milliseconds and the poll observes a state the
-  system is designed to erase. A drained row never returns, so the earlier
-  window widening (2s to 20s) only moved the failure from ~2.5s to ~21s. The
-  case now observes `InboxArrived`, published after the row commits and before
-  `wake()`, matching how `test/actor/cancel-notification.test.ts` already counts
-  envelopes. Behavior is unchanged and was verified identical with
-  `spawn.ts`/`prompt.ts` reverted to `e92d7a52`; the assertion is
-  mutation-checked against a suppressed notification and against one misrouted
-  to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
-  notification routing.
+  `test/question/lifecycle.test.ts`, `test/question/question.test.ts`,
+  `test/tool/plan.test.ts`, real `test/cli/tui/question-lifecycle.test.tsx`
+  and two `test/mcp/elicitation.test.ts` cases (payload fields) cover these
+  consumers.
 - Upstream relationship: stronger runtime cleanup plus a narrower quarantine
   than the reviewed upstream workflow; the adopted package-scoped enterprise
   storage fixture retired with upstream's package removal.
@@ -1832,51 +1687,12 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   `script/generate.ts`, `packages/cli/src/cli/cmd/generate.ts` (the
   `codeSample` producer behind the `@mimo-ai/sdk/v2` camelCase OpenAPI
   examples), the root `bunfig.toml`, and `AGENTS.md`.
-- Tests/evidence: hard-timeout, runner, workflow runtime/worktree suites, four
+- Tests/evidence: hard-timeout, runner, workflow runtime/worktree suites,
+  `test/project/instance-dispose.test.ts`, `test/fixture/fixture-root.test.ts`
+  (isolated `os.homedir()`, nothing discoverable above a fixture), four
   complete local hash shards, positive/negative JUnit verifier fixtures, and
   exact-SHA CI for the reviewed behavior tree when published; local tests do not
   substitute for that remote evidence.
-- 2026-09-07 fixture and synchronization review: adopted the two enterprise
-  preload files unchanged. Both complete storage/share test files pass locally
-  (16 tests), exercising the current S3 adapter against intercepted HTTP with
-  test credentials; the package typecheck passes. The fixture covers the
-  current read/write/delete/list requests, not R2, signature verification,
-  pagination, or external-service availability. The accepted `95b592e0`
-  upstream-sync skill is shared process guidance to propagate unchanged from
-  main into compat; it adds no runtime capability or new retirement decision.
-  Final propagation evidence belongs to `dev-compat-registry-history.md`, and
-  final published branch SHAs still require their own CI results.
-- 2026-09-10 skill reference split: the upstream-sync skill moved its
-  conditional detail into `references/validation-and-ci.md`,
-  `references/publication-and-cleanup.md` and `references/evidence-record.md`,
-  leaving `SKILL.md` as the scope and baseline entry. A local
-  `.gitignore` re-includes that directory, because `.mimocode/.gitignore`
-  ignores agent-cached `references/` directories and nested `.gitignore` files
-  and a file inside an excluded directory cannot be re-included on its own.
-  These are fork-only paths upstream does not define, so they join the watch
-  surfaces above; like `95b592e0` this is shared process guidance to propagate
-  unchanged from main into compat, adding no runtime capability and no new
-  retirement decision. Review-thread adjudication for the cleanup-scope finding
-  is recorded on PR #105.
-- 2026-09-15 tooling convergence: root `script/generate.ts` keeps SDK then
-  OpenAPI generation and stops implicitly formatting the whole repository,
-  matching upstream's generation policy. Generator-local formatting and failure
-  propagation remain. JavaScript OpenAPI examples import `@mimo-ai/sdk/v2`
-  and call the generated camelCase methods, including `session.promptAsync`;
-  actual generated/published samples are checked against the client and the
-  async prompt example sends the expected HTTP path/body. Main publishes 140
-  operations; compat's extra coverage operation remains its own protocol.
-  Generated artifacts still mix actual fork schema additions with refreshes of
-  upstream source fields whose checked-in artifacts lag. Compare producers
-  before attributing every artifact hunk to a fork feature.
-  Three no-caller model API child fixtures are removed; the live TUI worker
-  default/listener tests remain. See F05/F09/F11 in the implementation report.
-- 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
-  preserving local disposal and the fork project-init authorization fixture.
-  Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the
-  fork already has relevant fixture isolation and all three pass on both
-  pre-sync branch SHAs. Existing unrelated CI timeouts are tracked separately;
-  this decision does not claim that the fixture removal fixes those failures.
 - POLICY-03 lifecycle review (the model API admission clauses are historical
   and retired by FD-004; listener shutdown still exists): the TUI worker stops model API admission and
   joins pending listener startup before checkpoint draining and instance
@@ -1890,29 +1706,11 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   terminal coverage or new exact-head CI success.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0353965ea38ce3d963f123acb2f9a965bcbb98c3`.
-- 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
-  a process-only registry companion and does not advance the frozen main
-  behavior or its changed-path calculation.
-- 2026-09-02 test-sharding review: the new WebSearch regression is an ordinary
-  `.test.ts` input and therefore enters the existing stable path-hash shard 1/4.
-  Its local pass is supporting evidence; the final published `main` SHA remains
-  subject to the strict XML/count and exact-file CI gates.
-- 2026-09-14 capability route disposition: the 2026-09-07 model API lifecycle
-  review and the selected model API evidence (both kept in the
-  [shared history](fork-registry-history.md#2026-11-07-registry-normalization)) and the model API clauses of the
-  POLICY-03 lifecycle review above describe the retired fork model API and are
-  historical. FD-004 now owns `/v1` and adopts upstream's capability route
-  whole: token verification runs in the route after `InstanceMiddleware` has
-  bootstrapped the instance, instance waiting is not cancellation-aware, and
-  there is no admission, server-owned deadline or bounded upload. None of that
-  is to be restored during a sync. The retirement condition below governs this
-  entry's workflow and process bounds; the model API bounds were retired by
-  FD-004's decision rather than by an upstream settlement, and FD-004 records
-  each resulting behaviour.
 - Retirement condition: runtime bounds may retire only with equivalent upstream
   settlement. Restoring a quarantined test requires effective assertions and
   bounded exact-SHA CI settlement; the workflow case's restored execution alone
-  does not close the Linux timeout follow-up above.
+  does not close the 2026-09-15 Linux workflow-deadline timeout follow-up,
+  recorded in the history.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
