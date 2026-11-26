@@ -1349,8 +1349,8 @@ describe("retry decision and coordinator budget", () => {
   test("terminal abort wins over a retryable status in its cause chain", () => {
     const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
     const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause, status: 503 })
-    expect(decide(error)).toMatchObject({ retryable: false, kind: "terminal" })
-  })
+   expect(decide(error)).toMatchObject({ retryable: false, kind: "terminal" })
+ })
 
   test("fromError maps residual stream errors to AbortedError when ctx.aborted", () => {
     const undici = Object.assign(new Error("request aborted by transport"), {

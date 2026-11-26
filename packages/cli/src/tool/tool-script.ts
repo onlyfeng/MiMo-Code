@@ -165,9 +165,7 @@ export function renderToolScriptDeclarations(defs: Tool.Def[]): string {
     if (!def) return []
     const summary = def.description.split("\n").find((line) => line.trim()) ?? ""
     const input = schemaToTs(z.toJSONSchema(alias === "exec_command" ? ExecCommandParameters : def.parameters))
-    return [
-      `  /** Alias for ${target}. ${summary.trim().slice(0, 180)} */\n  ${alias}(input: ${input}): Promise<ToolResult>`,
-    ]
+    return [`  /** Alias for ${target}. ${summary.trim().slice(0, 180)} */\n  ${alias}(input: ${input}): Promise<ToolResult>`]
   })
   return [
     "```ts",

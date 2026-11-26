@@ -37,7 +37,9 @@ describe("fork prefix invariant", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+        const session = await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) => svc.create({})),
+        )
 
         // Build a session with three messages: user → assistant → user.
         let previousUser: MessageID | undefined
