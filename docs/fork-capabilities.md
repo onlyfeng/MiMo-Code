@@ -15,14 +15,14 @@ authority.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-25
-- Upstream: `c538fab349373356623acea5bb80defa7fc279c0`
-- Prior reviewed upstream: `81a37ab596e5ee4d086697df81731a06817e2237` (2026-11-24)
-- Review completion: `main` adopts upstream's always-direct MCP status and reminders (C01–C03) and validates the new `directToolNames` reminder field before replay (FC-004 note). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-25.md).
-- Main behavior (runtime/tests): `b9499a965e10f906f2a2ead5e0698e243cd0ce54` (synchronization merge over pull request #271)
-- Inherited compat behavior: `c70dfa435437a0dd49a4d60aa5946d02cffb227c` (propagation merge over pull request #272)
+- Last reviewed: 2026-11-26
+- Upstream: `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593`
+- Prior reviewed upstream: `c538fab349373356623acea5bb80defa7fc279c0` (2026-11-25)
+- Review completion: `main` adopts upstream's closed image attachment reminder (C01) and adapts its append-only placement (C02): `orderUserParts` now moves only a legacy envelope ahead of the user body on read, so a reloaded message keeps the prompt first sent (FC-009 note). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-26.md).
+- Main behavior (runtime/tests): `d1039edaa94528da317b8668a2e244ec5fa98c9b` (synchronization merge over pull request #278)
+- Inherited compat behavior: `75e37ed2f052e20f7b14a98caee44e7baaed1cf0` (propagation merge over the pull request #278 propagation)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `f1d3628423da4ebc3c9e5c3739f9b321d4bdbf10`. Prior fork `dev/compat` tip: `2ce781c493580987723acbbfb7bc3c9addf43ec7`
+- Prior fork `main` tip: `92d3b8d44902533ccfe15d4e470a279fdf412d75`. Prior fork `dev/compat` tip: `d8d14a2972182440a6f022f24dbdc01e30ec162d`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-25 always-direct MCP status](upstream-sync-2026-11-25.md), C01–C03 (N=3).
+Latest reviewed synchronization is the [2026-11-26 closed image attachment reminder](upstream-sync-2026-11-26.md), C01–C02 (N=2).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
