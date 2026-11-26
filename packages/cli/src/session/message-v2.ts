@@ -983,12 +983,22 @@ export function promoteComposeProtocolFirst(parts: Part[]): Part[] {
   return parts
 }
 
-// Part identities stay unchanged. Restore synthetic framing before the genuine
-// user body after DB ordering, including caller-supplied non-monotonic IDs.
+// Image attachment envelopes persisted before upstream #2867 end with a
+// "## My request:" divider and were spliced ahead of the user body under a
+// larger part ID. Part identities stay unchanged; after DB ordering, restore
+// only that legacy envelope before the genuine user body, including
+// caller-supplied non-monotonic IDs. The current closed <system-reminder> form
+// is appended and keeps its persisted order.
+const LEGACY_IMAGE_ENVELOPE_TAIL = "## My request:"
+
 function orderUserParts(parts: Part[]) {
   const envelope = parts.findIndex(
     (part) =>
-      part.type === "text" && part.synthetic === true && !part.ignored && part.metadata?.userImageAttachment === true,
+      part.type === "text" &&
+      part.synthetic === true &&
+      !part.ignored &&
+      part.metadata?.userImageAttachment === true &&
+      part.text.endsWith(LEGACY_IMAGE_ENVELOPE_TAIL),
   )
   const anchor = parts.findIndex(
     (part) =>
