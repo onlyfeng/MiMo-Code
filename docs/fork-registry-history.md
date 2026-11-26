@@ -4929,3 +4929,7 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 ### FC-053 (1 note)
 
 - 2026-11-13 synchronization: adopt declared model output limits, sampling and effort capabilities from `c9c91d7b`, including the 128K missing-output default and removal of name-derived defaults. Preserve the three FC-053 routing/options corrections and FC-025 Grok operation flattening. Tests now declare their effort lists explicitly; actual Responses requests prove configured/small effort, encrypted reasoning and explicit opt-out. An `xhigh` config on the pinned xAI adapter is explicitly rejected before any HTTP request; no silent downgrade or dependency upgrade is introduced.
+
+## 2026-11-26 path-preserving image reminder escape
+
+The one-commit review advances from `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` to `6aed4550c95a25204e50ae73f1d9893312d1782a` (upstream pull request #2868). C01 adopts the case-preserving escape of a closing `</system-reminder>` tag in the image attachment reminder on main `72dc3114b2eebc7deb26a497e3ba6e3ad8df8b86`; compat `730b7656f6255197d272825c5baa1c97b243f5f4` inherits it through a clean merge. No entry changes. See [the synchronization record](upstream-sync-2026-11-26-6aed4550.md).

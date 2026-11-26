@@ -16,13 +16,13 @@ authority.
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
 - Last reviewed: 2026-11-26
-- Upstream: `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593`
-- Prior reviewed upstream: `c538fab349373356623acea5bb80defa7fc279c0` (2026-11-25)
-- Review completion: `main` adopts upstream's closed image attachment reminder (C01) and adapts its append-only placement (C02): `orderUserParts` now moves only a legacy envelope ahead of the user body on read, so a reloaded message keeps the prompt first sent (FC-009 note). `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-26.md).
-- Main behavior (runtime/tests): `d1039edaa94528da317b8668a2e244ec5fa98c9b` (synchronization merge over pull request #278)
-- Inherited compat behavior: `75e37ed2f052e20f7b14a98caee44e7baaed1cf0` (propagation merge over the pull request #278 propagation)
+- Upstream: `6aed4550c95a25204e50ae73f1d9893312d1782a`
+- Prior reviewed upstream: `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` (2026-11-26)
+- Review completion: `main` adopts upstream's case-preserving escape of a closing `</system-reminder>` tag in the image attachment reminder (C01). FC-009's reminder tag and legacy-only read-time reorder do not read the reminder body, so no FC contract changes. `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-26-6aed4550.md).
+- Main behavior (runtime/tests): `72dc3114b2eebc7deb26a497e3ba6e3ad8df8b86` (synchronization merge over pull request #285)
+- Inherited compat behavior: `730b7656f6255197d272825c5baa1c97b243f5f4` (propagation merge over the pull request #285 propagation)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `92d3b8d44902533ccfe15d4e470a279fdf412d75`. Prior fork `dev/compat` tip: `d8d14a2972182440a6f022f24dbdc01e30ec162d`
+- Prior fork `main` tip: `3d268917d29a0c30c54372ea7c286e9512fce690`. Prior fork `dev/compat` tip: `25c859e82c775f6249b4a871c1daa8ff1d778723`
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -36,7 +36,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-26 closed image attachment reminder](upstream-sync-2026-11-26.md), C01–C02 (N=2).
+Latest reviewed synchronization is the [2026-11-26 path-preserving image reminder escape](upstream-sync-2026-11-26-6aed4550.md), C01 (N=1).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
