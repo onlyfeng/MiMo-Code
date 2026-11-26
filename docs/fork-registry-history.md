@@ -3978,3 +3978,954 @@ the complete resolved model identity` case. FD-005 keeps only identity
 - 2026-11-21 synchronization: Catalog transport changes only; the empty-step retry limit and rollback behavior remain.
 
 - 2026-10-30 synchronization: Keep the bounded empty-summary retry. Adapt the incoming HTTP rollback fixture to queue two empty responses, so it tests exhausted rollback instead of the successful retry.
+
+## 2026-11-26 registry consolidation: FC dated notes
+
+Moved verbatim from `docs/fork-capabilities.md` at main `f1fa3c86a8f56d980c4a717c6f6713e9e1274d13`, grouped by entry in numeric order and, within an entry, in their original order. Rules from these notes that were still in force were folded into the entry's fields in the same pull request, after checking them against the code; notes that only restated a contract, recorded an adopted upstream change, or described a retired mechanism were not folded. Where a note named code that has since changed (for example `registerPrefixCapture`, now gone while its behavior and test remain), the folded text describes the current code. The FC-007 block that opens "POLICY-03 carrier review" is an undated paragraph about the retired model API. This is a pure registry change: it changes no decision, behavior reference, owner or retirement condition, and advances neither the `Upstream` nor the `Main behavior` reference. Paths are as the notes wrote them.
+
+### FC-001 (32 notes)
+
+- 2026-11-26 alignment review: `actor/spawn.ts` delivers terminal notifications through the shared `makeTerminalNotifier` (`actor/notification.ts`), as upstream's spawn does, instead of two hand-written copies. The fork keeps only its delivery target around the call: `withNotificationTarget` runs it inside the parent's Instance and run-disposal scope, and the caller's early background, system-agent, mode and disposal checks stay in place. The notifier takes the caller's `actor` (no registry read inside another Instance) and publishes its toast through the injected `Bus` service, so the toast reaches the Instance the delivery runs in. A resumed persistent turn now notifies as a `continuation`, without a toast, matching the woken-peer path (`test/actor/spawn-notification.test.ts`) and the 2026-09-15 note below; spawn-turn and cancel-owner deliveries keep their toasts. The unused `captureNotificationTarget` helper is removed.
+
+- 2026-11-26 alignment review: three upstream helpers ship here without a production caller, and their upstream tests exercise only the helper: `MessageV2.planResumeTrim` and `assertResumeModelBoundary` (unused since the 2026-10-14 note below; covered by `test/session/message-v2.test.ts` and one `test/session/processor-effect.test.ts` case), and `resolveCurrentAgent` in `server/routes/instance/session.ts` (covered by `test/server/summarize-route-main-slice.test.ts`). The fork's `/summarize` route goes through `SessionPrompt.startSummarize`, which repeats the main-slice lookup inline because it also needs that user's id and task. `test/server/summarize-agent-main-slice.test.ts` drives the real route with a newer user message on a subagent lane and requires the compaction boundary to carry the main slice's agent; reading the agent from every lane fails it on that assertion. A passing upstream helper test is not evidence for the fork's path.
+
+- 2026-11-16 synchronization: adopt process-wide live-claim run tracking and monotonic run ids across every prompt entry. A run with no surviving claimed input interrupts instead of consuming retry supersession indefinitely. Settlement releases the live marker even when acknowledgement fails or there is nothing to acknowledge. Owned acceptance, frozen authority, lane identity and generation checks remain. See C09 in [the sync record](upstream-sync-2026-11-16.md).
+
+- 2026-10-30 synchronization: Keep summarize in `SessionPrompt.startSummarize` and its owned main runner, atomic `createIfLatest`, task identity and commit receipt. Validate the model before mutation, remove unprojected boundaries on exit, and verify projection after runner completion including cancellation fallback. The HTTP cancelled-compaction regression proves no false success.
+
+- 2026-10-22 live advancement: a newly accepted lane input supersedes a failing retry step through the existing claim/consume/task and run-approval boundaries. Recovery keeps its locked parent and does not observe the new-input watcher. Successful cleanup removes retry parts but retains assistant identities referenced by durable first-delivery receipts. Tests cover lower-ID admission, supersession, receipt anchors, recovery and retained authority.
+
+- 2026-10-21 synchronization: upstream `88673c41` deletes `recall-reminder.test.ts`, its only consumer of the `actor` hint, and moves the `hasActorTool` predicate cases into `test/tool/actor-subagent-gating.test.ts` with upstream's "an unresolvable agent keeps the tool" case. The fork keeps PR #53's fail-closed result: that moved case asserts `hasActorTool(undefined) === false`, and `ToolRegistry.available` remains the only production caller.
+
+- 2026-10-20 post-sync convergence: remove the retired inbox wake's optional
+  Runner join/admission arguments, `runLoop` inbox-deferral argument and
+  `CancelEpoch` wake holds. The durable scheduler now owns that work; the
+  synchronous session cancellation epoch, per-run generation, acquisition
+  checks and owned cleanup remain. Session fork reads its source-message
+  snapshot before destination creation and reuses it for cutoff validation
+  and subsequent busy-agent inspection, while retaining the transaction's
+  fresh rendered-order copy. Instance-owned cron cleanup discovered during
+  final CI is recorded under FC-007.
+
+- 2026-10-20 synchronization: adopt upstream `949a3bcc`'s durable input receipts and lane scheduler, replacing the old `Inbox.send`/drain/wake implementation and the async-only queue contract. `Controller.accept` commits the complete user message and parts with its receipt, preserving fork generated-part replay checks, provenance, task binding and ownership validation. Receipt states are `accepted`, `claimed`, `settled`, `cancelled` and `rejected`; outcomes distinguish success, assistant error, interruption and never-ran input. First delivery fixes input placement, while terminal receipt retention and GC replace destructive drain deletion. `session.receipt.updated` replaces `InboxArrived`; accepted-only consumers inspect the committed user input, not legacy row content. The API retains the `inboxID` result field for actor callers as a receipt identifier. Earlier dated send/drain/wake and async-only descriptions below are historical where superseded by this review.
+
+- 2026-10-15 follow-up (closes the pre-admission cancel gap): `SessionRunState.cancel` first advances a per-session `CancelEpoch` (`packages/cli/src/session/cancel-epoch.ts`) synchronously. `Inbox.wake` records that epoch before its first suspension and passes it as the loop input's `cancelEpoch`; the main-agent inbox loop hands it to `SessionRunState.ensureRunning`, which gives `Runner.ensureRunning` an `admit` predicate evaluated inside the same atomic transition as `canStart`, both on entry and after `onBusy`. A wake whose epoch moved is refused with an interrupt before it starts or joins a run, so no model request is made and its inbox row stays durable for the next ordinary run; a wake scheduled after the cancel records the new epoch and runs normally. Non-main receivers keep their `ActorExecution` path (`exec.cancelled`), and `LoopInput` stays internal (no HTTP/SDK change). Upstream's "abort immediately after send cannot let a queued wake restart the receiver" case is now carried verbatim; removing the admission predicate makes it fail again. `Session.remove` releases the removed session's epoch beside its other process-wide session state, deferred while a scheduled wake still holds it: `Inbox.wake` records the epoch and takes a `CancelEpoch.hold` together with its instance claim and releases both when the wake exits, because dropping the entry earlier would read as the initial epoch and admit a wake recorded before a cancel (`test/session/cancel-epoch.test.ts`).
+
+- 2026-10-15 synchronization: upstream `f82fa60a` makes a scheduled inbox wake hold an `Instance.claim` until its fiber exits. Adapted into `Inbox.wake`, the single entry for `send` and `wakePending`: the claim is taken on the current service instance before receiver lookup and instance preparation, and claim, preparation, `EffectBridge` fork and exit-observer registration form one uninterruptible handoff; the outer wake fiber starts immediately and the bridged receiver loop keeps its own instance and run-disposal marker. Known gap at that point (closed by the follow-up below): a cancel issued after `send` returns but before the bridged loop reaches Runner admission did not stop that wake, because the bridge (`Effect.runFork`) and the `InstanceState` lookup in `SessionRunState.runner` suspend before admission, so `SessionRunState.cancel` finds no busy runner. The gap predates this range (reproduced on `a7d242df` without disposal: the receiver issues a second model request); upstream closes it by synchronous admission and asserts it in `wake-instance-handoff.test.ts` ("abort immediately after send cannot let a queued wake restart the receiver"), which the fork did not carry until the pre-admission cancellation path below existed. Evidence: `test/inbox/wake-instance-handoff.test.ts` (five adopted cases), `test/inbox/` and `test/actor/cancel-notification.test.ts`.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` rebuilds resume around an exact reviewed target and a history trim that restarts from the parent user. The trim and parent restart are not adopted: resume still settles the selected assistant in its admission transaction and continues from it, so `MessageV2.planResumeTrim` and `assertResumeModelBoundary` ship unused. Adopted into `startResumeTurn`: `POST /session/:id/resume` accepts an exact `assistantMessageID` (exclusive with `userMessageID`, also forwarded to actor resume); a pending question or permission in the session refuses resume with 409 before occupation and again at admission; admission runs before `SessionRunState`'s orphan sweep through the new `startOwned` `admit` argument, so a rejected or cancelled admission writes nothing; a Stop before admission reports 404 from `POST /session/:id/resume` while `startResume` keeps reporting the interruption; and an optional host execution `attempt` is prepared, rechecked, admitted before the settlement commit, gated on `beforeWork` and finished when the run fiber exits (`Runner.startOwned` now exposes `awaitExit`), with `ExecutionScope` on main model calls. Actor resume refuses `attempt`. An empty provider stop is a candidate even after completion or a later error, until an abandonment settles it with `MessageAbortedError`; a completed errored assistant with delivered output stays settled as before. Residue cleanup skips summary and structured-output assistants. Model tools now run in the processor's tool scope, which execution cleanup closes and joins, so `Actor.cancel` called from a tool delegates to the service scope and waits interruptibly exactly as a direct execution hook does; without that, a peer cancelling its own spawn through the `actor` tool deadlocked (`test/actor/self-cancel.test.ts`). Evidence: `test/server/session-recovery.test.ts` (exact-target matrix, host attempt lifecycle, empty-stop matrix), `test/effect/runner.test.ts`, `test/session/invalid-output-continuation.test.ts`.
+
+- 2026-10-13 registry correction: `packages/cli/src/agent/config.ts` and `packages/shared/src/util/encode.ts` join the watch surfaces. Both were already fork-different (`hasActorTool` fails closed for an unresolvable caller since PR #53; `compareUtf8Bytes` is the SQLite BINARY tie-break the chronology consumers use) but no entry named them, so a path-based sync review could not find them. No behavior changes.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds an `Instance.updateIdle` barrier for explicit provider refreshes. A refresh returns `pending` while any request, execution claim, disposal or failed cleanup exists, so live Actor and session executions defer it. While a refresh is applying, new requests wait and `Instance.claim` throws `InstanceBusyError` exactly as upstream; only the explicit refresh endpoint opens that window and no TUI path calls it. Actor generation ownership and terminal claims are unchanged.
+
+- 2026-10-02 synchronization: upstream `698f0f29` deletes the committed `packages/sdk/openapi.json`; the SDK build now writes a scratch copy at that path and removes it. The published actor-recovery contract is asserted on the runtime OpenAPI document and carried by the generated v2 SDK, so the snapshot leaves this entry's surfaces.
+
+- 2026-09-30 synchronization: an interrupt-only exit while a run-loop step is still preparing (after `sessions.createMessage` commits the assistant, before stream cleanup owns it — snapshot capture, language resolution, tool resolution) now persists `MessageAbortedError("Aborted")` and publishes `Session.Event.Error` before SessionRunState publishes idle. An assistant that the processor already errored or completed is untouched. The assistant still has no `time.completed`, so it stays a recovery candidate exactly as a stream-phase abort does; the next admitted user's orphan sweep keeps that error rather than writing the generic abandonment message. `test/session/prompt-effect.test.ts` covers both preparation boundaries and the following turn.
+
+- 2026-09-19 synchronization: Main resume captures a cancellation epoch before atomic admission, then cascades only eligible same-session subagents through Actor.recovery/resume. No registry-only or released-context takeover; child supervisors retain task/model/context ownership and terminal publication. Pending admission is bounded and withdrawn on Stop or timeout.
+
+- 2026-09-17 synchronization: Empty-residue recovery deletes parent-scoped shells and binds any task within the existing immediate admission transaction. Ownership handoff precedes postcommit publication; failed/busy/stale/cancelled admission cannot clean up. Useful assistant output retains settlement and continuation. Recovery still selects the latest same-actor candidate; completed abandoned errors are not revived. The parent user is never fabricated or rewritten except the existing authorized task binding.
+
+- 2026-09-10 title authority: inherit transactional title revisions and protected
+  manual titles across imports, replay and HTTP conflicts. First genuine input
+  commits a deterministic fallback before detached generation through the
+  existing promptWork/send admission and queue handoff. Recovery alone does not
+  retitle historical turns. This changes no Actor generation or task ownership.
+
+- 2026-09-15 execution completion: spawn reserves an ActorExecution during
+  admission and retains it through postStop and terminal publication. Blocking
+  run/outcome/wait, persistence and parent notification observe the preserved
+  main result with postStop warnings after housekeeping; background spawn still
+  returns its identity after admission. Inbox continuations cannot overtake it.
+  Cancellation closes execution admission, invalidates queued acquisition
+  tickets, captures the selected execution, and interrupts/joins it through
+  retirement. Old tickets cannot restart after the barrier opens; fresh valid
+  generations and other sessions remain independent. A reserved worker cancelled
+  before startup skips its model call through the protected finalizer path. A cancellation-owned generation is published
+  by the execution; the cancelling owner waits rather than publishing early.
+  Notification receipts are read after that join. A completed turn cannot hide
+  cancellation of subsequently queued work; an already-cancelled turn does not
+  receive a duplicate notice. Failed-send fallback remains. Owner acquisition and cleanup installation are
+  masked together, while a follower's wait remains interruptible. Direct Effect
+  hooks on an active execution fiber delegate cancellation to the existing
+  service scope and wait interruptibly, including self/ancestor cancellation
+  from a finalizer. External callers still join complete cleanup. Model tool
+  calls already use independent Promise-bridge fibers; their interface is unchanged.
+  Runner installs its exit finalizer before its child can be interrupted, then
+  keeps the start wait and actual work interruptible. This prevents a child that
+  exits before its first instruction from leaving the runner's done signal open.
+  See [the lifecycle evidence](actor-lifecycle-alignment-2026-09-15.md).
+
+- 2026-09-13 terminal publisher (historical partial fix): continuations gained
+  a receipt recording whether their terminal envelope was actually published;
+  failed sends do not suppress fallback notification. That receipt and its
+  queued-work distinction remain. The former unjoined publication-to-receipt
+  window is closed by the 2026-09-15 execution join, replacing the earlier
+  decision to defer upstream's cancellation shape.
+
+- 2026-09-18 synchronization: session abort cancels every runner and registered
+  Actor in the target session. Terminal cancellation remains durable and is
+  drained into parent main history without automatic wake or toast. Quiet
+  delivery follows execution/generation and cancellation-episode ownership,
+  including a quiet follower joining a registry-only cancel. Runner keys are
+  nested by exact session and actor identity; leases, admission, retirement,
+  disposal checks and terminal-delivery deduplication remain authoritative.
+
+- 2026-09-07 recovery-timing review: adapted upstream early settlement inside
+  `startResume` validation rather than before the fork's atomic admission.
+  `test/session/prompt-effect.test.ts` observes the old assistant already
+  completed while `session.pre` blocks the new loop; it covers subsequent
+  success, partial-context retention, finalizer idempotence, real
+  non-retryable-error recovery, and unchanged messages on all three rejected or
+  cancelled admission paths. Main-only identity and locale propagation remain
+  unchanged.
+
+- 2026-09-05 subtask review: adopted terminal-state assignment and the
+  running-only metadata guard. A real cancellation regression calls late
+  metadata after settlement and requires the entire persisted tool part to
+  remain unchanged. Prompt queue admission, task binding, and atomic derived
+  user creation remain unchanged.
+
+- 2026-08-28 review: adopted strict spawn/run argument rejection and the
+  existing `send` follow-up path while preserving caller-resolution,
+  generation, persistent wake, and frozen-context fail-closed contracts.
+
+- 2026-09-02 session-ID format review: adopted marker-free descending session
+  IDs while retaining the same `ses` namespace, opaque lookup semantics, and
+  lifecycle/admission/resume ownership. Existing `ses_-...` identifiers remain
+  valid inputs; message descending IDs deliberately retain their chronology
+  marker.
+
+- 2026-09-03 correction: `prompt_async` had been routed through `startPrompt`
+  since `1cfe7efc`, which made the whole of `promptWork` — `createUserMessage`
+  included — the admitted work, so a busy session answered 409 and never
+  persisted the message. The TUI's queue depends on that message existing, so
+  typing during a turn silently lost the input. Admission for the fire-and-forget
+  route is now the upstream `prompt` path again; the synchronous `/message`,
+  `/init`, `/summarize`, `/command`, and resume routes keep `startRunning`,
+  which is what the zombie-runner hardening in `1cfe7efc` was for.
+
+- 2026-09-04 closing-window correction (historical follower implementation, replaced by durable lane receipts on 2026-10-20): a persisted prompt that joins an older
+  successful, failed, or non-assistant runner result hands off through the
+  existing `run` path until an assistant covers it. Pure interruption and a
+  shared `MessageAbortedError` stop handoff; a joined failure is retried once,
+  while failure from work this caller actually started is preserved. Coverage
+  uses actor transcript order and assistant `parentID`, without tickets, tail
+  movement, new Runner state, cancellation generation, or detached delivery.
+  Optional task authority is persisted with each user row and resolved from the
+  actor-scoped user actually selected by the loop, not from whichever queued
+  caller wins successor admission; derived synthetic users preserve the binding.
+  Old assistant results remain durable, but a derived synthetic/control user or
+  compaction follow-up is committed only while its source user is still latest
+  for the actor. That check, the message, and all of its parts share one immediate
+  database transaction. Pre-persistence prompt parsing, caller interruption,
+  process disposal, and durable exactly-once delivery remain outside this contract.
+
+- 2026-09-12 wake-routing retirement (historical): a woken non-main turn moved
+  to ActorExecution and runTurn instead of the fork wake generation. Spawn's
+  execution claim was deferred after a timeout was attributed to a nested actor
+  sharing its key. The 2026-09-15 review withdraws that causal claim: with the
+  corrected InboxArrived observation, the nested primary case and actual
+  spawn-before-continuation ordering pass. Spawn now holds the same execution
+  claim. Earlier removed wake-generation-specific tests remain historical;
+  generation ownership, terminal claims and disposal provenance remain shared
+  contracts for spawn and actor resume. The two remaining quarantines are now
+  active; no upstream PR is opened for this fork correction.
+
+- 2026-09-11 recovery-predicate and resume-override review: adopted the part of
+  upstream's allowlist predicate that is a genuine fix — a step-level
+  `time.completed` does not prove the round finished, so a turn that stopped on
+  `tool-calls` or `length` is a candidate again, while a clean `stop`/`other`
+  turn is not — and its idempotent settlement of an already-errored assistant.
+  Upstream additionally keeps every errored message a candidate even after it is
+  settled; that is not taken. `time.completed` remains this entry's settlement
+  marker: the processor leaves an errored turn without it so recovery can find
+  it, and `sweepOrphanAssistants`/`abandonRecoveredAssistant` set it when a new
+  user admission or a resume abandons the turn, which is what "until
+  recovery/resume or a newly admitted user turn abandons and completes it"
+  means above. The settlement guard is now "completed and errored" rather than
+  "completed" so a `tool-calls`/`length` candidate that already carries
+  `time.completed` can still be settled; the fork's `expectedParentID`
+  candidate-identity check is unchanged and still runs before any write. Upstream's `resume` / `resumeBackground` remain absent:
+  the optional model override is plumbed through the single `startResumeTurn`
+  admission path, resolved before `commitRecoveryCandidate` so an unresolvable
+  model settles nothing, and the classification skip uses the candidate the
+  runner actually settled rather than the caller's argument. `packages/sdk/`
+  artifacts are regenerated from the merged route; FD-009 owns the actor
+  frozen-identity refusal. Evidence:
+  `packages/cli/test/server/session-recovery.test.ts` predicate matrix plus
+  the two fork-owned cases, plus `packages/cli/test/session/prompt-sweep.test.ts`
+  for the settlement boundary; the predicate is mutation-checked from both
+  sides, since the fork's older exclusion loses the `tool-calls`/`length` fix and
+  upstream's exclusion loses the settlement contract.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+- 2026-09-15 retired-path cleanup: production inbox turns use ActorExecution
+  and SessionPrompt. The unused `Actor.runPersistentTurn`, private
+  `continueTurn` and sole-consumer `WakeSourceDisposal` are removed. Existing
+  `finishPersistentTurn` and `acquireWake` remain because resume uses them.
+  Ten old tests were individually mapped to actual Inbox/cancellation/lock
+  paths or explicitly retired obsolete DTO/owner-follower semantics; the
+  independent ten-case regression passed. Real continuation notifications
+  arrive through the parent Inbox without a toast. This does not reinstate the
+  deleted testing entry's notification policy. See F09 in
+  [the implementation report](audit-followups-2026-09-15.md).
+
+- 2026-09-15 shared chronology/admission (message identity/atomic replay retained; the drain/deletion implementation below was replaced on 2026-10-20): caller IDs are identity keys, not
+  admission order. `createMessage` allocates an actor-local monotonic committed
+  timestamp; metadata updates preserve creation time and completion cannot
+  precede it. User and derived-user message/parts submitted through
+  `commitUserMessage` or `commitUserMessageIfLatest` are committed together
+  with session/actor/part ownership validation; latest-user conditional
+  admission shares that transaction. Same-owner prompt retries may reuse
+  producer-generated part IDs only when the complete current persisted content
+  matches. Anonymous parts match by relative order; explicit IDs and complete
+  persisted content/metadata remain strict. Reordering explicitly identified
+  input parts can be equivalent after canonical sorting. Runtime-added
+  parts can make a later replay conflict. This is not a lifetime replay receipt.
+  Inbox draining commits its synthetic user message, all rendered parts and the
+  selected queue deletion in one immediate transaction. After asynchronous seed
+  resolution, admission rechecks cancellation, persistent-peer retirement and
+  the still-present receiver rows under that write lock. Concurrent drains or GC
+  cannot replay a previously selected row. Failed writes leave the whole batch
+  queued; postcommit observers see the complete transcript and consumed queue.
+  A publication callback failure preserves the committed drain count, while
+  Effect interruption still propagates. This guarantees queue-to-transcript
+  atomicity, not exactly-once model execution or durable event delivery. See
+  [the crash/reopen evidence](inbox-crash-consistency-2026-09-15.md).
+  Shell message/parts writes and streamed assistant/tool output remain outside
+  the `commitUserMessage*` transaction.
+  Fork/revert and cursor
+  consumers use chronological positions, with UTF-8 ID ties matching SQLite
+  BINARY. Producer and transaction regressions are recorded under F06 in
+  [the implementation report](audit-followups-2026-09-15.md).
+
+### FC-002 (10 notes)
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): identify memory paths by `{ key: "memory-paths", rev: sessionMemoryDir }` and places a `session-env` reminder before them, with the receiving `Instance.directory`, git root only inside git, and platform. `SessionReminder.windowTarget` selects only an unanswered own user in the current window; prior sent history and frozen system bytes stay unchanged. The environment reminder also reaches subagents that do not serve checkpoints, but excludes native hidden bounded agents. Strict `MessageV2.usageRecovered`, receipt-aware window ordering and FC-042's `compactsOnUsage` gate are preserved. Old untagged memory paths can be repeated once on the next eligible user before tag-based deduplication takes over; legacy file-tool placeholders remain supported.
+
+- 2026-11-02: the writer has no `task` tool and gets the parent session's tasks instead. It runs in a child session, so `task` read and wrote the child's empty list: in production 4,868 of 4,907 writer `task` calls in 72 hours returned "No tasks.", §4 Task trees came out empty, one checkpoint recorded "the DB keeps no tasks", and a writer `done` on a parent task failed its foreign key. Before spawning, the writer prompt now carries a TASK SNAPSHOT of the parent's tasks (`taskRegistry.list` with terminal tasks, rendered as a tree, capped at 300 tasks with unfinished tasks and their ancestors kept first, then the most recently active finished ones), and §4 comes only from it; the writer no longer changes task state, which never worked from the child session. Evidence: `test/session/checkpoint-child-session.test.ts` asserts the tool list without `task` and the snapshot lines for an open parent task and its finished subtask; the snapshot case fails when the block is removed from the prompt; `test/session/checkpoint-progress-reconcile.test.ts` "renderTaskSnapshot" keeps an active subtask under a finished root and an active task created after 400 finished ones, and fails when the cap keeps creation order.
+
+- 2026-11-01: `prefixCaptureRef` is filled through `registerPrefixCapture`. Disposing a SessionPrompt layer hands the slot to the most recent captor that is still live, never to a disposed one, instead of clearing it. Production holds one layer, so nothing changes there. A test process that builds its own layer beside the process-wide AppRuntime no longer strands AppRuntime without a captor; that was the cause of the combined-run "Missing actual prefix captor" failures in `subagent-resume-negatives`, `subagent-resume-route` and `session-actor-recovery`. Covered by `test/session/prefix-capture-ref.test.ts`.
+
+- 2026-10-31 (FC-021): the writer's full receipt-aware history is bounded by the usable window. When the projected view exceeds it, the writer forks the parent's own view; the full view is kept whenever it fits.
+
+- 2026-10-22 synchronization: new rebuild parts carry `placement: "after-tail"`; legacy records retain exact chronological seam reconstruction. Model requests use the boundary digest and unanswered text/media, while the writer and logical turn recover full receipt-aware history. Queued inputs are excluded until delivery or terminal settlement. Task provenance, run approval and fail-closed frozen capture remain unchanged. The appended window and legacy collapse are covered by placement, writer-tail, legacy golden, rebuild-unify and tail-digest tests.
+
+- 2026-10-21 synchronization: upstream `88673c41` replaces the per-message recall reminder and `SessionCheckpoint.hasMemoryOrTasks` with one memory paths reminder per context window, and names the project and session segments `<project_id>`/`<session_id>` in the memory instructions. Adopted unchanged in the system text, which therefore no longer names the real project ID or tells the model to keep `{current_session_id}` verbatim. Read/Write/Edit/Glob/Grep and `apply_patch` still resolve `{current_session_id}`: system prompts frozen in an existing session's prefix snapshot keep that sentence, and the runLoop reuses the frozen system instead of rebuilding it. Writer modes, frozen prefix ownership and FD-009 admission are unchanged.
+
+- 2026-10-20 synchronization: checkpoint writer context uses `MessageV2.renderedOrder` with consumed receipts, so unclaimed inputs do not enter a writer snapshot and first-delivery order survives queue reconstruction. The same queue-aware view feeds post-hook trajectories and goal judging; context-boundary continuation identity and run-approval ownership remain distinct from historical input reconstruction. Frozen new MCP captures carry a fixed dispatcher and complete authorized hidden pool; legacy active/loaded masks remain readable under FD-005/FD-006. Canonical writer modes and fail-closed admission do not retire.
+
+- 2026-11-21 synchronization: catalog generation retires from cold/warm frozen
+  prefixes. Capture and compaction use `getFrozen` for one-time historical
+  catalog removal; full-context Actors/writers inherit user reminder metadata
+  and complete frozen native-tool authority. FC-005 owns historical migration;
+  fail-closed capture admission and pin-winner/native-tool contracts remain.
+
+- 2026-09-11 history-escalation copy review: the verbatim elision marker and its
+  doc comment now point at `history around` followed by `get(part_id)` instead of
+  `around` alone, because upstream's bounded history returns summaries from
+  `around` and the original text from `get`. That is factually correct in this
+  fork, which merged the same history tool. The two lines are the entire
+  incoming change to `src/session/checkpoint.ts`; the writer modes, frozen
+  context, watermark advancement and token budget are untouched.
+
+- 2026-09-15 memory convergence: upstream `9780b2e5` adopts the fork's
+  disabled-checkpoint memory behavior. Only that clause converges: canonical
+  writer modes, frozen prefix authority and stable filesystem placeholders remain
+  shared. FD-002 still separates memory eligibility from fail-closed actor
+  identity replacement.
+
+### FC-004 (13 notes)
+
+- 2026-11-25 synchronization: upstream `c538fab3` adds each connected server's request-exposed always-direct tools to readiness (`directTools`) and their names to server reminder metadata (`directToolNames`), which joins the fingerprint only when present and the removal diff of the next reminder. `announcedMcpReminders` validates `directToolNames` like `toolNames`, so a malformed historical value is skipped without erasing an earlier valid state instead of throwing in `mcpReminderMarker` or corrupting the removal list. Direct tools come from the same request-authorized set that exposes them top-level; readiness still grants no invocation authority. Evidence: `test/tool/mcp-tool-search.test.ts` ("malformed historical reminder metadata cannot erase valid state or break replay" fails without the check; "always-direct MCP tools in status and reminders"), `test/session/prompt-effect.test.ts`. See C01–C03 in [the synchronization record](upstream-sync-2026-11-25.md).
+
+- 2026-11-24 synchronization: upstream `81a37ab5` adds form-mode elicitation (`mcp/elicitation-form.ts`) and associates server requests with the originating call. `convertMcpTool` adds the call id to the turn-lifecycle `_meta` of `tools/call` and passes the call, turn and message ids and an optional recorder to `McpElicitation.beginCall`; a request that matches no call or several calls is rejected with -32602. The request-authorized `executeMcp` wrapper in `session/prompt.ts`, shared by direct calls, `mcp_tool_use` dispatch and exec's `execMcpTools`, supplies the assistant `messageID` and the session's elicitation recorder beside the fork's progress presentation. Pending Claude imports, `auto_connect`/`enabled` precedence, URL validation and request isolation are unchanged. Evidence: `test/mcp/elicitation.test.ts`, `test/mcp/elicitation-form.test.ts`, `test/mcp/lifecycle.test.ts`. See C02–C03 in [the synchronization record](upstream-sync-2026-11-24.md).
+
+- 2026-11-04 synchronization: upstream `bfd5a2f4` reverses the 2026-10-31 execution-source filter. MCP/LSP/formatter and Claude imports again use ordinary configuration sources; `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS` remains a plugin-only boundary and `config/host.ts` is removed. The native control-overrides argument, pending defaults and explicit `auto_connect`/`enabled` precedence remain. FD-013 owns the retained source/persistence deviation: shared config loading retains fresh TOML parsing and models-only refresh without migration writes; `Config.update` retains raw stored JSONC validation and literal reference persistence. The updated positive project-source and persistence tests in `test/config/config.test.ts`, pending Claude import test and real Node plugin-host tests cover these decisions. The following 2026-10-31 paragraph is historical, not the current source policy.
+
+- 2026-10-31 synchronization: upstream `7bc7dc3a` adds the host execution policy (`config/host.ts`). On the Node build, or Bun with `MIMOCODE_ONLY_CONFIG_DIR_PLUGINS`, MCP sections from sources outside `MIMOCODE_CONFIG_DIR` and host-injected content are dropped before merging, so their startup controls never reach the Claude import merge. `mergeClaudeMcp` keeps the fork's control-overrides argument and returns before reading a Claude file from a rejected source. A host-source `auto_connect: true` therefore cannot supply startup authority to a project `.claude.json` transport; the leftover transportless control is ignored. Ordinary Bun CLI loading, pending imports and `auto_connect`/`enabled` precedence are unchanged. Evidence: `test/mcp/claude-auto-connect.test.ts` (`host execution policy skips a project Claude import…`, which fails if the guard is removed), `test/mcp/project-config-execution.test.ts`, and the host-policy cases in `test/config/config.test.ts`.
+
+- 2026-10-28 synchronization: local and remote MCP config accept optional `alwaysDirectTools`; sanitized server-local names select top-level tools outside deferred search/use, without changing host override precedence, connection lifecycle or startup controls. Config arrays use the existing mutable schema convention so ACP accepts the regenerated SDK types. FD-006 retains execution and frozen authority.
+
+- 2026-10-20 live catch-up through `4e58a801`: optional `MCP.readiness()` reads current configured-server status and tool definitions without awaiting connection settlement or starting a connection. Pending Claude imports, `auto_connect` precedence, ownership and refresh lifetime remain unchanged. The prompt intersects readiness tools with the existing request-authorized search/dispatch catalog, reports latest outcomes at user boundaries and never turns connection readiness into invocation authority. Malformed historical reminder metadata is ignored without erasing an earlier valid state.
+
+- 2026-10-20 synchronization: adopt sticky MCP deferral and fixed search/use entries through connection churn and an initially empty catalog. Search always sees the live authorized catalog, while changed catalog announcements wait for the next user-turn boundary. This does not auto-connect pending Claude imports or broaden connection authority. FD-005/FD-006 own resolved harness, dispatch and frozen implementation authority; the old conversation-loaded membership is now only a legacy snapshot compatibility carrier.
+
+- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1269` (keep Claude imports pending until connect, opened 2026-06-24) is withdrawn. Upstream still has no `auto_connect` and has since rewritten `mcp/index.ts`; the fork keeps the pending-import contract here, with `test/mcp/lifecycle.test.ts` and `test/mcp/claude-auto-connect.test.ts` as its evidence, and does not resubmit. Its head branch `codex/upstream-mcp-claude-pending-connect` is deleted from the fork.
+
+- 2026-10-13 synchronization: upstream `2f373289` connects startup MCP servers in a background fiber; `MCP.tools()` waits at most three seconds and every other accessor awaits the settled state. Claude imports without explicit `auto_connect: true`, and entries with `auto_connect: false`, are still never attempted at startup. Upstream's new cleanup deletes a `pending` placeholder that an attempt left behind; it now skips those entries, so their pending status survives settlement. Removing the guard fails `test/mcp/lifecycle.test.ts` ("Claude Code local MCP server is pending until explicitly connected") and `test/mcp/claude-auto-connect.test.ts`. Upstream `463cbb28` makes MCP deferral the default for every function-calling model; request-local loaded membership and frozen seeding are unchanged (FD-005 note).
+
+- 2026-10-04 synchronization: the models-only Config reload behind upstream's provider refresh skips Claude MCP import, plugin origins, command/agent scans and dependency installation, and publishes only the model keys. The ordinary path keeps the fork's native-override argument to `mergeClaudeMcp`, so pending imports and explicit `auto_connect` are unchanged; MCP configuration changes still require a restart.
+
+- 2026-09-15 real protocol evidence: `test/mcp/real-transport-oauth.test.ts`
+  launches an isolated non-test child using the actual MCP SDK HTTP transport
+  and a self-owned OAuth issuer. Resource/issuer discovery, DCR, S256 PKCE,
+  callback, read-only tool execution, token refresh and pending-auth cancellation
+  pass on loopback and a self-owned local RFC1918 interface. This is concrete lab
+  evidence, not enterprise IdP/proxy/TLS interoperability or a new fork-wide
+  private-network policy. DC-NET-002 remains compat-owned. See the
+  [runtime evidence](runtime-validation-2026-09-15.md).
+
+- 2026-09-08 selected integration: `auto_connect` explicitly enables a selected
+  imported server while retaining pending defaults and disabled precedence.
+  The real-transport regression runs in an isolated child process to avoid
+  unrelated suites' process-wide MCP SDK mocks. Usage and source precedence
+  are documented in [Claude MCP auto-connect](claude-mcp-autoconnect.md).
+
+- 2026-09-01 OAuth branding review: adopted upstream's MiMoCode callback-page
+  and dynamic-registration literals. This is a clean carrier overlap only;
+  URL validation, pending-import state, request isolation, bounded diagnostics,
+  and secret redaction are unchanged.
+
+### FC-005 (2 notes)
+
+- 2026-11-26 alignment review: `isSkillCatalogReminder` in `session/skill-catalog.ts` has no caller here. Legacy catalog recognition goes through `isLegacySkillCatalogPart` and `isGeneratedSkillCatalog`, which match the proven historical format rather than a substring. The export stays as upstream ships it.
+
+- 2026-11-21 synchronization: adopt upstream `128adcb7` live discovery and
+  persisted user-turn catalog reminders (entry plus fingerprinted delta).
+  System-tail generation and schema-3 catalog freezing retire. The shipped
+  `20260908000000_session_prefix_skill_catalog` migration is unchanged; its
+  column and type remain historical readers. See [the synchronization
+  record](upstream-sync-2026-11-21.md) and [historical layout and migration](skill-catalog-system-tail.md).
+
+### FC-006 (5 notes)
+
+- 2026-10-14 synchronization: upstream `002cb4c9` runs `tool.execute.before`/`after` hooks through `ToolSettlement`, so Stop waits for an admitted hook and a file hook's timeout still joins its promise. Adopted unchanged; `plugin/index.ts` still differs from upstream only by the `actor.postStop` `memoryWriteEnabled` injection.
+
+- 2026-10-13 synchronization: upstream `4fcfe1b7` serves the plugin SDK from the host and removes per-directory dependency installs with `Config.waitForDependencies`. The fork's 2026-09-26 file-plugin dependency wait therefore has nothing to wait for and retires with its `pathToFileURL` import; `plugin/index.ts` now differs from upstream only by the `actor.postStop` `memoryWriteEnabled` injection, which is unchanged.
+
+- 2026-10-04 synchronization: `Plugin.list({ initialize: false })` lets provider refresh reuse initialized hooks without loading plugins. The `actor.postStop` `memoryWriteEnabled` injection reads the live configuration; memory keys are not refreshed, so the decision is unchanged.
+
+- 2026-10-02 synchronization: upstream `50b505a3` removes the private `src/ext` overlay loader from `plugin/index.ts` and its `url` import. The fork's 2026-09-26 file-plugin dependency-wait check still calls `pathToFileURL`, so the merge restores that import. The `actor.postStop` `memoryWriteEnabled` injection is unchanged.
+
+- 2026-09-10 hook-validation review: upstream `1493f7813e3041e9da2ea52738940591d03ed8a8`,
+  merged by `cb00c2808043bb0c4f0a4cfc5855912d82c9abe8`, routes every registration
+  path through `registerHook` and guards the trigger, config and event loops, so
+  a plugin resolving to a non-object is skipped with a warning. FC-006's
+  instance-local `memoryWriteEnabled` injection into the `actor.postStop`
+  aggregate is preserved on top of the rewritten loops, including its fail-open
+  behavior when the value is absent.
+
+### FC-007 (9 notes)
+
+- 2026-11-26 alignment review: the opt-in Auto-Worktree notice retires, adopting upstream `71a12699` (#2413), which removed the automatic isolation policy. The 2026-09-17 synchronization (C08) had kept the notice as a registered opt-in with no other rationale, and no known configuration enables it. Removed: `tool/auto-worktree-hint.ts`, the notice in `SessionPrompt` reminders, Bash's write and git-mutation detection with its `fileWrite`/`mainWorktreeHits` metadata, exec's retained `mainWorktreeHits` evidence, the `auto_worktree` config key and SDK field, the bundled `config.md` row, and the four notice/scan/bash-write/config suites. As upstream does, a config that still sets `auto_worktree` loads with the key dropped (`test/config/config.test.ts`), and `auto_worktree_hint_sent` stays as an inert column. The SSH timeout note (FC-032), deletion overlap checks and nested-record manifests are unchanged.
+
+- 2026-10-20 post-sync CI correction: CronBridge mounts now belong to the
+  InstanceState generation that started them. A long-lived application Layer
+  previously retained its scheduler after instance disposal, allowing it to
+  consume later session tasks from the process-wide pool. Disposal marks its
+  owner closed and stops that owner's exact handle; an old generation cannot
+  stop a replacement mount. Ownership is registered outside the lifecycle
+  lock and rechecked immediately before publishing a mount, so concurrent
+  start/dispose cannot leave a late scheduler. Existing Layer cleanup,
+  reentrant stop behavior, scheduling policy and test deadlines remain.
+  This does not add a stronger join guarantee for every concurrent stop
+  finalizer. Real disposal/reopen, in-flight start/dispose and replacement
+  ownership regressions cover the boundary.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` forks `InstanceState` initialization into the cache entry's scope behind a `Deferred`, so cancelling one caller cannot interrupt a shared initialization and invalidation waits for it to exit. Adapted onto the fork's generation-keyed cache: the lookup resolves its context by generation and provides `InstanceRef` and `WorkspaceRef` explicitly, and a disposed generation still refuses new entries (upstream's dispose case asserts that refusal). Disposal can now interrupt a Bus state that is still initializing, so the detached `Bus.publish` helper (used fire-and-forget by sync events) treats an interrupt-only exit as a no-op instead of an unhandled rejection that ended the process (`test/inbox/drain-crash-reopen.test.ts`). Registry correction: `packages/cli/src/effect/instance-state.ts` was already fork-different (generation keys, per-directory context sets, disposed-instance refusal) but unlisted, and joins the watch surfaces. Evidence: `test/effect/instance-state.test.ts`.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` adds `Instance.updateIdle`, the `updating` admission barrier and an `expected` owner for `Instance.provide`. Protected-root and filesystem-root rejection, instance generations, `peek` and the stale-context `dispose()` path are unchanged; an `expected` owner that is closing, absent or not the cached context is rejected by identity.
+
+- 2026-09-17 synchronization: Upstream removed automatic isolation and its notice. Retain this owner's explicit opt-in post-success notice, config and mutation metadata; reject the intermediate hard write gate. Adopt removal of the unused conflict-detection auto-create route and regenerate its SDK/OpenAPI removal. Ordinary explicit worktree operations remain. The notice is independent of auto-creation.
+
+- 2026-09-05 Bash-output review: accepted token-budget truncation while
+  retaining `pathsOverlap`, `tmpOnlyDelete`, explicit delete approval, and
+  immutable instance-cwd handling. Full output remains archived independently
+  of the inline preview; `metadata.truncated` prevents wrapper re-truncation.
+
+- 2026-09-07 explicit model API review (historical; superseded by FD-004's
+  2026-09-14 retirement): capability discovery and token-scoped
+  model API admission use a fixed startup directory. Requests cannot select a
+  different directory or workspace; the new Node token export is opt-in host
+  functionality. FD-004 remains the canonical listener/auth owner. Coverage:
+  `test/server/model-api.test.ts`, shared `server/api-request.ts`, and CLI tests.
+
+- POLICY-03 carrier review (historical model-token containment; superseded
+  by FD-004's 2026-09-14 retirement): TUI-generated Basic authentication is distinct
+  from operator configuration. Both instance-route directory guards and the
+  non-loopback bind guard preserve their operator-origin policy; automatic
+  credentials cannot authorize a broader directory. Model tokens retain their
+  exact startup directory and reject workspace switching regardless of Basic
+  credentials. Existing orchestrator and explicit noAuth exceptions retain
+  their original scope. The fixed-cwd and deletion contracts above are unchanged.
+  Current `/v1` token checks run inside the route after instance bootstrap;
+  operator-password servers follow upstream's directory policy. The historical
+  no-workspace/pre-bootstrap clauses do not describe today's capability API.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+### FC-008 (36 notes)
+
+- 2026-11-26 alignment review: the 2026-11-16 decision to keep stable path-hash shards was re-measured. On the green dispatch for `fe97a67a` the four hash shards carried 372 s, 245 s, 175 s and 348 s of JUnit test time; upstream's duration-weighted split (`script/test-shard.ts`, shipped here unused) fed the same per-file times gives 288 s each. That saves about 84 s of wall-clock per run and no runner minutes, since the total is unchanged, while every added test file or weight refresh would move files between shards. The hash split stays; revisit if a shard job approaches its 12-minute step budget (shard 1 took 409 s). The upstream files stay byte-identical, and `test/script/test-shard.test.ts` covers only the unused tool.
+
+- 2026-11-24 synchronization: upstream `81a37ab5` splits `Question.ask` into an internal `raise` plus `askElicitation`, adds an optional `elicitation` request to questions, and lets a reply carry `source`, `reason` and a structured `elicitation` answer. The POLICY-01 Question lifecycle is unchanged: registration still refuses a closed generation inside the acquire/use/release lifetime, abort and release still go through `dismiss`, and `reply` stays uninterruptible and publishes `Replied` through the captured publisher before completing the waiter, which now receives the whole `Replied` payload instead of the answers alone. `ask` still resolves with the answers. Removing the payload fields fails two cases of `test/mcp/elicitation.test.ts` ("form choices are answered, exposed on the question and recorded", "structured replies are validated against the schema"); `test/question/lifecycle.test.ts`, `test/question/question.test.ts` and `test/cli/tui/question-lifecycle.test.tsx` pass. See C01 in [the synchronization record](upstream-sync-2026-11-24.md).
+
+- 2026-11-22 test home isolation: Bun caches `os.homedir()` at process start, so the HOME set by `test/preload.ts` never reached it. Instead, about 30 production call sites read the developer's real home: `instruction.ts` put the real `~/.claude/CLAUDE.md` into every test system prompt. Two `prompt-skill-command-multi`/`prompt-effect` cases failed locally because of it, and CI runners have no such file. The preload now also points `os.homedir()` at the isolated home. `test/fixture/fixture-root.test.ts` "os.homedir() follows the preload's isolated HOME" fails without it. Limit: a named `import { homedir }` keeps Bun's original binding; only `cron/loop-file.ts` (`~/loop.md`) uses one.
+
+- 2026-11-22 stall visibility: `test/lib/effect.ts` reports the first bounded flush that misses its 1-second budget in each process, as a GitHub `::warning::` annotation in Actions. A stalled shared log queue therefore appears as a warning rather than only as later tests running a second slower. FC-054 bounds the stall itself.
+
+- 2026-11-22 isolation: `test/bus/bus-integration.test.ts` runs in its own discovery-checked, report-verified `bus-integration` job. It shares hash shard 3/4 with `lsp/client.test.ts`, while upstream's duration split keeps the two apart. On Linux runners, the stall begins when its last two tests finish; both dispose a directory with a busy SSE and cancel its reader. An instrumented dispatch showed that the logger's next `append` called `stream.write` and its callback never arrived: the stream was open, with 76 bytes buffered and no drain pending. Every later bounded flush (`test/lib/effect.ts`, 1 s) then paid its full budget, and about 210 shard-3 tests each ran about one second slower. `Log.init` in `lsp/client`'s `beforeEach` waited behind 26,000 queued writes until its 120-second hook timeout, and the shard overran its 12-minute budget. This is upstream's unexplained log-queue stall (`33943835` isolated `subagent-resume-negatives` for it); the fork's hash shards had brought this trigger and an unbounded waiter into one process. Neither effect reproduces on macOS. The lost write callback inside Bun's file stream remains unexplained; production `Log.shutdown` waits on the same queue. Discovery now also requires this file.
+
+- 2026-11-16 synchronization: keep stable path-hash shards, tsx discovery, zero-case inputs, strict JUnit coverage and Windows acceptance. Run `subagent-resume-negatives` in its own discovery-checked/report-verified job after upstream identified its shared log-queue pollution. Adopt bounded best-effort test-log flush and catalog-only fetch spying. Keep the three incoming timing-bound cases executable; local outcomes and limits are in C07 of [the sync record](upstream-sync-2026-11-16.md). The weighted splitter is available as a tested utility but does not replace this fork contract. Correct the locked `@npmcli/agent@4.0.2` patch and test actual proxy transport.
+
+- 2026-11-13 synchronization: adopt provider stream-error logging that destructures the actual error and records only its cause summary, excluding `requestBodyValues`. The real request-marker regression passes; logger clone isolation remains FC-022. This adopts upstream privacy behavior and creates no new fork deviation. Local Windows exec fixture path/symlink failures are recorded separately from opt-in migration failures and require clean CI evidence.
+
+- 2026-11-07 CI alignment: the dedicated `session-actor-recovery` job is removed. `test/server/session-actor-recovery.test.ts` (hash shard 4/4) and the three `test/actor/subagent-resume-*` suites (shard 2/4) now run in their hash shards, as upstream runs every ordinary suite. The job dated from 2026-09-08, and took the subagent-resume suites on 2026-09-19, because a disposed `SessionPrompt` layer cleared the process-wide prefix captor under AppRuntime. Since `registerPrefixCapture` (`c5b283dc`, 2026-11-01), a disposal hands that slot to the most recent live captor. Local evidence used Bun 1.4.3 (CI pins 1.3.14), removed every ambient `MIMOCODE_*` variable and ran each shard's workflow file list in one process: shard 2/4 (172 files) passed 1,807 tests with 0 failures and a verified JUnit report. With the captor reverted to clearing on disposal, the same shard failed nine subagent-resume cascade cases with `Missing actual prefix captor`. In shard 4/4 all twelve `session-actor-recovery` cases passed. Its three failures are unrelated to the move: `test/sync/restore-order.test.ts` passes alone, and the two `test/provider/provider-event-timeout.test.ts` keep-alive cases fail on that host even alone, on a tree whose `packages/` equals main `d1a9c181`. On main CI the removed job's test step took 31 seconds against 246 and 282 seconds for shards 2/4 and 4/4 under their 12-minute budgets. The pull request records the exact-SHA dispatch.
+
+- 2026-11-04 CI correction: the main-lane and subagent hanging-retry steer fixtures now release their deliberately pending HTTP reply only during cleanup, before awaiting the scripted server stop. Client abort does not cancel a JavaScript fetch-handler Promise. Production lifecycle behavior, all steer assertions and original test timeouts are unchanged; see the [sync evidence](upstream-sync-2026-11-04.md).
+
+- 2026-10-28 quota-sync CI correction: progress-reconcile fixtures use generated unique session IDs and remove actual session memory, replacing ineffective late MIMOCODE_HOME changes and millisecond-only IDs. A fixed-clock two-fixture regression reproduces the old stale-progress collision and passes with the corrected fixture. Runtime checkpoint behavior and assertions remain unchanged; see [the quota sync record](upstream-sync-2026-10-28-ebd06ee2.md).
+
+- 2026-10-27 synchronization: adopt the lighter two-child/two-agent global concurrency regression while keeping the existing 60-second two-level-resume budget. The Windows runtime job additionally runs `test/installation/launcher.test.ts` with a 120-second per-test cap and preserves its log in the existing artifact, so the incoming PATH-shadow/system-tar regression executes on Windows rather than only skipping on Linux/macOS. No production workflow semaphore or cleanup boundary changes.
+
+- 2026-10-22 synchronization validation: `.github/actions/setup-bun/action.yml` exposes npm's bundled `node-gyp` on a job-temporary PATH before locked installation. A runner may execute the trusted tree-sitter-powershell native install script even though the CLI uses its WASM asset. Repeated CI ENOENT established that no build executable was available; this setup reuses the existing npm dependency without adding installs, changing the lockfile, widening trust or altering product module resolution.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` adds `abortSignal` to `Question.ask`'s input and passes `ctx.abort` from the question and plan tools. It replaces the fork's second-argument signal; the POLICY-01 lifecycle (closed-generation admission, captured publisher, single `Rejected` through `dismiss`) is unchanged, and an abort now dismisses and then awaits the request so a reply already in flight wins. The detached `Bus.publish` helper now ignores an interrupt-only exit from instance disposal (see the FC-007 note). Evidence: `test/question/question.test.ts`, `test/question/lifecycle.test.ts`, `test/cli/tui/question-lifecycle.test.tsx`, `test/tool/plan.test.ts`.
+
+- 2026-10-13 format alignment, second pass: the first pass only reverted hunks that were formatting in their entirety and only looked at `packages/cli/src`. This pass covers every modified `ts`/`tsx`/`md` file outside `docs/` (273, including the 143 modified test files) and reaches formatting noise inside mixed hunks: a three-way merge of ours = upstream bytes, base = `prettier(upstream)`, theirs = `prettier(fork)` keeps upstream's bytes wherever the fork only reformatted, after which only the hunks whose restored block is a contiguous substring of the upstream file are kept, and files the merge cannot stitch fall back to the single-hunk test at `-U0` granularity. Two guards: the result must be Prettier-equivalent to the fork file, and a hunk whose first line changes indentation is never restored, because upstream's indentation of a block only fits upstream's nesting (upstream's own `prompt.ts` skill-mention block is mis-indented, and the fork keeps its corrected form rather than inherit that). Outcome: 24 files, 433 fewer changed lines and 274 fewer hunks against upstream `b258d28f` (3061 → 2787), `test/mcp/host.test.ts` byte-identical to upstream again, and the realigned `prompt-effect.test.ts` diff drops from 370 hunks to 168 with two restored lines. The remaining difference is semantic: over the same 273 files the raw diff (39.6K changed lines) is already smaller than the Prettier-normalized diff of the two trees (40.2K), and the per-file excess that remains (648 lines in `session/prompt.ts`, under 100 anywhere else) sits where the fork changed code that upstream itself keeps un-formatted, which no byte-level revert can remove. Changed test files pass locally except one `actor-subagent-gating` case that fails identically on the untouched tree whenever `MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS` is inherited from an enclosing MiMoCode session, and passes with it unset.
+
+- 2026-10-13 `.gitignore` alignment: the root `.gitignore` is upstream's bytes again, including its inert `.mimocde` entry and missing final newline. Fork PR #51 removed that entry to avoid a blanket `.mimocode/` rule while the repository still tracked assets there; nothing under `.mimocode/` is tracked on either side now and the runtime regenerates its own nested ignore file, so the entry ignores nothing and the two-line difference bought only a conflict surface.
+
+- 2026-10-13 format alignment: 53 fork hunks across 13 `packages/cli/src` files differed from upstream `b258d28f` only by Prettier output (line wrapping, `0.50` → `0.5`, double spaces); upstream does not run Prettier (184 of its 709 `ts/tsx` files fail the repository config) and `bun lint` is oxlint, so those hunks were pure merge-conflict surface. They are reverted to upstream's bytes; `session/overflow.ts` is byte-identical to upstream again. Every touched file is Prettier-equivalent before and after, so runtime behavior is unchanged and the `Main behavior` reference does not advance. `packages/cli/src/cli/cmd/generate.ts` also joins the watch surfaces: it carries the `codeSample` producer recorded under the 2026-09-15 tooling convergence but was not listed.
+
+- 2026-10-13 synchronization: upstream `c68463f2`/`ca056a8e` restore a root `bunfig.toml` that scopes bare root `bun test` to `script/`, isolates HOME/XDG and the database, and refuses `packages/**` test paths. It replaces the fork's `do-not-run-tests-from-root` guard with the same protection. Upstream `4a5e2140` adds `workflow_call` triggers and an unverified shard-4 `script/release.test.ts` step; the fork keeps its `windows_runtime` dispatch input beside `workflow_call` and runs the release script tests in a dedicated `release-script` job with JUnit verification. Default-path validation now clears `MIMOCODE_MCP_TOOL_SEARCH`, which replaced `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH`.
+
+- 2026-10-10 Actions usage reduction: GitHub disabled this fork's workflows for Actions usage. Between 2026-06-22 and 2026-10-04 the fork ran 758 `test` workflows; recent ones averaged about 27 runner-minutes (four shards, four isolated jobs, and a Windows job for `dev/compat`). In September 233 of 415 were `pull_request` runs, repeated on every PR push. `test.yml` skips every job of a pull request whose head is a branch of this repository; such a branch dispatches `test` when it needs pre-merge evidence. A pull request from another repository cannot be dispatched by ref, so its Linux jobs still run, under GitHub's read-only fork-PR token; dispatching an untrusted head from a base-repository ref would instead run its workflow with this repository's permissions. All three workflows ignore pushes and pull requests confined to `docs/`; no test, lint or typecheck input lives there. The Windows job runs only on pushes to `dev/compat` and on dispatch with `windows_runtime`, never for a pull request, so its environment record drops the pull-request head SHA. `AGENTS.md` and the upstream-sync skill let a tip without runs because its push changed only `docs/` cite an ancestor's exact-SHA runs after proving the tree outside `docs/` identical. Shard layout, isolation jobs, JUnit verification and step budgets are unchanged.
+
+- 2026-10-04 synchronization: upstream `6babeb0b` runs its two provider refresh suites in separate processes on shard 4/4, because the refresh needs process-wide instance idleness that other session fixtures' detached work can hold. The fork's discovery-checked layout instead adds a `provider-refresh` job that runs `refresh`, `refresh-boundaries` and the fork's `refresh-harness` suite each in its own process with JUnit verification; discovery requires all three, and every other file keeps its hash shard.
+
+- 2026-10-02 synchronization: upstream `f40c76ac` deletes the root `bunfig.toml` with its `[test] root` guard and makes root `bun run test` delegate to `packages/cli`. The fork adopts the delegation but keeps a root `bunfig.toml` with only the guard: Bun reads `bunfig.toml` from the working directory, so a bare root `bun test` would otherwise discover every package test without `packages/cli/bunfig.toml`'s preload and lose the isolated HOME/XDG and fixture roots. Husky and its pre-push typecheck are removed with upstream; CI remains the gate. The isolation `test.yml` keeps its jobs on `packages/cli`. With the committed OpenAPI snapshot deleted by upstream `698f0f29`, root `script/generate.ts` only rebuilds the SDK, and the OpenAPI tests check the runtime and generated documents.
+
+- 2026-09-29 synchronization: upstream removed `packages/enterprise`, so the
+  package-scoped enterprise S3 fixture clause below retires with it; the
+  opencode harness contracts are unchanged. Root typecheck now also checks
+  `tsconfig.scripts.json`, which has no `@/` path mapping. The fork-only
+  `script/experiments/**` carrier imports opencode source through that alias,
+  so the scripts project excludes it, as upstream excludes `generate.ts` and
+  `schema.ts`; `packages/cli/tsconfig.json` keeps checking every experiment
+  file. Upstream also deleted the tracked `.mimocode/.gitignore`. The runtime
+  regenerates an untracked copy that ignores `.gitignore` but not `references/`,
+  so the upstream-sync skill's local re-include is now defensive only.
+
+- 2026-09-29 skill relocation: the fork-only upstream-sync skill follows
+  upstream's project-skill layout from `.mimocode/skills/upstream-sync/` to
+  `.agents/skills/upstream-sync/`, which skill discovery scans unless
+  `MIMOCODE_DISABLE_AGENTS_SKILLS` is set. Nothing ignores `references/` or
+  nested `.gitignore` files under `.agents`, so the local re-include file is
+  removed. Skill content is unchanged; this is a path move of shared process
+  guidance that propagates unchanged into compat.
+
+- 2026-09-27 synchronization: config refresh retains an instance while its
+  main or Actor execution is live. Isolated workflow worktree removal now waits
+  for `server.instance.disposed` from that owning instance before removing the
+  directory; a one-hour timeout releases the listener and reports cleanup
+  failure if the event does not arrive. This
+  preserves in-flight Actor files without extending the workflow caller's
+  bounded settlement. `test/workflow/runtime-worktree.test.ts` and
+  `test/project/instance-dispose.test.ts` cover the lifecycle boundary.
+
+- 2026-09-19 synchronization: The three new subagent-resume suites share the dedicated real-AppRuntime recovery job. Combined unit execution reproduced a missing prefix captor after focused test layers disposed the global reference; discovery requires all four recovery files and JUnit verifies every file. This changes test isolation, not product behavior.
+
+- 2026-09-17 per-run test roots: `test/preload.ts` roots the process-wide data
+  directory (`mimocode-test-data-<pid>`, holding the XDG directories and HOME)
+  under the resolved `os.tmpdir()` again, as upstream does. Its home-directory
+  placement predated `62fd366c`, after which Instance accepts temp-tree project
+  directories such as worktrees under `Global.Path.data`. The temp directory is
+  resolved because macOS's sits behind the `/var` symlink and runtime events
+  report canonical paths: unresolved, three `test/workflow/runtime-worktree.test.ts`
+  cases failed on macOS, which Linux CI's `/tmp` cannot reproduce.
+  Default fixture projects are rooted under the resolved `/var/tmp` on POSIX
+  (then the home directory, the git-free parent of cwd, and temp as fallbacks;
+  Windows keeps those fallbacks). A non-git fixture's worktree is `/`, so config,
+  command and skill discovery walk every ancestor. Measured on macOS: rooted
+  under home, a probe fixture discovered the developer's own `~/.mimocode` and
+  `~/.claude`, and 23 of its 63 skills came from the real home; rooted inside the
+  checkout as upstream does, it loaded the repository's `.mimocode`, and a full
+  6458-case run failed seven fork-only deletion/listener security cases
+  deterministically because their "outside" directory joined the project
+  worktree; rooted under `/var/tmp`, nothing was discovered and the full run
+  passed.
+  CI runners have no such home directories, which is why the home placement
+  stayed green there. The root also stays outside the temp tree: Bash exempts
+  temp-only deletions, so a fixture project there would let the "target outside
+  temp" deletion cases pass through project containment instead. The candidate
+  filter mirrors Instance's current protected paths; its earlier `/root` and
+  `/var` prefixes had been stale since upstream `20b79f71`. `root: "home"` is
+  removed: `test/file/path-traversal.test.ts` passes in upstream's form, so its
+  helper and the shared `~/.mimocode-home-fixtures` directory are gone.
+  `test/fixture/fixture-root.test.ts` requires that nothing discoverable lies
+  above a non-git fixture; with the home root restored it fails, listing the
+  home directories. `outsideGit`
+  fixtures now sit under a per-process `/tmp` root that the preload passes to
+  `test/fixture/fixture.ts`. Every root is `<prefix><pid>`. Preload startup
+  reclaims, best effort, roots whose process no longer exists and never touches
+  another live or EPERM PID, which covers killed and timed-out runs. A root
+  already named for the current PID belongs to a run whose PID was reused; it
+  is removed with retries, and a removal that still fails stops the run instead
+  of letting it inherit that state. afterAll removes the roots
+  synchronously before any timer await; only a root that fails there (Windows
+  EBUSY) takes the existing GC-and-retry path, followed by a last synchronous
+  pass. Under Bun 1.3.14 `bun test` runs no `exit` listeners, stops awaiting
+  afterAll at its first timer when a test file fails to load, and detached
+  Config dependency installs recreate removed paths whenever the hook yields.
+  Before: a concurrent-writer reproduction leaked the data root in 3 of 3 runs,
+  and each probed load-failure run left its root. After: 0 of 6 and 0 of 3. The
+  three roots of a SIGKILLed run were reclaimed by the next run while a
+  concurrently running process kept its own.
+
+- 2026-09-17 tests no longer write into the checkout: a package test run used to
+  leave `.mimocode/package.json`, a lockfile and `node_modules` at the
+  repository root, and `packages/cli/.mimocode/` (`.cron-lock`,
+  `.gitignore`, installed dependencies) inside the checkout. Upstream's copies of
+  the same tests use the same paths. There were two writers. A session boot
+  starts the cron bridge, which is on by default, and its scheduler lock and
+  task file follow `process.cwd()`, which is this package directory. The harness
+  keeps that production path enabled instead of switching cron off. When
+  `process.cwd()/.mimocode` is absent at startup, the preload creates it with a
+  non-recursive mkdir. Only when that call created it does the preload record the
+  directory's identity (device, inode and birth time) in a marker in
+  the temp directory. A directory someone else created, or deleted and
+  recreated, never matches that identity. The owned directory is removed at the
+  end of the run, and a killed run's is reclaimed at the next startup, unless
+  another test process (a live `mimocode-test-data-<pid>` root) or a live
+  foreign `.cron-lock` owner may still use it. A lock that cannot be parsed yet
+  counts as live, because a scheduler opens it before writing its owner, until
+  it has gone a minute without changes. The lock is re-read immediately before
+  the removal, which backs off if the lock changed; what remains is the same
+  check-then-rename interval the scheduler's own takeover has. It is removed only while it holds
+  nothing beyond runtime artifacts (`.cron-lock`, `.gitignore`,
+  `package.json`, `package-lock.json`, `bun.lock` and `node_modules`). Any
+  other content, such as `scheduled_tasks.json`, hands the directory over by
+  dropping the marker. Without the end-of-run release,
+  `cancel-notification.test.ts` leaves the directory behind. The cron suites
+  stay in upstream's form. The second writer was instances rooted in the repository,
+  which ran config discovery against its `.mimocode` and installed dependencies
+  there. `bash.test.ts`, `webfetch.test.ts` and `websearch.test.ts` now use a git
+  fixture instead of the checkout, and `read.test.ts` reads a copy of its large
+  image from a fixture. Route requests that named no directory booted an
+  instance for `process.cwd()`. The `workflows-route`, `session-messages`,
+  `session-task-route`, `session-select`, `title-authority` and
+  `session-actions` server tests now send their fixture directory on every
+  request. Unauthenticated servers only admit directories under cwd, so those
+  fixtures move under `root: "cwd"`. `worker-listener.test.ts` gives its cwd
+  fixtures a git root and names that directory on the requests that boot an
+  instance (`/config`, and `/v1/models`, whose route bootstraps before checking
+  its token). The writers were located file by file and, for those that only
+  wrote alongside others, by order-preserving bisection of the CI shard order.
+  Before the change, each of those tests left repository artifacts; after it,
+  none did.
+
+- 2026-09-15 runtime acceptance infrastructure: the shared test workflow adds
+  a Windows job for compat PR/push and explicit manual dispatch. Bun follows the
+  package declaration and dependencies use `bun ci`, including the shared
+  `.github/actions/setup-bun` composite after the CI reproducibility review.
+  A missing Windows entry
+  fails. The job records event, checkout and PR-head SHAs separately and uploads
+  bounded evidence. DC-PLATFORM-001 owns the actual compat archive/no-rg entry;
+  a skipped main-side Windows job is not a platform acceptance result. Existing
+  Linux jobs and their failure/reporting boundaries are preserved.
+
+- 2026-09-15 quarantine closure: both remaining registered actor cases run
+  normally: postStop failure preserves a successful result with warnings, and
+  inbox waits for the entire spawn execution. The warning test now covers
+  foreground/background and outcome/wait/persistence/parent notice. No new skip
+  replaces either case. Final cancellation regressions cover the Runner
+  pre-first-instruction exit, owner-acquisition interruption, queued execution
+  admission, cancellation before worker startup and direct Effect hook
+  self/ancestor cancellation. Workflow agent timeouts
+  bound the cancellation join to the existing reclaim grace while detached
+  cleanup continues; shared cancellation retains interrupt/join semantics.
+  The dated 2026-09-12 to 2026-09-14 actor quarantine entries, kept in the
+  [shared history](fork-registry-history.md#2026-11-07-registry-normalization), describe their historical snapshots.
+  The separate workflow deadline case is restored. The restored
+  `it.live` case proves the hanging LLM request was consumed, a child worktree
+  and running Instance existed, the exact workflow deadline fired, and the
+  worktree and Instance were disposed. Its former two-second deadline could
+  precede child startup; the test now explicitly gates on startup before testing
+  reclamation. Four workflow/disposal suites pass together (44 tests) and the
+  process exits naturally in that local matrix. PR #129 at `eaf99b8b` subsequently
+  reproduced a 120-second timeout in this case on Linux; other tests continued
+  until the shard's eight-minute budget ended. A second observation located the
+  wait inside workflow settlement after child disposal. Worktree removal can
+  fail as an Effect defect, which the old typed-error ignore did not catch;
+  that failure stranded terminal persistence and the completion signal.
+  Reclaim now logs removal defects and continues publishing the original
+  outcome. Pure interruption still propagates and existing cleanup deadlines
+  remain unchanged. Real removal followed by fault injection proves both
+  deadline and cancellation settle, persist and notify after child disposal.
+  Concurrent reclaim/isolated removal is observed; the exact Git failure in the
+  intermittent Linux run remains an inference, not a captured exception.
+  F03 records default/opt-in and final CI evidence separately in
+  [the implementation report](audit-followups-2026-09-15.md).
+  A separate Runner reentry fixture now uses explicit started/reentered/release
+  signals instead of five/fifty-millisecond timer ordering, preserving the
+  assertion that both waiters share the first execution and emit one warning.
+
+- 2026-09-12 racy-observation fix: `nested primary ActorTool hands background
+ownership to the real parent` polled the `InboxTable` row its assertion is
+  about. That row exists to wake the persistent peer it addresses, so the peer's
+  continuation drains it within milliseconds and the poll observes a state the
+  system is designed to erase. A drained row never returns, so the earlier
+  window widening (2s to 20s) only moved the failure from ~2.5s to ~21s. The
+  case now observes `InboxArrived`, published after the row commits and before
+  `wake()`, matching how `test/actor/cancel-notification.test.ts` already counts
+  envelopes. Behavior is unchanged and was verified identical with
+  `spawn.ts`/`prompt.ts` reverted to `e92d7a52`; the assertion is
+  mutation-checked against a suppressed notification and against one misrouted
+  to `main`. Prefer the bus envelope over inbox rows whenever a test asserts
+  notification routing.
+
+- 2026-09-07 fixture and synchronization review: adopted the two enterprise
+  preload files unchanged. Both complete storage/share test files pass locally
+  (16 tests), exercising the current S3 adapter against intercepted HTTP with
+  test credentials; the package typecheck passes. The fixture covers the
+  current read/write/delete/list requests, not R2, signature verification,
+  pagination, or external-service availability. The accepted `95b592e0`
+  upstream-sync skill is shared process guidance to propagate unchanged from
+  main into compat; it adds no runtime capability or new retirement decision.
+  Final propagation evidence belongs to `dev-compat-registry-history.md`, and
+  final published branch SHAs still require their own CI results.
+
+- 2026-09-10 skill reference split: the upstream-sync skill moved its
+  conditional detail into `references/validation-and-ci.md`,
+  `references/publication-and-cleanup.md` and `references/evidence-record.md`,
+  leaving `SKILL.md` as the scope and baseline entry. A local
+  `.gitignore` re-includes that directory, because `.mimocode/.gitignore`
+  ignores agent-cached `references/` directories and nested `.gitignore` files
+  and a file inside an excluded directory cannot be re-included on its own.
+  These are fork-only paths upstream does not define, so they join the watch
+  surfaces above; like `95b592e0` this is shared process guidance to propagate
+  unchanged from main into compat, adding no runtime capability and no new
+  retirement decision. Review-thread adjudication for the cleanup-scope finding
+  is recorded on PR #105.
+
+- 2026-09-15 tooling convergence: root `script/generate.ts` keeps SDK then
+  OpenAPI generation and stops implicitly formatting the whole repository,
+  matching upstream's generation policy. Generator-local formatting and failure
+  propagation remain. JavaScript OpenAPI examples import `@mimo-ai/sdk/v2`
+  and call the generated camelCase methods, including `session.promptAsync`;
+  actual generated/published samples are checked against the client and the
+  async prompt example sends the expected HTTP path/body. Main publishes 140
+  operations; compat's extra coverage operation remains its own protocol.
+  Generated artifacts still mix actual fork schema additions with refreshes of
+  upstream source fields whose checked-in artifacts lag. Compare producers
+  before attributing every artifact hunk to a fork feature.
+  Three no-caller model API child fixtures are removed; the live TUI worker
+  default/listener tests remain. See F05/F09/F11 in the implementation report.
+
+- 2026-09-05 fixture review: removed `resetDatabase` and its four call sites,
+  preserving local disposal and the fork project-init authorization fixture.
+  Rejected incoming auth-override, fork-prefix, and failed-subtask skips: the
+  fork already has relevant fixture isolation and all three pass on both
+  pre-sync branch SHAs. Existing unrelated CI timeouts are tracked separately;
+  this decision does not claim that the fixture removal fixes those failures.
+
+- 2026-08-25 publication companion: the `AGENTS.md` default-environment rule is
+  a process-only registry companion and does not advance the frozen main
+  behavior or its changed-path calculation.
+
+- 2026-09-02 test-sharding review: the new WebSearch regression is an ordinary
+  `.test.ts` input and therefore enters the existing stable path-hash shard 1/4.
+  Its local pass is supporting evidence; the final published `main` SHA remains
+  subject to the strict XML/count and exact-file CI gates.
+
+- 2026-09-14 capability route disposition: the 2026-09-07 model API lifecycle
+  review and the selected model API evidence (both kept in the
+  [shared history](fork-registry-history.md#2026-11-07-registry-normalization)) and the model API clauses of the
+  POLICY-03 lifecycle review above describe the retired fork model API and are
+  historical. FD-004 now owns `/v1` and adopts upstream's capability route
+  whole: token verification runs in the route after `InstanceMiddleware` has
+  bootstrapped the instance, instance waiting is not cancellation-aware, and
+  there is no admission, server-owned deadline or bounded upload. None of that
+  is to be restored during a sync. The retirement condition below governs this
+  entry's workflow and process bounds; the model API bounds were retired by
+  FD-004's decision rather than by an upstream settlement, and FD-004 records
+  each resulting behaviour.
+
+### FC-009 (10 notes)
+
+- 2026-11-26 synchronization: upstream `6ad6bbb4` (#2867) replaces the user image attachment envelope with a closed `<system-reminder>` appended after the user parts. Its part ID order is therefore its in-memory order, and the `# Files mentioned by the user … ## My request:` divider and the `isEnvelopeAnchorPart` splice are gone. The fork keeps its `metadata.userImageAttachment` tag. On read, `orderUserParts` (`session/message-v2.ts`) now moves only a legacy envelope (tagged text ending in `## My request:`, persisted from 2026-09-17 until this sync) ahead of the user body, so the 2026-09-17 reload rule below applies only to those rows. Moving the new reminder would give a reloaded message a different prompt from the one first sent. The legacy branch can retire once rows from before this sync no longer need their original order. Evidence: `test/session/image-envelope-read-order.test.ts` covers legacy and current order and fails if either the legacy guard or the reorder is removed; the `prompt.test.ts` persisted read-back cases also assert that `MessageV2.parts` and `sessions.messages` equal the in-memory parts.
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): replace text/`syntheticMarker` matching in `ensurePersistedUserSynthetic` with validated `metadata.reminder = { key, rev }`. Only non-ignored synthetic text counts; equal key and revision dedupe independently of wording. Memory paths, loop streak and MCP callers migrate; MCP keeps its separate announcement metadata. There is no text-only compatibility shim: an old memory reminder can be repeated once on the next eligible user, and loop streak can repeat if detection fires again on the same user. Hook/spawn provenance, stable persisted part identities, queue delivery and side-effect retry boundaries remain unchanged. Existing `TextPartInput.metadata` carries client tags without a public schema change.
+
+- 2026-10-21 synchronization: upstream `a7440d13` resets a dropped empty step by removing its parts instead of deleting and rebuilding the assistant under the same ID, so no `message.removed` is published for a turn that still delivers content. Adopted into the fork's pure-empty branch only: reasoning-only output keeps the run loop's scoped continuation, so upstream's think-only identity case is adapted to a pure-empty stop in `invalid-output-continuation.test.ts`. Upstream `88673c41` retires the persisted recall reminder; the memory paths reminder is persisted through the same marker-deduplicated `ensurePersistedUserSynthetic`, at most once per context window on an unsent own user message.
+
+- 2026-10-20 synchronization: inbox acceptance persists complete synthetic agent input and provenance with a durable receipt; later rendering hides unconsumed rows and places consumed input at its first delivery. Import/export/sync/fork preserve referenced message identity and queue visibility without cloning runnable receipts into a fork. Mid-turn direct user text is sent verbatim rather than wrapped against a moving last-finished assistant, preserving byte identity around signed thinking. This does not claim to repair every other history rewrite or an already poisoned signature. Pure empty, tool-free replay uses the scoped retry policy; reasoning-only and settled-tool continuation retain their existing bounded, atomic provenance paths.
+
+- 2026-10-16 synchronization: upstream `bf0563dd` extends the user image attachment envelope and replay provenance. The envelope's local path now derives from an absolute `source.path` or, when absent, a `file:` URL; a new sentence names `[Image: <file name>]` / `[PDF: <file name>]` markers as session-stable attachment identity, matched by the same file name. An attachment-only all-synthetic prompt keeps the caller `system` on the persisted user message (`prompt.system ?? input.system`) while still skipping the `resolvePrompt` fallback, so `session.prompt` is not pinned. The overflow replay copies media `file` parts verbatim (the `[Attached <mime>: <filename>]` substitution is gone) under FC-001's atomic `commitUserMessageIfLatest`, retaining `source: "hook"` and `task_id`. The fork's `userImageAttachment` metadata and hook/spawn provenance rules are unchanged. Evidence: `test/session/prompt.test.ts` envelope and attachment-only-system cases, `test/session/prompt-effect.test.ts` keeps-replayed-media case.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` records a tool's execution boundary (`ToolPart.execution`, `ToolStateError.inputComplete`) through transactional `Session.mutateToolPart`, closes a per-attempt tool scope on cleanup instead of waiting 250 ms for unsettled calls, and lets `ToolSettlement` persist a tool's real result after an interruption; projectors and imports refuse tool identity changes and never downgrade `started`. Adopted with the side-effect replay boundary unchanged; completed tools still merge running metadata and failed tools keep the record guard. Evidence: `test/session/processor-effect.test.ts`, `test/session/tool-gate-cancel.test.ts`, `test/history/import.test.ts`.
+
+- 2026-09-19 synchronization: Machine provenance joins hook provenance as an explicit union. Internal GitHub/command/inbox source labels remain non-user. Optional uncommitted hints persist source=hook with inherited task/model variant and atomic latest-user/token checks; their worker owns no prior run-approval scope.
+
+- 2026-09-17 synchronization: Compose, recall and loop-streak reminders are persisted with stable IDs. Hydration restores Compose protocol priority. User image attachments use a synthetic provenance envelope rather than a fabricated Read result; its tagged envelope is placed before genuine user content after reload without changing IDs. Responses tool images remain tied to their tool call, using the actual adapter provider and shared image limits.
+
+- 2026-09-10 title isolation: automatic titles use persisted genuine user text,
+  configured lite then the exact source model, and an isolated StructuredOutput
+  request. Attachment-only input keeps a filename fallback; image bytes never
+  enter this title request. Ephemeral generation bypasses mutable chat parameter
+  and header hooks and rejects workflow connectors. Preserve the stronger fork
+  rule that only non-ephemeral main requests publish global retry state/events.
+
+- 2026-09-15 error-summary carrier: `session/trajectory.ts` extracts a
+  NamedError's `data.message` for the model-visible session error instead of
+  serializing its complete data/metadata. The `sessionErrorText` regression
+  covers this helper; it does not prove end-to-end provider exception redaction.
+
+### FC-010 (1 note)
+
+- 2026-10-15 fork hardening (prompted by the dropped June stash review): DNS classification resolves every record (`lookup` with `all: true`) instead of trusting the first answer — a hostname returning a public and a private address together fails closed, and an empty answer list fails closed as a resolution failure. The upstream base still checks the first answer only. The check still races the request's own resolution (TOCTOU), so it remains defense-in-depth. The injected-resolver API now passes `{ all: true }` and expects the record list. Evidence: `test/util/ssrf.test.ts` adds the mixed-answer fail-closed and empty-answer cases (29/29 with `test/tool/webfetch.test.ts` 5/5).
+
+### FC-011 (17 notes)
+
+- 2026-11-26 alignment review: the `auto_worktree` row leaves bundled `mimocode-docs/reference/config.md` with FC-007's retired notice, matching upstream's text.
+
+- 2026-11-13 synchronization: adopt the unified default prompt and retire unused vendor-specific prompt templates, including MiniMax. The MiniMax-specific repository-reminder removal is superseded by template retirement; the factual shared Task/Actor, fixed-cwd and authorized exec guidance remains. Adopt Compose Next spec presentation and independently deliverable sub-documents from `994aa695`, retaining explicit invocation, workspace ownership and publication authorization boundaries.
+
+- 2026-11-09 synchronization: adopt upstream `26d1f3a6` unchanged. Compose Next keeps Report as `[Not finalized yet]` until finalized and Journey log as `None` until a useful entry replaces it; three upstream specs illustrate those markers. Explicit workflow invocation, workspace ownership, discovery/permission and Finish authorization boundaries remain unchanged. Content evidence only; no new runtime behavior is claimed.
+
+- 2026-10-30 registry correction: upstream `2b993ac9` removed the actor shell invocation format on 2026-09-24, including `actor.shell.txt`, its tokenizer/help, heredoc flag-placement errors and the `actor.shell` tests; FC-018 retired with them. Those references leave the observable contract, watch surfaces and Tests/evidence. JSON Actor guidance in `actor.txt` remains. No behavior or content changes.
+
+- 2026-10-30 synchronization: Adopt available search/MCP wording, explicit Exa/search MCP setup, and DuckDuckGo HTML through WebFetch when no search tool is available. Permission/discovery and workflow lifetime contracts remain unchanged; prompt text is content evidence, not a live search-provider availability claim.
+
+- 2026-10-26 synchronization: adopt upstream `18adffc9` unchanged. The `claude-code`, `codex` and `grok-build` descriptions now say to load only on explicit authorization and to confirm the binary first; their host-only `agents/openai.yaml` files are deleted, and the `mimocode-docs` discovery row names the opt-in selector. The fork's PPTX guidance regression in `test/skill/builtin.test.ts` is kept beside upstream's new cases.
+
+- 2026-10-21 synchronization: adopt upstream `12a59e90` unchanged. Compose Next spec `source` takes a branch name, PR URL or MR URL, so the frontmatter stays valid YAML; fill-ins use `{{}}`, S labels move onto Design H3s, `covers` and the Journey log are optional, and any merge needs its own confirmation. Bundled `mimocode-docs` drops `compaction.prune` and names `xiaomi/mimo-v2.6-flash` as the voice control default; the fork's compaction-row wording and `auto_worktree` entry in `config.md` are kept.
+
+- 2026-10-21 live synchronization: adopt `cf8c09d5` Compose Next unavailable-input handling, spec `source` tracking and Finish confirmation unchanged. The explicit invocation entry and discovery/permission boundaries remain; this is shipped content, not a runtime schema or bulk spec migration. Content loading/discovery and permission/search tests cover the integration, while behavioral wording is reviewed as guidance.
+
+- 2026-10-13 MiniMax reminder removal: the shipped `session/prompt/minimax.txt` no longer carries "The default branch in this repo is `main`. CI triggers on …". Upstream `25b7bac3` pasted that repository-specific sentence into a prompt every MiniMax user receives, twice; fork PR #43 kept it and updated the branch list to `dev/compat`, which made it current for this repository and still a fabricated fact for every other project. The sentence is deleted, so the file differs from upstream by two removed lines and nothing added, and this repository's branch guidance reaches the model through `AGENTS.md` like every other instruction. `test/session/system.test.ts` now asserts the absence of any repository-specific CI reminder (mutation-checked against upstream's text). The TUI skill i18n keys stay corrected: `skill/localized-alias.ts` reads `tui.skill.<name>.slash`, so upstream's `tui.skill.mimocode.*` keys have been dead since `5bf07b7e` renamed the bundle to `mimocode-docs`.
+
+- 2026-10-13 synchronization: upstream `3c6e6bb0` retires the compose agent and `compose:*` skills from bundled `mimocode-docs` content, the TUI tips and `gpt.txt`; upstream `463cbb28` documents harness-injected `<system-reminder>` content in the provider prompts. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/` suites pass.
+
+- 2026-10-10 synchronization: upstream `a4b06963` replaces the `_CLAUDE_IMPORT` disable toggle in bundled `mimocode-docs/reference/config.md` with an `MIMOCODE_ENABLE_CLAUDE_IMPORT` entry: startup import of Claude Code sessions is off by default, manual session imports remain, and Codex sessions are imported only on request. Upstream `f98dcd1c` gives the `xlsx-official/create.md` library-choice table's combined row its own Library cell. Both are adopted unchanged; the fork's harness, compaction and `auto_worktree` additions to `config.md` are untouched, and `test/skill/mimocode-docs.test.ts` and `test/skill/builtin.test.ts` pass.
+
+- 2026-08-28 review: adapted upstream PPTX image-sourcing guidance instead of
+  shipping unconditional `image_gen`, text-only WebFetch, or unchecked curl
+  claims. Actor help also distinguishes reusable actors from completed
+  ephemeral full-context actors.
+
+- 2026-09-01 tools-guidance review: adopted upstream's dynamic, action-oriented
+  default guidance after binding the `task` and `actor` lifecycle claims to the
+  shipped runtime and removing the incoming trailing whitespace. The static
+  tool inventory was retired from this prompt without changing registry or
+  permission behavior.
+
+- 2026-09-02 Compose Next review: adopted upstream's workspace-first ordering
+  from `6972b3290415f5e87e859e6b38f3c212f091e8e5`. Workspace now owns the
+  active workspace before Spec writes its durable document there; without-spec
+  and missing-document finalize paths remain conditional. This is bundled
+  workflow guidance and does not widen file, worktree, or publication authority.
+
+- 2026-09-07 selected-capability review: actor help documents explicit
+  persistent full-context creation, constrained resume, successful idle status
+  and cancellation release. Bundled configuration guidance describes
+  `harness_model`; these instructions do not widen runtime permission or
+  restore public actor/task recovery selectors.
+
+- 2026-09-11 PDF-gate review: the read tool now refuses a PDF when the active
+  model declares no `pdf` input support and names the bundled skill by path —
+  `<builtinSkillRoot()>/pdf-official/SKILL.md`. That is factually correct here:
+  the fork ships `pdf-official` in the same bundle under the same
+  `OFFICIAL_SKILL_NAMES` / `MIMOCODE_DISABLE_OFFICIAL_SKILLS` opt-out as
+  upstream, so no fork-facing rewrite is needed. This is a runtime message, not
+  bundled content; the guidance content snapshot is unchanged.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+### FC-012 (7 notes)
+
+- 2026-11-06 synchronization: adopt upstream `3a12665a9e27789b04dc7529d4ce0c10128e9ad8`’s non-interactive workspace-trust warning, headless approval description and trust-bypass scope row. Keep fork-only vulnerability handling separate from upstream’s reporting channels. FD-001 still owns invocation-scoped approval; no permission implementation changes. See [the C01 record](upstream-sync-2026-11-06.md).
+
+- 2026-10-27 synchronization: launcher extraction adopts upstream `tarCommand()`: on Windows prefer the existing absolute system tar, then fall back to PATH; other platforms still use PATH tar. Release URL/checksum/cache and staged-run behavior are retained. Adopt the README download links and desktop screenshots while preserving fork routing. See [the four-capability record](upstream-sync-2026-10-27.md).
+
+- 2026-10-26 synchronization: adopt upstream's `0.1.16` across the four workspace manifests and `bun.lock` (`d3c71e33`), and `b8dbe084`'s tag release that builds after typecheck and lint without rerunning unit tests, with `script/fds-upload.ts` defaulting to the external `cnbj1.fds.api.xiaomi.com` endpoint (`MIMO_FDS_ENDPOINT` still overrides). `GH_REPO` remains required and fork-scoped. A fork tag therefore depends on the exact-SHA branch CI of the tagged commit. No publishing stage ran during this sync. FC-019's patched quickjs versions are unchanged by the bump.
+
+- 2026-10-20 synchronization: adopt trusted-publisher `--allow-publish` and a preflight stage before npm/GitHub publication. The preflight checks SDK/plugin/CLI tarball name and version and proves an FDS signed canary write. Keep `GH_REPO` mandatory and scoped to the fork; the upstream-owned npm trust configuration is not authority to publish fork work there. A passing preflight is neither a release rollback transaction nor proof that every later publication stage succeeded. No publishing stage is invoked during synchronization validation.
+
+- 2026-10-13 synchronization: upstream `4a5e2140` replaces the maintainer release scripts with CI stages in `script/release.ts` run by `release.yml` on a pushed tag. The fork adopts the stages and keeps `GH_REPO` required: the `github` stage throws before any `gh` call when it is unset, so a fork release can never fall back to the `upstream` remote. `release.yml` itself sets `GH_REPO` from `github.repository`. The npm trusted-publisher setup still names upstream's repository and applies only to upstream's packages.
+
+- 2026-10-02 synchronization: upstream `327f5b63` makes `script/release.ts` default `GH_REPO` to `XiaomiMiMo/MiMo-Code`, which would aim an unconfigured fork release at the read-only upstream. The fork keeps `GH_REPO` required, with no default, and adopts the rest of the `.env` release flow. Upstream `698f0f29` removes the `CLAUDE.md` → `AGENTS.md` symlink; the fork keeps it so Claude Code sessions load the same routing conventions as other agents.
+
+- 2026-09-02 release review: adopted upstream's synchronized `0.1.14` version
+  across all sixteen workspace package manifests and `bun.lock`; fork-only
+  publication destinations and branch routing remain unchanged.
+
+### FC-013 (13 notes)
+
+- 2026-11-26 alignment review: upstream's `MIMOCODE_EMPTY_STEP_DROP_LIMIT` (`flag/flag.ts`, from `942de16e`) has no reader here. Upstream uses it to bound consecutive `dropEmptyAssistant` drops; the 2026-11-13 synchronization (C04) adapted that bound into the count-bounded `emptyOutput` budget and the background system-agent cap instead, so `dropEmptyAssistant` and its counter are absent. The definition stays byte-identical to upstream, so setting the variable has no effect. A synchronization that brings back a reader must decide which bound governs.
+
+- 2026-11-13 synchronization: adopt live `rawFinish` propagation and `StreamIncompleteError` for a stream ending with unified `other` and no provider finish reason. This error uses bounded stream recovery, distinct from a complete pure-empty response's `emptyOutput` budget. Preserve request/candidate/judge scope precedence, the system-agent cap, tool-side-effect replay guards and main-only retry publication. Non-GPT reasoning-only output retains scoped bounded continuation; upstream's global reasoning-only-final policy is not adopted. Historical raw-less `other` messages remain readable by content, and MaxMode excludes live incomplete candidates while retaining raw finish on accepted replay.
+
+- 2026-11-11: pure-empty `InvalidOutputError` retries under its own `emptyOutput` budget instead of the server budget, superseding the 2026-10-22 persistent pure-empty budget for main and ordinary actors. `decide` still reports `kind: "server"` and adds `emptyOutput: true`; `budgetFor` routes that flag to `config.emptyOutput` after the scope (request, max-candidate, max-judge), host-class, network and rate-limit checks, so retry parts, status events and the SDK `kind` enum are unchanged. Default: bounded, `EMPTY_OUTPUT_MAX_RETRIES` (8) retries, no wall-clock deadline, server delays (2 s doubling to 30 s). `retry.server` no longer affects empty output; `retry.emptyOutput` (global or `provider.<id>.retry`) configures it, and `mode: "persistent"` restores the previous behavior. Exhaustion ends the turn with `InvalidOutputError` and keeps the retry record (existing processor path). The system-agent cap still applies on top. Why: the request was accepted, so every empty attempt is billed. In production (2026-11-03..11, main and ordinary actors, one gateway), 9 of 12 recovered streaks recovered within 8 retries, while 26 unrecovered streaks averaged 22 retries (up to 51) before a cancel or a newer input ended them; one main turn spent 33 retries in 17 minutes on a 322K-token context. Upstream (`XiaomiMiMo/MiMo-Code`) keeps empty output on the persistent server budget. Evidence: `test/session/retry.test.ts` "InvalidOutputError retries under the bounded emptyOutput budget, not the server budget" (defaults, persistent-server independence, opt-in persistence, provider precedence, scope precedence) and "policy gives up on endless empty output after the emptyOutput count" (stops after `EMPTY_OUTPUT_MAX_RETRIES + 1` attempts under a persistent server budget); `test/session/invalid-output-continuation.test.ts` "endless empty output stops at the default bound even under a persistent server budget" makes `EMPTY_OUTPUT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`. With the `budgetFor` routing removed, the integration test reaches the late scripted answer (12 requests instead of 9) and both unit tests fail on their assertions. The endless-retry cancellation test and the system-agent test now opt into `emptyOutput: { mode: "persistent" }` explicitly. Configs that bounded empty output through `retry.server` stop doing so: the two processor cleanup cases in `test/session/processor-effect.test.ts` and the checkpoint-writer failure case in `test/actor/spawn.test.ts` now set `retry.emptyOutput` instead.
+
+- 2026-11-02: background system agents (`SYSTEM_SPAWNED_AGENT_TYPES`: checkpoint writer, dream, distill) retry within a bounded budget whatever the configured mode: at most `SYSTEM_AGENT_MAX_RETRIES` (4) retries within `SYSTEM_AGENT_RETRY_DEADLINE_MS` (5 min), keeping the class's delays (`SessionRetry.boundForSystemAgent`, passed as the stream policy's `cap`, which applies after the network and persistent-host constraints that otherwise reset a budget to persistent, and in the request ladder of `llm.ts`). They get another chance on their own schedule (the next checkpoint threshold or pass), so a persistent budget only held their slot. In production a checkpoint writer whose model kept returning empty output retried for about 21 hours, held the writer slot and froze the parent's checkpoint watermark. Main and ordinary actors keep the 2026-10-22 persistent pure-empty budget. Evidence: `test/session/invalid-output-continuation.test.ts` "checkpoint-writer gives up on endless empty output within its bounded budget" makes `SYSTEM_AGENT_MAX_RETRIES + 1` requests and ends with `InvalidOutputError`; without the bound it keeps retrying until the scripted answer. `test/session/retry.test.ts` "a system-agent cap bounds network and persistent-host retries" stops an `ECONNRESET` and a persistent host error after 4 retries, and fails when the cap is applied before those constraints. "checkpoint-writer bounds request retries before provider output even when configured persistent" sends 503 under persistent request and server budgets and stops after `(SYSTEM_AGENT_MAX_RETRIES + 1)²` requests (each bounded processor attempt runs a bounded request ladder); without the request-ladder cap it reaches the scripted answer.
+
+- 2026-10-28 quota synchronization: adopt terminal handling for complete HTTP429/code429/type limitation/exact quota exhausted signals in SessionRetry.decide, independent of provider identity and preserved through serialization. Host decisions retain precedence; SDK normalization is unchanged. Adapt the incoming ordinary429 test to the existing bounded request budget and persistent live-step rate-limit budget. Classification and all other retry contracts remain unchanged; see [C01](upstream-sync-2026-10-28-ebd06ee2.md).
+
+- 2026-10-22 live advancement: pure-empty InvalidOutputError uses the persistent server live-step budget, with explicit bounded overrides and cancellation still effective. The retrySafe/tool-residue/non-length/non-structured guards remain; reasoning-only output keeps bounded actor-scoped continuation and atomic provenance. Request and stream retries persist per-actor records, while global status and RetryAttempt stay main-only; ephemeral/quiet MaxMode scopes remain isolated. Summary retry/fallback ownership remains under FD-010/011/012.
+
+- 2026-10-21 synchronization: upstream `8fd65328` checks `retryConstraint(error) === "terminal"` before the `exhausted`/`unavailable` capacity heuristic in `decide`. HTTP403 membership and subscription-quota refusals and HTTP402 balance refusals now make one request and settle as an assistant API error instead of persistent server recovery. The fork had the same order, so the moved line is the whole change. Budget resolution, scope isolation and main-only publication are unchanged. Upstream `a7440d13` also changes the empty-attempt cleanup that the 2026-10-20 bullet below describes: the assistant identity is kept and only its parts are removed (FC-009). Evidence: `title-first-turn.test.ts` TP-REFUSAL-01, `retry.test.ts`, `test/error/host-registry.test.ts`.
+
+- 2026-10-20 post-sync correction: the processor's stream retry callback now
+  applies the main-agent boundary to both retry status and `RetryAttempt`
+  publication. The earlier code guarded only status, so ordinary actor
+  pure-empty retries could emit session-global events despite this contract.
+  HTTP/SSE fixture regressions check successful main and actor retries,
+  main status/event publication and the absence of both for the actor.
+
+- 2026-10-20 synchronization: classify `InvalidOutputError` as retryable unknown and let `SessionRetry.policy` own a genuinely empty conversation attempt only when it is replay-safe, tool-free, non-structured and not a length finish. Remove the empty attempt and recreate its assistant shell before retry; exhaustion persists the terminal error, and no repair user is injected for this clean case. Reasoning-only output, incomplete checkpoint completion and tool/settlement residue retain fork bounded continuation and atomic source/task ownership rather than losing useful history or replaying side effects. Candidate/judge budgets, main-only retry publication and the MaxMode tool-free final step remain. Summary assistants remain under FD-010/FD-011/FD-012 and the separate compaction retry bound.
+
+- 2026-10-14 synchronization: upstream `002cb4c9` lets request-phase retries publish `session.status{retry}` through the processor's `setRetry`, and runner, loop and stream busy writes no longer replace a retry row. Adopted for durable main requests only, keeping the fork's main-only `RetryAttempt` guard and status lock. The visible attempt now continues across phases (request 1, stream 2) while `phaseAttempt` restarts; subagent and ensemble retries stay out of session status. Evidence: `test/session/processor-effect.test.ts`, `status-retry-map.test.ts`, `retry-density-invalid-baseurl.test.ts`.
+
+- 2026-10-13 upstream PR record: `XiaomiMiMo/MiMo-Code#1871` (honor `toolChoice` on MaxMode's final step, opened 2026-07-23) is withdrawn. Upstream's `useMaxMode` gate still lacks the `!isLastStep` term, so the behavior remains fork-only under this entry's final-step contract; the PR predates the `packages/cli` rename and is not resubmitted. Its head branch `fix/maxmode-laststep-toolchoice` is deleted from the fork.
+
+- 2026-10-02 synchronization: upstream `ac04af98` deletes `docs/architecture/retry-coordinator.md` with its other non-spec documents. The fork rewrote that file as this entry's retry-policy and configuration reference, so it stays as fork documentation.
+
+- 2026-09-17 synchronization: Retain bounded server/rate-limit defaults and scope-first request/candidate/judge budgets against upstream persistent defaults. Adopt expanded transport classification and processor-owned visible retry status. Request retries publish diagnostics only for durable main requests; ensemble calls suppress that diagnostic stream. Jitter precedence, bounded network fallback, immutable instructions, side-effect replay guards and MaxMode final-step enforcement remain.
+
+### FC-015 (11 notes)
+
+- 2026-10-30 synchronization: Adopt boundary-model summary selection and failed/interrupted cleanup without changing chronological tails, pending external admission or frozen-prefix sizing. Compat retains active-only frozen tool membership and its tail budget under DC-CONTEXT-001.
+
+- 2026-10-21 synchronization: upstream `6f83cd0e` stops rewriting persisted parts to shrink context. Turn-end prune and `stripNonEssential`, `SessionCompaction.prune`, rebuild-time microcompact, `Overflow.pressureLevel`/`contextPressureLevel`, the `compaction.prune` key and `MIMOCODE_DISABLE_PRUNE` are removed; a config that still sets `compaction.prune` loads with one warning. Adopted unchanged; the fork's `observedToolParts` protection inside `SessionCompaction.prune` retires with that function. Rows already marked `time.compacted` still project the cleared placeholder. Checkpoint thresholds keep resolving against `usable()`, and the ratio trigger, bounded projection, frozen prefix and `toolChoice: "none"` are unchanged. The fork keeps `auto_worktree` in `normalizeLoadedConfig`; only the prune hunk is taken from that conflict. Evidence: `test/session/turn-end-lossless.test.ts`, `rebuild-boundary-lossless.test.ts`, `legacy-compacted-row.test.ts`, `overflow.test.ts`, `test/config/config.test.ts`.
+
+- 2026-10-16 synchronization: upstream `bf0563dd` copies every non-`compaction` part verbatim in the overflow replay, including media `file` parts, so the replayed user message and the next model turn keep the image; the summarization request still strips media under overflow. Adopted into the fork's atomic replay commit without touching the bounded projection, ratio trigger, frozen prefix reuse or FD-011's `toolChoice: "none"`. Evidence: `test/session/prompt-effect.test.ts` (keeps replayed media), `test/session/compaction-projection.test.ts`, `test/session/compaction-reasoning-fallback.test.ts`, `test/session/compaction-tool-choice.test.ts`.
+
+- 2026-09-15 shared chronological projections: rebuild tails, recovery usage,
+  checkpoint context and persisted loop-streak spans resolve actual message
+  positions rather than lexical ID ranges. Missing/reversed checkpoint bounds
+  retain live messages through both context filtering and later tail collapse;
+  the transient invalid range is not written back to storage. TUI buckets use
+  the same `(created, UTF-8 ID)` order and undo hydration follows pagination
+  through its exact boundary, preserving that boundary during live updates.
+  After authoritative single-session or list updates clear revert, each actor
+  bucket returns to its normal 100-message limit and all evicted cached parts
+  are removed. Normal message upserts likewise remove the entire excess prefix.
+  Active revert still retains hydrated history; the real SyncProvider event and
+  bootstrap regressions in `test/cli/tui/revert-cache.test.tsx` cover this change.
+  Main's existing footer compares a locally resolved watermark and remains
+  pending when it cannot resolve one. The extra checkpoint-coverage HTTP/SDK
+  and TUI cache protocol stays owned by DC-CONTEXT-001 on compat.
+  Additional carriers: `session/session.ts`, `message-v2.ts`, `checkpoint.ts`,
+  `tail-digest.ts`, `revert.ts`, `prompt/loop-streak.ts`, shared UTF-8 ordering,
+  and TUI sync/session/model utilities. Real SQL pagination, atomic admission,
+  composed projection and TUI state-helper tests bind these paths; no
+  interactive terminal playtest is claimed.
+
+- 2026-09-15 concurrent admission review: pending external requests are scoped
+  by session and actor until their message and parts commit or admission ends.
+  Compaction waits for that actor's pending admissions before and after inserting
+  an automatic continuation; a newer committed request removes the exact stale
+  continuation and its parts. Failed/interrupted admission releases the wait,
+  and another actor's pending request does not block this actor. Snapshot tails
+  use message identity and the actual chronological endpoint rather than an
+  array length shared across different views. Real MCP gates cover pre-insert,
+  post-insert, failure, cross-actor and interruption paths, including a second
+  compaction while a cancelled resource remains unresolved. No additional tool
+  authority or compat preflight policy is introduced.
+
+- 2026-11-21 synchronization: compaction is the third `getFrozen` consumer.
+  Its projection suppresses historical generated catalogs and preserves current
+  reminder metadata; its system excludes the retired catalog. The next context
+  window receives an entry reminder. Ratio-only triggering, bounded projection,
+  summary recovery/retry and `toolChoice: "none"` remain intact (FD-010/011/012).
+
+- 2026-08-28 review: adopted the explicit empty checkpoint threshold ladder
+  from upstream's fixture retune, but rejected its 50K usage and flat-ratio
+  explanation because both would hide removal of the reserve boundary.
+
+- 2026-09-02 generated-contract review: adopted the missing published
+  `CompactionPart.projection` schema and the deprecated `tail_turns` description
+  by regenerating from fork source. The `preserve_recent_tokens` description
+  retained the then-current at-most-40K plus reserve-safe effective-window bound.
+
+- 2026-09-08 policy adjustment: supersedes the retained reserve trigger from
+  the 2026-08-27/28 reviews at the user's request. The 33K and 20K constants
+  came from upstream; the fork had retained the old cutoff when upstream moved
+  to the ratio. No fork feature was identified as requiring that extra cutoff.
+  The projection description now refers to the ratio trigger, and the buffer
+  description explicitly limits its role to configured-budget validation.
+
+- 2026-09-08 PR #80 review follow-up: `/status` labels the ratio gap as
+  `headroom`, while the active Compose specification records the ratio formula
+  and marks former reserve formulas and live measurements as historical.
+
+- 2026-09-09 POLICY-02 review: registered/live-context recovery target selection,
+  task consistency and missing-binding admission are integrated at `6ff976a97026610335dc367d8875a87d1d91d1a7`.
+  The retained spawn task namespace, synchronous commit/ownership boundary and
+  metadata-only background updates preserve existing task and message sources.
+  HTTP/SDK/tool publication and actual provider/transaction regressions are
+  recorded in the shared history; no cross-restart recovery is introduced.
+
+### FC-016 (2 notes)
+
+- 2026-10-29 synchronization: upstream `3e92e0d8` makes `resolveCredentials` walk the Xiaomi family (token-plan clusters before `xiaomi`) when a configured family provider has no key, with per-cluster default base URLs. Adopted unchanged: credentials are chosen before any request starts, so Prompt ownership, stop/drain and grapheme offsets are unchanged. `test/cli/tui/voice.test.ts` covers the fallback beside the existing lifecycle cases.
+
+- 2026-10-21 synchronization: upstream `786151b3` changes the default voice control model to `xiaomi/mimo-v2.6-flash` (request fallback `mimo-v2.6-flash`); ASR stays on `mimo-v2.5-asr`. Adopted with the schema description and generated SDK text. Prompt ownership, stop/drain and grapheme offsets are unchanged; `test/cli/tui/voice.test.ts` covers the new default.
+
+### FC-017 (5 notes)
+
+- 2026-10-30 registry correction: the legacy retry-part normalization adopted on 2026-10-22 (below) joins the observable contract, watch surfaces, Tests/evidence and retirement condition. `packages/cli/src/session/retry-record.ts` and its read-boundary callers were already fork-different, but no entry named them, so a path-based sync review could not find them. No behavior changes.
+
+- 2026-10-22 live advancement: new retry records expose phase/scope/kind/message/next and both timestamps. Historical schema-valid error-based retry rows normalize at hydration, import and replay boundaries without weakening the public schema or editing shipped SQL. Legacy message and response content remain searchable through bounded NUL-safe projections; export redacts the resulting message. Replay normalizes the original event object before storage and publication. Reverse-ID and UTF8 tie-break tests enforce parent chronology and actor/session isolation.
+
+- 2026-10-14 synchronization: upstream `6ba6a625` makes the shipped `20261011000000_history_fts_kind` and `20261012000000_history_cjk_unigram` migrations replay-safe (`CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`) and routes `Database.Client()` through `migrateReplaySafe`. Adopted unchanged: both migrations are upstream-owned and were byte-identical to upstream, the edits change no schema, and drizzle selects migrations by journal name, so the AGENTS.md rule against editing shipped migrations (which protects applied journals) is not engaged. FC-017's projection, media and preview bounds are untouched. Evidence: `test/history/fts-kind-idempotent.test.ts`, `test/history/fts-kind-boot.e2e.test.ts` and every other `test/history/` file.
+
+- 2026-10-13 synchronization: upstream `5f55525c` restores `history_fts.kind` with a dual-column body/body_idx index, two new migrations and a background re-extract. The merge is clean and touches neither `projection.ts` nor `media.ts`; NUL, preview-budget and attachment-locator tests in `test/history/` pass.
+
+- 2026-09-17 synchronization: Adopt shared tool-result previews and resumable migration version 6, including legacy chunk deduplication and Node SQLite query planning. Projection/media retain the registered SQL NUL, field/list budget and attachment-locator rules. This index preview is separate from raw history retrieval.
+
+### FC-023 (1 note)
+
+- 2026-11-02: rebuild boundaries kept the model but dropped the variant. After
+  every checkpoint rebuild, inbox deliveries copied the boundary's model and ran
+  at the default, and reopening the session showed no variant. In one
+  multi-agent workspace five sessions lost `max` or `xhigh` this way at their
+  first rebuild and never got it back.
+
+### FC-024 (1 note)
+
+- 2026-11-16 synchronization: a still-live run in this process survives controller/Instance replacement and is excluded from same-epoch crash reconciliation. Stale-epoch fencing still cancels input. Actual orphaned consumed claims retain `interrupted`, unconsumed claims `never_ran`; crash fixtures explicitly withdraw their live marker, and the new live/orphan mixed regression runs alongside the consumed-outcome case.
+
+### FC-036 (1 note)
+
+- 2026-11-07 sizing change: on a coordinator session whose code-mode tool
+  stores nested traces, stored parts were about three times the rendered
+  request (3 hours: 12.9 MB stored, 6.3 MB of it tool metadata and 2 MB
+  reasoning metadata). Sizing the stored parts sent 9 of 54 writers a day to a
+  parent-model fork at about eight times the configured writer's cost, while
+  the rendered parent view was about 600 KB. "fork:false sizes the delta by the
+  writer's rendered request, not the stored parts" fails when the check goes
+  back to the stored parts.
+
+### FC-042 (1 note)
+
+- 2026-11-04 reminder synchronization (`10b03cf0`, validated): `isBoundedComputation` moves earlier in the loop so session-environment injection uses the same `native && hidden` predicate. The processor's `compactsOnUsage: !isBoundedComputation`, provider-overflow termination and step budgets are retained.
+
+### FC-050 (1 note)
+
+- 2026-11-13 synchronization: adopt the unified environment from `e3592f0e`, which no longer renders Claude-specific git status or recent commits. The production status-generation deviation retires. Keep `GitStatusPrompt.oversized` and `SessionPrefixSnapshot.get` recovery for historical persisted prefixes until such data no longer needs to be read.
+
+### FC-053 (1 note)
+
+- 2026-11-13 synchronization: adopt declared model output limits, sampling and effort capabilities from `c9c91d7b`, including the 128K missing-output default and removal of name-derived defaults. Preserve the three FC-053 routing/options corrections and FC-025 Grok operation flattening. Tests now declare their effort lists explicitly; actual Responses requests prove configured/small effort, encrypted reasoning and explicit opt-out. An `xhigh` config on the pinned xAI adapter is explicitly rejected before any HTTP request; no silent downgrade or dependency upgrade is introduced.
