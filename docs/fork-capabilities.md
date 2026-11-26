@@ -42,6 +42,8 @@ Path note: living registry entries use the `packages/cli/` and `packages/sdk/` l
 
 Earlier synchronization summaries (35, from the 2026-09-15 specified range through the 2026-11-04 `10b03cf0` sync) moved verbatim to [the shared history](fork-registry-history.md#2026-11-07-registry-normalization); the linked synchronization records remain authoritative.
 
+The dated notes that entries carried through 2026-11-26 (178 notes and one superseded FC-007 paragraph) moved verbatim to [the shared history](fork-registry-history.md#2026-11-26-registry-consolidation-fc-dated-notes). Rules from them that are still in force were folded into each entry's fields. Later reviews add new dated notes at the top of an entry; a later consolidation folds them the same way.
+
 ## Sync index
 
 | ID     | Watch surfaces                                                                                            | Upstream relationship                                            | Required decision                                                                        |
@@ -1514,7 +1516,8 @@ own source list remains the complete watch surface.
   removal waits for `server.instance.disposed` from the owning instance before
   deleting the directory; after one hour it releases the listener and reports a
   cleanup failure. Reclaim logs a worktree-removal defect and still persists
-  and publishes the original outcome; pure interruption propagates. Default-path validation, including
+  and publishes the original outcome; pure interruption propagates.
+  Default-path validation, including
   upstream-sync regressions, clears ambient `MIMOCODE_EXPERIMENTAL`,
   `MIMOCODE_MCP_TOOL_SEARCH` (which replaced
   `MIMOCODE_EXPERIMENTAL_MCP_TOOL_SEARCH` on 2026-10-13), and
