@@ -4489,39 +4489,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       parentMessageID: MessageID
       sessionBusy?: boolean
       force?: boolean
-      /** Default true: keep error-marked empty shells for recovery; user-resume pre-clean passes false. */
       preserveError?: boolean
+      exceptMessageID?: MessageID
     }) {
       const busy = input.sessionBusy ?? (yield* status.get(input.sessionID)).type !== "idle"
       const preserveError = input.preserveError ?? true
       const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
       const removed: MessageID[] = []
-      let skippedLive = 0
-      let skippedError = 0
       for (const msg of msgs) {
         if (msg.info.role !== "assistant") continue
         if (msg.info.parentID !== input.parentMessageID) continue
+        if (input.exceptMessageID && msg.info.id === input.exceptMessageID) continue
         if (!isEmptyAssistantResidue(msg.info, msg.parts)) continue
-        if (preserveError && msg.info.error) {
-          skippedError += 1
-          continue
-        }
+        if (preserveError && msg.info.error) continue
         const liveOwned = !input.force && busy && !msg.info.error && !("completed" in msg.info.time)
-        if (liveOwned) {
-          skippedLive += 1
-          continue
-        }
+        if (liveOwned) continue
         yield* sessions.removeMessage({ sessionID: input.sessionID, messageID: msg.info.id })
         removed.push(msg.info.id)
       }
-      if (removed.length > 0 || skippedLive > 0 || skippedError > 0)
-        elog.info("empty-residue-assistants-cleanup", {
-          sessionID: input.sessionID,
-          parentMessageID: input.parentMessageID,
-          removed,
-          skippedLive,
-          skippedError,
-        })
       return removed
     })
 
@@ -4766,10 +4751,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      /** user-resume: force a new turn from the parent user; step-0 skips classify of old siblings. */
       userRedispatch?: boolean,
+      /** Prompt source of this turn; "hook" must never re-enter uncommitted-hint. */
       turnSource?: "user" | "spawn" | "hook",
+      /**
+       * [R003/D16f] Locked parent user for user-resume first step. When set on step 0,
+       * lastUser must be this message (not silently replaced by a newer inbox/steer user).
+       */
       parentUserID?: MessageID,
+      /**
+       * [R003] When true, parent must remain the slice tail (no later user/assistant).
+       * Trailing-user resume sets this; empty-shell user-resume allows completed siblings.
+       */
       strictParentTail?: boolean,
+      /**
+       * Inbox claim frontier (C-01). Mid-turn pickup of a newer user requires
+       * extendClaim before treating `id > claimFrontier` as part of this run.
+       */
       claimFrontier?: MessageID,
       claimOwner?: ClaimOwner,
     ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
