@@ -1824,6 +1824,8 @@ own source list remains the complete watch surface.
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
 
+- 2026-11-26: the bundled `mimocode-docs/reference/config.md` row for `harness_model` still said the field drove "automatic harness inference", which the 2026-11-13 synchronization removed (FD-005). It now matches the config schema description: a legacy compatibility field that does not select the harness or change the API model or transport. `test/skill/mimocode-docs.test.ts` and `test/skill/builtin.test.ts` pass.
+
 - Status: active process/content contract
 - Canonical owner: fork `main` prompt and bundled-skill content
 - Observable contract: the default native prompt tells models to use only the
