@@ -429,16 +429,6 @@ function compactExecSubPart(part: ExecSubPartSnapshot): ExecSubPartSnapshot {
   if (["bash", "exec_command"].includes(part.tool)) {
     retain(input, "command", args.command ?? args.cmd)
     retain(metadata, "exit", meta.exit)
-    if (Array.isArray(meta.mainWorktreeHits)) {
-      const hits: string[] = []
-      metadata.mainWorktreeHits = hits
-      for (const hit of meta.mainWorktreeHits.slice(0, 32)) {
-        if (typeof hit !== "string" || hit.length > MAX_SUB_PART_EVIDENCE_BYTES) continue
-        hits.push(hit)
-        if (Buffer.byteLength(JSON.stringify(evidence), "utf8") > MAX_SUB_PART_EVIDENCE_BYTES) hits.pop()
-      }
-      if (!hits.length) delete metadata.mainWorktreeHits
-    }
     if (part.state.output) retain(evidence, "output", normalizeResult(part.state.output))
   }
   if (

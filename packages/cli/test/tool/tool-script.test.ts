@@ -20,7 +20,6 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { buildFileManifest } from "../../src/session/compaction"
 import { TryBestMonitor } from "../../src/session/try-best-detector"
-import { sessionMutatedMainWorktrees } from "../../src/tool/auto-worktree-hint"
 
 describe("sandbox non-deterministic mode", () => {
   test("deterministic:false keeps Date and Math.random", async () => {
@@ -565,7 +564,7 @@ describe("exec", () => {
               Effect.succeed({
                 title: "shell",
                 output: args.command === "bun test" ? "test failed" : "updated",
-                metadata: args.command === "bun test" ? { exit: 1 } : { exit: 0, mainWorktreeHits: ["/repo"] },
+                metadata: args.command === "bun test" ? { exit: 1 } : { exit: 0 },
               }),
           },
         ],
@@ -608,7 +607,6 @@ describe("exec", () => {
       })
       const messages = [{ info, parts: [part] }]
       expect(buildFileManifest(messages, { worktree: "/repo" })).toContain("changed.ts (written)")
-      expect(sessionMutatedMainWorktrees(messages)).toEqual(["/repo"])
       expect(new TryBestMonitor().consume(part)?.reason).toBe("bash_retry")
       expect(Buffer.byteLength(JSON.stringify(result.metadata.sub_parts))).toBeLessThanOrEqual(256 * 1024)
       expect(JSON.stringify(result.metadata)).not.toContain(image.url)

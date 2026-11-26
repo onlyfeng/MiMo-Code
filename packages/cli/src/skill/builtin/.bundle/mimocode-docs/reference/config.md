@@ -162,7 +162,6 @@ The trigger is `floor(effective window × ratio)`, with a default ratio of 90%, 
 |-----|---------|
 | `autoupdate` | `true` / `false` / `"notify"` |
 | `snapshot` | Filesystem snapshot tracking for undo/redo (default true) |
-| `auto_worktree` | Auto-Worktree Notice on main-worktree writes (default false) |
 | `logLevel` | Log verbosity |
 | `server` | Config for `mimo serve` |
 
