@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-25. Audited `81a37ab596e5ee4d086697df81731a06817e2237..c538fab349373356623acea5bb80defa7fc279c0`: upstream pull request #2863 (always-direct MCP tools in server status and reminders) through this synchronization, and compat pull request #272 (DC-RESOURCE-001) merged since the previous review.
+- Last reviewed: 2026-11-26. Audited `c538fab349373356623acea5bb80defa7fc279c0..6ad6bbb44acb3600ccc4c09ab3c64c79f5878593`: upstream pull request #2867 (closed image attachment reminder) through this synchronization. No compat pull request merged since the previous review; the `main` alignment review (#273–#278) reached compat through its own propagations.
 
-- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-25.md).
+- Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-26.md).
 
-- Starting main: `f1d3628423da4ebc3c9e5c3739f9b321d4bdbf10`. Starting compat: `2ce781c493580987723acbbfb7bc3c9addf43ec7` (already containing that `main`). Main runtime snapshot: `b9499a965e10f906f2a2ead5e0698e243cd0ce54`. Compat runtime snapshot: `c70dfa435437a0dd49a4d60aa5946d02cffb227c`.
+- Starting main: `92d3b8d44902533ccfe15d4e470a279fdf412d75`. Starting compat: `d8d14a2972182440a6f022f24dbdc01e30ec162d` (already containing that `main`). Main runtime snapshot: `d1039edaa94528da317b8668a2e244ec5fa98c9b`. Compat runtime snapshot: `75e37ed2f052e20f7b14a98caee44e7baaed1cf0`.
 
-- Result: inherit always-direct MCP tools in readiness, server reminders, the `mcp_tool_search` status and the `mcp_tool_use` rejection, with FC-004's replay validation of `directToolNames`, through a clean merge. Compat-owned `prompt.ts` hunks do not touch the readiness, reminder or dispatcher regions; `mcp-tool-search.ts` is identical to `main`. DC-RESOURCE-001's `ripgrep.ts` and TUI renderer surfaces are untouched by the incoming change. All DC owners are unchanged.
+- Result: inherit the closed `<system-reminder>` for user image attachments and the legacy-only read-time envelope reorder (FC-009) through a clean merge. DC-CONTEXT-001 watches `prompt.ts` and `message-v2.ts`; its compat-owned hunks there lie outside the envelope and `orderUserParts` regions, and preflight sizes image attachments from their pixel dimensions, not from the reminder text. All DC owners are unchanged.
 
-- Validation: root `bun typecheck` passes; root lint reports 0 errors. `test/tool/mcp-tool-search.test.ts`, `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts` and `test/session/codex-compact.test.ts`: 326 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-25.md#publication).
+- Validation: `bun run typecheck` in `packages/cli` passes; root lint reports 0 errors. 16 focused files, including `test/session/overflow.test.ts` for DC-CONTEXT-001 image sizing: 705 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-26.md#publication).
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 

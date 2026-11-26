@@ -5688,3 +5688,17 @@ This superseded current-review block is retained as history. The 2026-11-24 prop
 - Validation: root `bun typecheck` and SDK regeneration pass; root lint reports 0 errors. 110 focused files, including 35 compat-owned session, MCP, preflight and question suites: 1,773 pass, 0 fail on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-24.md#publication).
 
 This superseded current-review block is retained as history. The 2026-11-25 propagation of upstream `c538fab3` (always-direct MCP status) is recorded in [the shared sync record](upstream-sync-2026-11-25.md); compat runtime/test snapshot `c70dfa435437a0dd49a4d60aa5946d02cffb227c`.
+
+## 2026-11-25 always-direct MCP status propagation
+
+- Last reviewed: 2026-11-25. Audited `81a37ab596e5ee4d086697df81731a06817e2237..c538fab349373356623acea5bb80defa7fc279c0`: upstream pull request #2863 (always-direct MCP tools in server status and reminders) through this synchronization, and compat pull request #272 (DC-RESOURCE-001) merged since the previous review.
+
+- Scope: C01–C03 (N=3). See [the shared synchronization record](upstream-sync-2026-11-25.md).
+
+- Starting main: `f1d3628423da4ebc3c9e5c3739f9b321d4bdbf10`. Starting compat: `2ce781c493580987723acbbfb7bc3c9addf43ec7` (already containing that `main`). Main runtime snapshot: `b9499a965e10f906f2a2ead5e0698e243cd0ce54`. Compat runtime snapshot: `c70dfa435437a0dd49a4d60aa5946d02cffb227c`.
+
+- Result: inherit always-direct MCP tools in readiness, server reminders, the `mcp_tool_search` status and the `mcp_tool_use` rejection, with FC-004's replay validation of `directToolNames`, through a clean merge. Compat-owned `prompt.ts` hunks do not touch the readiness, reminder or dispatcher regions; `mcp-tool-search.ts` is identical to `main`. DC-RESOURCE-001's `ripgrep.ts` and TUI renderer surfaces are untouched by the incoming change. All DC owners are unchanged.
+
+- Validation: root `bun typecheck` passes; root lint reports 0 errors. `test/tool/mcp-tool-search.test.ts`, `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts` and `test/session/codex-compact.test.ts`: 326 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-25.md#publication).
+
+This superseded current-review block is retained as history. The 2026-11-26 propagation of upstream `6ad6bbb4` (closed image attachment reminder) is recorded in [the shared sync record](upstream-sync-2026-11-26.md); compat runtime/test snapshot `75e37ed2f052e20f7b14a98caee44e7baaed1cf0`.
