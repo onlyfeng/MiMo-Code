@@ -54,7 +54,7 @@ export const SessionTable = sqliteTable(
     time_compacting: integer(),
     time_archived: integer(),
     last_checkpoint_message_id: text().$type<MessageID>(),
-    // FC-007 retains the opt-in once-per-session notice receipt.
+    // Retain the inert column for older clients sharing this database.
     auto_worktree_hint_sent: integer({ mode: "boolean" }),
   },
   (table) => [

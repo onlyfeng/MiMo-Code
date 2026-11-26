@@ -20,11 +20,10 @@ import { runTurn } from "@/actor/turn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Bus } from "@/bus"
-import { TuiEvent } from "@/cli/cmd/tui/event"
+import { makeTerminalNotifier } from "./notification"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionRetry } from "@/session/retry"
 import { Inbox } from "@/inbox"
-import { renderActorNotification } from "@/inbox/render"
 import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { assistantFinalText, sessionErrorText } from "@/session/trajectory"
@@ -369,6 +368,7 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
     const plugin = yield* Plugin.Service
     const bus = yield* Bus.Service
+    const terminalNotifier = makeTerminalNotifier({ inbox, registry: actorReg, sessions: session, bus })
     const taskRegistry = yield* TaskRegistry.Service
     const executions = yield* ActorExecution.Service
     const scope = yield* Scope.Scope
@@ -395,25 +395,6 @@ export const layer = Layer.effect(
         }),
       )
       .pipe(Effect.ignoreCause)
-
-    const captureNotificationTarget = (instance: InstanceContext) =>
-      state
-        .withRunDisposal(
-          Effect.gen(function* () {
-            const disposal = yield* RunDisposal
-            const target = { instance, disposal }
-            if (rememberNotificationTarget(target)) return target
-            const existing = layerNotificationTargets.get(instance.directory)
-            if (existing && !isRunDisposing(existing.disposal)) return existing
-            return undefined
-          }),
-        )
-        .pipe(
-          Effect.provideService(InstanceRef, instance),
-          Effect.provideService(RunDisposal, { disposing: false }),
-          Effect.exit,
-          Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : undefined)),
-        )
 
     type FrozenContext = {
       context: ForkContext
@@ -555,22 +536,26 @@ export const layer = Layer.effect(
             if (isRunDisposing(source)) return
             if (!input.background || input.agentType === "checkpoint-writer") return
             if (input.notifyOnCompletion && !(yield* Deferred.await(input.notifyOnCompletion))) return
-            yield* withNotificationTarget(notificationTarget, Effect.gen(function* () {
+            yield* withNotificationTarget(notificationTarget, Effect.suspend(() => {
               const quiet = input.execution.groupAbort || input.generation.groupAbort
-              yield* inbox.accept({
-                receiverSessionID: input.parentSessionID,
-                receiverActorID: input.parentActorID ?? "main",
-                senderSessionID: input.sessionID,
-                senderActorID: input.actorID,
-                type: "actor_notification",
-                content: renderActorNotification({ actorID: input.actorID, description, status, ...extra }),
-              }, { deferKick: quiet, expectedEpoch: quiet ? undefined : input.expectedEpoch })
-              if (quiet) return
-              yield* bus.publish(TuiEvent.ToastShow, {
-                message: `Child "${description}" ${status}`,
-                variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+              return terminalNotifier({
+                sessionID: input.sessionID,
+                actorID: input.actorID,
+                actor: {
+                  background: input.background,
+                  agent: input.agentType,
+                  description,
+                  parentActorID: input.parentActorID,
+                },
+                parentSessionID: input.parentSessionID,
+                parentActorID: input.parentActorID,
+                source: "spawn",
+                status,
+                ...extra,
+                deferKick: quiet,
+                expectedEpoch: quiet ? undefined : input.expectedEpoch,
               })
-            }), source).pipe(Effect.ignoreCause({ log: "Warn", message: "actor terminal notification failed" }))
+            }), source)
           })
         // Delivery carriers, shared by the success and failure terminal writes.
         // A failed turn still publishes whatever it produced, so a later wait can
@@ -1256,6 +1241,7 @@ export const layer = Layer.effect(
       extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string } = {},
       source?: RunDisposalState,
       wake = true,
+      kind: "continuation" | "pending" = "pending",
     ) =>
       Effect.gen(function* () {
         const origin = source ?? (yield* RunDisposal)
@@ -1274,30 +1260,9 @@ export const layer = Layer.effect(
         if (!notificationTarget) return
         yield* withNotificationTarget(
           notificationTarget,
-          inbox.accept({
-            receiverSessionID: parentSessionID,
-            receiverActorID: actor.parentActorID ?? "main",
-            senderSessionID: sessionID,
-            senderActorID: actorID,
-            type: "actor_notification",
-            content: renderActorNotification({
-              actorID,
-              description: actor.description,
-              status,
-              ...extra,
-            }),
-          }, { deferKick: !wake }),
+          terminalNotifier({ sessionID, actorID, actor, parentSessionID, source: kind, status, ...extra, wake }),
           origin,
         )
-        if (!wake) return
-        yield* withNotificationTarget(
-          notificationTarget,
-          bus.publish(TuiEvent.ToastShow, {
-            message: `Child "${actor.description}" ${status}`,
-            variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-          }),
-          origin,
-        ).pipe(Effect.ignoreCause)
       }).pipe(Effect.catchCause((cause) => Effect.logError(`actor terminal notification failed: ${Cause.pretty(cause)}`)))
 
     const finishPersistentTurn = (
@@ -1392,6 +1357,7 @@ export const layer = Layer.effect(
                       : {},
                   source,
                   !owner.groupAbort,
+                  "continuation",
                 )
               }
             }).pipe(Effect.ensuring(lifecycleState.settleTerminal(owner)))

@@ -51,7 +51,7 @@ Earlier synchronization summaries (35, from the 2026-09-15 specified range throu
 | FC-004 | MCP configuration, connection state, and local exit diagnostics                                           | Explicit imported-server auto-connect plus fork hardening        | Preserve validation, redaction, and isolation                                            |
 | FC-005 | skill discovery and invocation                                                                            | Stronger shared gates                                            | Preserve permission parity                                                               |
 | FC-006 | plugin progress-checker configuration                                                                     | Fork integration hardening                                       | Preserve instance-local decision                                                         |
-| FC-007 | project roots, fixed instance cwd, Auto-Worktree notice, inert SDK event, optional context, Bash deletion | Shared fixed cwd and SDK compatibility plus fork safety boundary | Preserve exact path, mutation, and cwd boundaries                                        |
+| FC-007 | project roots, fixed instance cwd, inert SDK event, optional context, Bash deletion | Shared fixed cwd and SDK compatibility plus fork safety boundary | Preserve exact path, mutation, and cwd boundaries                                        |
 | FC-008 | workflow cleanup, detached Effect context, package test isolation, synchronization, and CI/reporting      | Runtime/process hardening                                        | Preserve bounds, scoped services, clean defaults, and fail-closed evidence               |
 | FC-009 | synthetic messages, text parts, and retry boundary                                                        | Adapted upstream stream/retry handling                           | Preserve provenance and prevent side-effect replay                                       |
 | FC-010 | WebFetch and SSRF destination classification                                                              | Adapted contract plus fork hardening                             | Preserve complete `fe80::/10` classification, per-hop authorization, and resource bounds |
@@ -113,6 +113,8 @@ condition; review the group together whenever upstream changes `actor/`,
 entry's own source list remains the complete watch surface.
 
 ### FC-001 — linearized actor generations and persistent-peer lifecycle
+
+- 2026-11-26 alignment review: `actor/spawn.ts` delivers terminal notifications through the shared `makeTerminalNotifier` (`actor/notification.ts`), as upstream's spawn does, instead of two hand-written copies. The fork keeps only its delivery target around the call: `withNotificationTarget` runs it inside the parent's Instance and run-disposal scope, and the caller's early background, system-agent, mode and disposal checks stay in place. The notifier takes the caller's `actor` (no registry read inside another Instance) and publishes its toast through the injected `Bus` service, so the toast reaches the Instance the delivery runs in. A resumed persistent turn now notifies as a `continuation`, without a toast, matching the woken-peer path (`test/actor/spawn-notification.test.ts`) and the 2026-09-15 note below; spawn-turn and cancel-owner deliveries keep their toasts. The unused `captureNotificationTarget` helper is removed.
 
 - 2026-11-26 alignment review: three upstream helpers ship here without a production caller, and their upstream tests exercise only the helper: `MessageV2.planResumeTrim` and `assertResumeModelBoundary` (unused since the 2026-10-14 note below; covered by `test/session/message-v2.test.ts` and one `test/session/processor-effect.test.ts` case), and `resolveCurrentAgent` in `server/routes/instance/session.ts` (covered by `test/server/summarize-route-main-slice.test.ts`). The fork's `/summarize` route goes through `SessionPrompt.startSummarize`, which repeats the main-slice lookup inline because it also needs that user's id and task. `test/server/summarize-agent-main-slice.test.ts` drives the real route with a newer user message on a subagent lane and requires the compaction boundary to carry the main slice's agent; reading the agent from every lane fails it on that assertion. A passing upstream helper test is not evidence for the fork's path.
 
@@ -1477,6 +1479,8 @@ own source list remains the complete watch surface.
 
 ## FC-007 — protected roots, fixed instance cwd, inert SDK event, deletion boundaries, and optional context
 
+- 2026-11-26 alignment review: the opt-in Auto-Worktree notice retires, adopting upstream `71a12699` (#2413), which removed the automatic isolation policy. The 2026-09-17 synchronization (C08) had kept the notice as a registered opt-in with no other rationale, and no known configuration enables it. Removed: `tool/auto-worktree-hint.ts`, the notice in `SessionPrompt` reminders, Bash's write and git-mutation detection with its `fileWrite`/`mainWorktreeHits` metadata, exec's retained `mainWorktreeHits` evidence, the `auto_worktree` config key and SDK field, the bundled `config.md` row, and the four notice/scan/bash-write/config suites. As upstream does, a config that still sets `auto_worktree` loads with the key dropped (`test/config/config.test.ts`), and `auto_worktree_hint_sent` stays as an inert column. The SSH timeout note (FC-032), deletion overlap checks and nested-record manifests are unchanged.
+
 - 2026-10-20 post-sync CI correction: CronBridge mounts now belong to the
   InstanceState generation that started them. A long-lived application Layer
   previously retained its scheduler after instance disposal, allowing it to
@@ -1520,14 +1524,7 @@ own source list remains the complete watch surface.
   CLI run reply. The existing temporary-only path remains separate and still
   passes through ordinary Bash/external-directory authorization.
   Optional context lookup supports pre-install state without weakening the
-  throwing accessor used by ordinary runtime paths. When explicitly enabled,
-  Auto-Worktree guidance is emitted only after a successful main-worktree
-  mutation, only for a primary root session, and only once per session; omitted
-  or false configuration remains silent. Detection consumes completed absolute
-  tool metadata and does not cache a pre-repository negative lookup. Validated
-  terminal nested exec effects retained within the snapshot budget feed the
-  same detector; exec_command evidence
-  is normalized to Bash and never bypasses its success/path checks.
+  throwing accessor used by ordinary runtime paths.
 - Upstream relationship: adopts the shared fixed-instance-cwd simplification
   and inert SDK event compatibility while retaining fork root and deletion
   safety hardening; FD-001 separately owns startup delete approval and the
@@ -1544,7 +1541,6 @@ own source list remains the complete watch surface.
   `packages/cli/src/tool/glob.ts`,
   `packages/cli/src/tool/grep.ts`,
   `packages/cli/src/tool/apply_patch.ts`,
-  `packages/cli/src/tool/auto-worktree-hint.ts`,
   `packages/cli/src/session/observed-tool-parts.ts`,
   `packages/cli/src/tool/session-cwd.ts`, and
   `packages/cli/src/tool/registry.ts`; TUI cwd context/sidebar/plugin API;
@@ -1558,9 +1554,6 @@ own source list remains the complete watch surface.
   generated-artifact review cover removal of the mutable cwd surface and prove
   the compatibility event is declared but never published; the removed
   upstream `session-cwd.test.ts` is not claimed as runtime evidence.
-  Auto-Worktree config, notice, Bash-write, and path-scan regressions cover the
-  explicit toggle, one-shot notice, real mutations, negative cache, and
-  completed apply-patch metadata.
   `test/tool/bash-delete-permission.test.ts` and
   `test/permission/auto-approve-delete.test.ts` under `packages/cli` cover
   the deny-first deletion path, dangerous-startup grant, and single deletion
@@ -2096,6 +2089,8 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
   behavior-focused tests.
 
 ## FC-011 — fork-facing model prompts and bundled skill guidance
+
+- 2026-11-26 alignment review: the `auto_worktree` row leaves bundled `mimocode-docs/reference/config.md` with FC-007's retired notice, matching upstream's text.
 
 - 2026-11-13 synchronization: adopt the unified default prompt and retire unused vendor-specific prompt templates, including MiniMax. The MiniMax-specific repository-reminder removal is superseded by template retirement; the factual shared Task/Actor, fixed-cwd and authorized exec guidance remains. Adopt Compose Next spec presentation and independently deliverable sub-documents from `994aa695`, retaining explicit invocation, workspace ownership and publication authorization boundaries.
 

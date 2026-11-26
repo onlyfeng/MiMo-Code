@@ -120,7 +120,7 @@ function checkpointPart(msg: WithParts): CheckpointPart | undefined {
  * endpoints fail closed without dropping anything.
  *
  * User-role messages are never dropped: the last user is where turn-boundary
- * reminders (skill catalog, MCP, auto-worktree gates) are persisted, and a file-only or
+ * reminders (skill catalog, MCP) are persisted, and a file-only or
  * synthetic-only user turn is still an instruction the provider must see.
  * Collapsing it would mark the reminder "already sent" while the provider
  * never receives it.
