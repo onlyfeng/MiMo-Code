@@ -630,7 +630,7 @@ the complete resolved model identity` case. FD-005 keeps only identity
   authorized attachments totaling 10 MiB encoded data and reports omissions;
   images reach ordinary persisted FileParts and the next model request.
   Expanded TUI output remains bounded and ANSI-free. Retained validated nested
-  records feed file manifests, worktree hints and repeated-failure detection.
+  records feed file manifests and repeated-failure detection.
   Snapshot compaction keeps at most 8 KiB of selected facts per child and 32
   entries per retained array; oversized fields or whole records may be omitted
   within the overall bound. Missing paths never imply a cwd mutation.

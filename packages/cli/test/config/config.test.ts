@@ -607,7 +607,7 @@ test("loads project config from Cygwin paths on Windows", async () => {
   })
 })
 
-test("preserves opt-in auto_worktree without changing other config", async () => {
+test("ignores removed auto_worktree without changing other config", async () => {
   await using tmp = await tmpdir({
     init: (dir) => writeConfig(dir, { $schema: "https://opencode.ai/config.json", model: "test/model", auto_worktree: true }),
   })
@@ -616,7 +616,7 @@ test("preserves opt-in auto_worktree without changing other config", async () =>
     fn: async () => {
       const config = await load()
       expect(config.model).toBe("test/model")
-      expect(config.auto_worktree).toBe(true)
+      expect(config).not.toHaveProperty("auto_worktree")
     },
   })
 })

@@ -4,7 +4,6 @@ import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { buildFileManifest } from "../../src/session/compaction"
 import { TryBestMonitor } from "../../src/session/try-best-detector"
-import { sessionMutatedMainWorktrees } from "../../src/tool/auto-worktree-hint"
 import { observedToolParts } from "../../src/session/observed-tool-parts"
 
 function nested(tool: string, input: Record<string, unknown>, metadata: Record<string, unknown>) {
@@ -69,33 +68,6 @@ test("compact nested edits remain in the compaction file manifest", () => {
   expect(buildFileManifest([message], { worktree: "/repo" })).toContain("new.ts (written)")
 })
 
-test("compact nested shell retains successful main-worktree mutation evidence", () => {
-  expect(
-    sessionMutatedMainWorktrees([
-      nested(
-        "exec_command",
-        { cmd: "touch file" },
-        {
-          exit: 0,
-          mainWorktreeHits: ["/repo"],
-        },
-      ).message,
-    ]),
-  ).toEqual(["/repo"])
-  expect(
-    sessionMutatedMainWorktrees([
-      nested(
-        "exec_command",
-        { cmd: "touch file" },
-        {
-          exit: 1,
-          mainWorktreeHits: ["/repo"],
-        },
-      ).message,
-    ]),
-  ).toEqual([])
-})
-
 test("compact nested shell retries still reach the repeated-failure detector", () => {
   const monitor = new TryBestMonitor()
   const { part } = nested("exec_command", { cmd: "bun test" }, { exit: 1 })
@@ -122,7 +94,6 @@ test("cancelled and rejected nested calls never become mutation or retry evidenc
   for (const flag of ["cancelled", "rejected"]) {
     const patch = nested("apply_patch", {}, { [flag]: true })
     expect(observedToolParts(patch.part)).toEqual([patch.part])
-    expect(sessionMutatedMainWorktrees([patch.message])).toEqual([])
     expect(buildFileManifest([patch.message], { worktree: "/repo" })).toBeUndefined()
     const shell = nested("bash", { command: "bun test" }, { [flag]: true, exit: 1 })
     const monitor = new TryBestMonitor()
