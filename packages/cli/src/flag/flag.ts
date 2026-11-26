@@ -50,22 +50,28 @@ const MIMOCODE_DISABLE_CLAUDE_CODE = MIMOCODE_MIMO_ONLY || MIMOCODE_DISABLE_CLAU
 //   .claude / .codex / .opencode  default off — MIMOCODE_ENABLE_*_SKILLS
 const copy = process.env["MIMOCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
 
-let operatorServerPassword = process.env["MIMOCODE_SERVER_PASSWORD"]
-let automaticServerPassword: { password: string } | undefined
+/**
+ * Password for a listener nobody asked for, held in memory only.
+ *
+ * Opening a socket makes every instance route reachable by any process running as
+ * this user — `/file` reads and writes the project, `/pty` and `/bash-interactive`
+ * run commands. The token-authenticated `/v1` routes are carved out of basic auth on
+ * purpose (see `server/middleware.ts`), so generating this closes everything else
+ * without closing the surface the listener exists for.
+ */
+let generatedServerPassword: string | undefined
 
 /**
- * Mint a credential for a listener the user did not ask for.
+ * Generate the password for an implicit listener, once.
  *
- * Deliberately NOT written to `process.env`: every child we spawn inherits the
- * environment, and a subprocess is supposed to hold a scoped task token, never the
- * credential that opens the whole instance API. An operator-configured password
- * always wins — the user has already said what auth should be.
+ * Idempotent: a second listener in the same process must not invalidate the
+ * credential the first one is already authenticating against. A user-supplied
+ * password always wins, and in that case nothing is generated at all — the operator
+ * has already said what auth should be.
  */
 export function generateServerPassword() {
-  if (operatorServerPassword) return
-  automaticServerPassword ??= {
-    password: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
-  }
+  if (process.env["MIMOCODE_SERVER_PASSWORD"]) return
+  generatedServerPassword ??= Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")
 }
 
 /**
@@ -76,7 +82,7 @@ export function generateServerPassword() {
  * belongs with `stop()` for the same reason unpublishing the address does.
  */
 export function clearGeneratedServerPassword() {
-  automaticServerPassword = undefined
+  generatedServerPassword = undefined
 }
 
 export const Flag = {
@@ -286,23 +292,30 @@ export const Flag = {
   // the working directory. Use to avoid touching git in restricted/sandboxed
   // environments or where git startup probing is undesirable.
   MIMOCODE_DISABLE_GIT: truthy("MIMOCODE_DISABLE_GIT"),
+
+  /**
+   * The password every non-`/v1` route is authenticated against.
+   *
+   * A getter rather than a snapshot, because a listener the user did not ask for
+   * generates one at bind time (see `generateServerPassword`). The generated value
+   * is deliberately NOT written to `process.env`: every child we spawn inherits the
+   * environment, and a subprocess is supposed to hold a scoped task token, never the
+   * credential that opens the whole instance API.
+   */
   get MIMOCODE_SERVER_PASSWORD() {
-    return operatorServerPassword || automaticServerPassword?.password
-  },
-  set MIMOCODE_SERVER_PASSWORD(value: string | undefined) {
-    operatorServerPassword = value
-  },
-  get MIMOCODE_SERVER_OPERATOR_PASSWORD() {
-    return operatorServerPassword
+    return process.env["MIMOCODE_SERVER_PASSWORD"] || generatedServerPassword
   },
   /**
    * Did the OPERATOR configure auth, as opposed to us generating a password for a
-   * listener we opened on our own initiative? Load-bearing for `InstanceMiddleware`:
-   * a user-secured server may serve directories outside its cwd, while an implicit
-   * listener stays pinned to one project no matter what credential guards it.
+   * listener we opened on our own initiative?
+   *
+   * The difference is load-bearing for `InstanceMiddleware`: a user-secured server is
+   * allowed to serve directories outside its cwd (the desktop engine does exactly
+   * that), while an implicit listener must stay pinned to one project no matter what
+   * credential guards it.
    */
   get MIMOCODE_SERVER_PASSWORD_SUPPLIED() {
-    return Boolean(operatorServerPassword)
+    return Boolean(process.env["MIMOCODE_SERVER_PASSWORD"])
   },
   MIMOCODE_SERVER_USERNAME: process.env["MIMOCODE_SERVER_USERNAME"],
   MIMOCODE_ENABLE_QUESTION_TOOL: truthy("MIMOCODE_ENABLE_QUESTION_TOOL"),

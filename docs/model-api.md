@@ -12,8 +12,8 @@
 
 主体采用 upstream 的 capability 路由；截至已接受的 `5198ff54` 基线，仍保留以下边界与修正：
 
-- 非 loopback 绑定守卫读取 `MIMOCODE_SERVER_OPERATOR_PASSWORD`,因此 worker
-  自生成的凭据无法满足它。
+- 非 loopback 绑定守卫读取 upstream 的 `MIMOCODE_SERVER_PASSWORD_SUPPLIED`
+  (仅环境变量中由运维提供的密码为真),因此 worker 自生成的凭据无法满足它。
 - `Server.listen` 接受 `advertiseDirectory`。upstream 以 `process.cwd()` 作通告键
   (它假设进程已 chdir 进项目);fork 的 TUI worker 服务的是启动时选定的目录,
   未必等于 cwd,通告落错桶会让 `mimo llm-server issue` 找不到它。
