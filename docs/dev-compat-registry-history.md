@@ -5702,3 +5702,717 @@ This superseded current-review block is retained as history. The 2026-11-25 prop
 - Validation: root `bun typecheck` passes; root lint reports 0 errors. `test/tool/mcp-tool-search.test.ts`, `test/session/prompt-effect.test.ts`, `test/session/llm-request-prefix.test.ts` and `test/session/codex-compact.test.ts`: 326 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-25.md#publication).
 
 This superseded current-review block is retained as history. The 2026-11-26 propagation of upstream `6ad6bbb4` (closed image attachment reminder) is recorded in [the shared sync record](upstream-sync-2026-11-26.md); compat runtime/test snapshot `75e37ed2f052e20f7b14a98caee44e7baaed1cf0`.
+
+## 2026-11-26 registry consolidation: DC dated notes
+
+Moved verbatim from `docs/dev-compat-overrides.md` at dev/compat `ee152f3358c53a6133b0d0c52c202af9da08e7a1`, grouped by entry in their original order. Most are propagation logs recording that an incoming change did not touch the owner. Rules from these notes that were still in force were folded into the entry's fields in the same commit, after checking them against the code; notes about retired mechanisms (the Xiaomi search sidecar, shell actor recovery, the pressure bands, the recall reminder, the strict capped-v2 recognizer) were not folded. This is a pure registry commit: it changes no decision, owner or exit condition. Paths are as the notes wrote them.
+
+### DC-NET-001 (18 notes)
+
+- 2026-10-15 propagation: main `a7d242df` (first pushed as `ebb8b62b`) makes the inherited classifier check
+  every DNS answer (`lookup` with `all: true`) instead of trusting the first,
+  failing closed on mixed public/private answers and empty results, and
+  resolves empty-answer lookups as failures. The merge inherits
+  `src/util/ssrf.ts` and `test/util/ssrf.test.ts` byte-identically; compat
+  WebFetch still does not call the classifier, so DC-NET-001 behavior is
+  unchanged. Evidence: `test/util/ssrf.test.ts` 29/29 and
+  `test/tool/webfetch.test.ts` 5/5 on main.
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: No WebFetch/SSRF path changed; private-network
+  policy and inherited bounds remain intact.
+
+- 2026-09-07 synchronization: No WebFetch/SSRF path or symbol overlap. The
+  approved private-target call seam and inherited per-hop authorization,
+  HTTP(S), redirect, timeout, and response-size bounds remain unchanged.
+
+- 2026-09-07 explicit model API propagation: No WebFetch path overlap; approved private-network policy remains owned here.
+
+- POLICY-04 review: No incoming production-path overlap; the existing source overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- 2026-09-01 review: incoming changes had no WebFetch/SSRF call-seam overlap;
+  the explicit private-destination policy override remains unchanged.
+
+- 2026-09-01 OAuth-branding propagation: no WebFetch/SSRF path or symbol
+  overlap; the approved private-destination call seam remains unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: no WebFetch/SSRF path or
+  symbol overlap; the approved private-destination call seam remains unchanged.
+
+- 2026-09-02 default-model/Compose/voice sync: no WebFetch/SSRF path or symbol
+  overlap; the approved private-target call seam and inherited HTTP bounds are
+  unchanged.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: no WebFetch/SSRF path or symbol overlap; the
+  approved private-target call seam and inherited HTTP bounds remain unchanged.
+
+- 2026-09-02 WebSearch/session-ID sync: Xiaomi WebSearch does not use the
+  WebFetch/SSRF call seam. The approved private-target policy, per-hop asks,
+  timeout, redirect limit, and 5 MB bound remain unchanged.
+
+- 2026-09-03 PR #73 propagation: no WebFetch/SSRF path or symbol overlap; the
+  approved private-target behavior and inherited bounds remain unchanged.
+
+- 2026-09-04 PR #74 propagation: no WebFetch/SSRF path or symbol overlap; the
+  approved private-target behavior and inherited bounds remain unchanged.
+
+- 2026-09-07 selected-capability review: No WebFetch/SSRF call-seam overlap.
+  Approved private-destination access and inherited per-hop permission,
+  HTTP(S), redirect, timeout, and response-size bounds remain unchanged.
+  Shared ALIAS-01/SCHEMA-01/RECOVERY-01 adds no network-policy override.
+
+- 2026-09-08 selected Actor/MCP completion: The selected Actor/MCP integration has no WebFetch or destination-classification overlap; the private-network WebFetch override remains unchanged.
+
+### DC-NET-002 (18 notes)
+
+- 2026-10-13 full sync: upstream `2f373289` moves startup MCP connections into a background fiber. Compat's `mcp/index.ts` takes main's FC-004 adaptation byte-for-byte; remote URL validation and client creation are unchanged, and the RFC1918 sentinel passes in `test/mcp/lifecycle.test.ts` (34 pass).
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: No remote MCP URL or connection path changed;
+  RFC1918 client behavior remains intact.
+
+- 2026-09-07 synchronization: No MCP path or symbol overlap. Production MCP
+  remains byte-identical to accepted main; the existing RFC1918 test keeps its
+  mocked client-creation scope and does not establish OAuth interoperability.
+
+- 2026-09-07 explicit model API propagation: No MCP client or lifecycle overlap; temporary model credentials do not change MCP authentication.
+
+- POLICY-04 review: No incoming production-path overlap; the existing source overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- 2026-09-01 review: incoming stdio MCP transport and lifecycle changes
+  overlapped the MCP path without weakening the compat RFC1918 reachability
+  guarantee.
+
+- 2026-09-01 OAuth-branding propagation: shared callback and
+  dynamic-registration literals are adjacent to this MCP owner but do not fork
+  `mcp/index.ts`. The RFC1918 sentinel sets `oauth: false`, passed at the final
+  behavior tree, and continues to make no authentication-interoperability claim.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: no MCP transport/config path
+  or symbol overlap; the RFC1918 reachability guarantee remains unchanged.
+
+- 2026-09-02 default-model/Compose/voice sync: no MCP transport/config path or
+  symbol overlap; RFC1918 client creation remains the same bounded guarantee.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: no MCP transport/config path or symbol
+  overlap; the RFC1918 client-creation guarantee remains unchanged.
+
+- 2026-09-02 WebSearch/session-ID sync: the Xiaomi `MimoWebsearch` sidecar is
+  not the remote-MCP lifecycle. No MCP path changed, and the RFC1918
+  client-creation guarantee remains unchanged.
+
+- 2026-09-03 PR #73 propagation: no MCP path or symbol overlap; RFC1918 remote
+  MCP reachability remains unchanged.
+
+- 2026-09-04 PR #74 propagation: no remote-MCP path or symbol overlap; RFC1918
+  reachability remains unchanged.
+
+- 2026-09-07 selected-capability review: No remote-MCP client or lifecycle
+  implementation overlap. MCP production remains identical to accepted main;
+  the RFC1918 sentinel retains its mocked client-creation scope and makes no
+  new real-network, authentication, or OAuth interoperability claim.
+
+- 2026-09-08 selected Actor/MCP completion: Inherited shared per-name Claude MCP auto_connect and disabled precedence. MCP source remains byte-identical to main; the existing RFC1918 client-creation sentinel passes, without extending its oauth:false evidence scope.
+
+### DC-PLATFORM-001 (22 notes)
+
+- 2026-11-25 DC-RESOURCE-001: `ripgrep.ts` also carries the opt-in `ripgrep.threads` and `ripgrep.timeout` limits owned by DC-RESOURCE-001. They apply only to spawned rg runs; the no-rg listing fallback, the Windows archive extraction and their fail-closed boundaries are unchanged.
+
+- 2026-11-01 DC-SESSION-001 follow-up: the Windows entry adds a fourth focused suite, `session-owner` (`test/session/process-liveness.test.ts` and `test/session/session-owner.test.ts`), and records `src/session/process-liveness.ts` in its source hashes. That suite and its subject belong to DC-SESSION-001; the archive, no-rg and other focused cases are unchanged.
+
+- 2026-10-10 FC-008 Actions usage reduction (main PR #153): the shared `windows-runtime` job no longer runs for any pull request, including one into `dev/compat`. It runs on each push to `dev/compat` that changes more than `docs/`, and on dispatch with `windows_runtime: true`; a compat branch that changes `ripgrep.ts`, `archive.ts` or the Windows entry dispatches `test.yml` on that branch with the input when it needs pre-merge platform evidence. The environment record no longer carries a pull-request head SHA. The platform entry and both fallbacks are unchanged.
+
+- 2026-10-02 full sync: the Windows runtime entry is now `packages/cli/script/verify-windows-runtime.ts`; the shared `test.yml` `windows-runtime` job and the `tsconfig.scripts.json` exclusion follow the rename. The ripgrep/archive overlay is unchanged.
+
+- 2026-09-29 full sync: upstream's root typecheck now also checks `tsconfig.scripts.json`, which includes `packages/cli/script/**` without the package's `@/` path mapping. `script/verify-windows-runtime.ts` reaches `src/util/process.ts` through `test/fixture/windows-archive-runtime.ts`, so compat adds it to that project's `exclude` list; `packages/cli/tsconfig.json` still checks it. The production overlay and the Windows job are unchanged.
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: No archive/ripgrep fallback path changed;
+  restricted-network and Windows behavior remains intact.
+
+- 2026-09-07 synchronization: No ripgrep/archive path or symbol overlap.
+  Restricted-network and Windows fallbacks, their failure boundaries, and the
+  inherited fixed-instance-cwd contract remain unchanged.
+
+- 2026-09-07 explicit model API propagation: No ripgrep/archive path overlap; all platform fallback blobs remain unchanged.
+
+- POLICY-04 review: No incoming production-path overlap; the existing source overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- 2026-09-01 review: incoming changes had no ripgrep/archive fallback overlap;
+  the restricted-network and Windows adaptations remain unchanged.
+
+- 2026-09-01 OAuth-branding propagation: no platform-fallback path or symbol
+  overlap; both adaptations remain compat-only and unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: no ripgrep/archive path or
+  symbol overlap; both platform adaptations remain compat-only and unchanged.
+
+- 2026-09-02 default-model/Compose/voice sync: no ripgrep/archive path or symbol
+  overlap; both platform fallbacks remain compat-only and unchanged.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: no ripgrep/archive path or symbol overlap;
+  both platform fallbacks remain compat-only and unchanged.
+
+- 2026-09-02 WebSearch/session-ID sync: no ripgrep/archive path or symbol
+  overlap; the restricted-network and Windows fallbacks remain unchanged.
+
+- 2026-09-03 PR #73 propagation: no ripgrep/archive path or symbol overlap;
+  both platform fallbacks remain unchanged.
+
+- 2026-09-04 PR #74 propagation: no ripgrep/archive path or symbol overlap;
+  both platform fallbacks remain unchanged.
+
+- 2026-09-07 selected-capability review: No ripgrep/archive fallback
+  implementation or test overlap. Restricted-network/Windows adaptations,
+  inherited fixed-cwd relative-path semantics, and fail-closed fallback
+  boundaries remain unchanged.
+
+- 2026-09-08 selected Actor/MCP completion: No rg, glob, archive or platform implementation overlaps this integration; fallback behavior is unchanged.
+
+### DC-MODEL-001 (22 notes)
+
+- 2026-11-22 propagation of `main` PR #263: the run loop's pin-winner selection follows main. A concurrent cold pin's row is adopted only when it froze the same tools (compat's tools hash also binds loaded MCP membership); otherwise the loop rotates to its own system and tools, as any tools mismatch does. MaxMode routing reads the resolved prefix and is not on that path: per-agent opt-in, the structured-output exclusion, the final-step `toolChoice: "none"` bound and retry-status isolation are unchanged, and the MaxMode suites pass.
+
+- 2026-11-12 FC-013 empty-output budget propagation (`main` PR #258): an `InvalidOutputError` keeps kind `server` but draws on the new `retry.emptyOutput` budget (bounded, 8 retries, no deadline by default) instead of `retry.server`. The persistent server budget compat inherits under the 2026-09-18 bullet below therefore no longer extends a pure-empty streak, and a config that bounded empty output through `retry.server` now gets the default 8 unless it sets `retry.emptyOutput`. `session/retry.ts`, `config/retry.ts` and the processor's empty-output classification are identical on both branches, and compat's `processor.ts`, `prompt.ts` and `llm.ts` deltas do not touch that path. `budgetFor` still resolves the `max-candidate` and `max-judge` scopes first, so MaxMode candidate and judge calls keep their own bounded budgets. Subagent retry-status isolation is unchanged. The merge was clean, and SDK regeneration from compat sources matched the merged `types.gen.ts` with no diff (`emptyOutput` on the global and provider retry config). Tests, one file per process with ambient `MIMOCODE_*` selectors removed: `session/retry`, `invalid-output-continuation`, `processor-effect`, `actor/spawn`, `message-v2`, `prompt-effect`, the MaxMode suites and the `llm*` suites all pass.
+
+- 2026-10-02 full sync: upstream deletes the committed `packages/sdk/openapi.json`; the per-agent `maxMode` schema is now carried by the generated v2 SDK types, regenerated from compat sources without a diff, and the snapshot leaves this entry's surfaces.
+
+- 2026-09-18 retry defaults: inherit persistent server/rate-limit live-step
+  recovery. Per-agent MaxMode candidate/judge budgets, final-step enforcement
+  and subagent retry-status isolation remain unchanged.
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
+- POLICY-02 review: Inherited recovery query/schema and Session changes preserve MaxMode, retry/status isolation and generated compat APIs. Fresh standard SDK/OpenAPI generation matches the resolved artifacts.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: Inherited title mention cleanup and subtask
+  terminal-state guards without changing per-agent MaxMode, lite/ephemeral
+  title isolation, or retry status ownership.
+
+- 2026-09-07 synchronization: The prompt carrier directly overlaps shared
+  recovery settlement; MaxMode is semantically adjacent. Per-agent opt-in,
+  structured-output exclusion, final-step bounds, hidden-title routing, and
+  retry-status isolation remain unchanged. App locale-fixture inheritance
+  creates no alternate title or MaxMode path.
+
+- 2026-09-07 explicit model API propagation: The proxy uses resolved models and returns client tool calls; it does not run or change per-agent MaxMode or title state.
+
+- POLICY-04 review: Real prompt-path overlap: catalog layout and pin-winner selection retain per-agent MaxMode, final gates, and candidate instruction delivery.
+
+- 2026-09-01 review: compat retains per-agent MaxMode opt-in, main-only
+  session-global status/events, and the tool-free final-step boundary.
+
+- 2026-09-01 OAuth-branding propagation: `plugin/codex.ts` changes only private
+  browser-page literals; loader, model limits, MaxMode routing, retry status,
+  generated schemas, and the tool-free final step remain unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: audited upstream/main prompt,
+  system, and harness semantic adjacency was reviewed; the final compat
+  production delta is empty on those owner surfaces. Compat inherits the
+  stronger shared tri-state resolver and action guidance while preserving
+  per-agent MaxMode, final-step, title, retry-status, and generated-schema
+  behavior; 20 owner sentinels passed.
+
+- 2026-09-02 default-model/Compose/voice sync: inherited the stable live-registry
+  default-model fallback, including recent/config validation and usable-chat
+  filtering. Per-agent MaxMode, the lite hidden-title path, final-step bound,
+  retry-status isolation, and generated schemas remain compat-owned and
+  unchanged.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: the generated OpenAPI surface overlaps this
+  owner but regenerates to the established compat artifact. `AgentConfig.maxMode`
+  and its routing, final-step, structured-output, and status-isolation behavior
+  remain unchanged; 20 owner sentinels passed.
+
+- 2026-09-02 WebSearch/session-ID sync: inherited request-scoped
+  `model.api.id` for Xiaomi WebSearch. Per-agent MaxMode, final-step and
+  `json_schema` gates, hidden-title routing, and retry-status isolation remain
+  compat-owned and unchanged.
+
+- 2026-09-03 PR #73 propagation: generated OpenAPI/SDK carriers overlap, but
+  `AgentConfig.maxMode`, routing, final-step, structured-output, hidden-title,
+  and retry-status behavior remain unchanged.
+
+- 2026-09-04 PR #74 propagation: prompt handoff and task metadata overlap the
+  run loop, while per-agent MaxMode routing, final-step and structured-output
+  gates, hidden-title isolation, and retry-status ownership remain unchanged.
+
+- 2026-09-07 selected-capability review: Actual overlap includes `agent.ts`,
+  `prompt.ts`, and generated SDK/OpenAPI carriers. Shared `harness_model`
+  resolution and recovery identity flow coexist with per-agent MaxMode opt-in,
+  non-final/non-`json_schema` gating, hidden-title isolation, and main-only
+  session-global retry status/events. Fresh compat generation retains
+  `Agent.maxMode` and `AgentConfig.maxMode`; ALIAS-01 creates no compat-only
+  harness resolver or eighth DC owner.
+
+- 2026-09-08 compact-tool integration: The shared Codex advertisement subset
+  flows through compat's existing `runStep` and per-agent MaxMode paths.
+  Non-final/non-`json_schema` gating, hidden-title isolation, and retry-status
+  ownership remain unchanged; compact declarations add no new MaxMode policy.
+
+- 2026-09-08 selected Actor/MCP completion: Actor HTTP recovery uses the same runLoop/runStep path, preserving per-agent MaxMode, final-step and structured-output gates, and main-only retry publication. SDK regeneration retains agent maxMode and title contracts.
+
+### DC-CONTEXT-001 (35 notes)
+
+- 2026-11-22 propagation of `main` PR #263 (upstream `128adcb7`): the skill catalog leaves the frozen system tail and arrives as persisted user-turn reminders (one entry per context window, then fingerprinted deltas), as FC-005 now describes. Compat keeps its 50 KiB cap by moving it from `SystemPrompt.skills` to `renderSkillCatalogReminder` (`packages/cli/src/session/skill-reminder.ts`): the `<available_skills>` body of an entry and of an update's added or changed skills is head-capped with the existing marker, the reminder wrapper and its closing tag stay intact, and the metadata still records the whole announced state, as the capped frozen catalog did. Main's read-time cleanup (`SessionPrefixSnapshot.getFrozen`) removes a system-tail catalog only when it ends at `</available_skills>`; a compat row frozen with a capped catalog ends at the cap's truncation marker instead, so compat's `LEGACY_SYSTEM_CATALOG` in `skill-catalog.ts` also ends a block at that marker, whichever terminator comes first. Without it, an old session with a large catalog would keep the stale catalog in its frozen system next to the new entry reminder. The strict capped-v2 recognizer `isTruncatedCompatCatalog` retires: main's v2 recognizer now accepts every engine-generated v2 snapshot without a `<skill_content` body, and requires the stored schema-2 hash only when one is present, which the compat producer's hash of its capped output satisfies. The `skillCatalogInSystem` conversion option and the pin-winner message reprojection retire with the system-tail catalog; the current-turn projection (`currentUserID`, `currentTurnMessages`) is computed once per prefix build and is unchanged by pin-winner adoption or rotation. Tests: `packages/cli/test/session/skill-catalog-compat-projection.test.ts` (capped historical v2 leaves both projections, the UTF-8 producer is still recognized, capped system-tail strip with marker-bounded and host-copy cases, capped entry and update reminders) and `packages/cli/test/session/skill-catalog-compat-capture.test.ts` (a cold capture that adopts a pin winner projects the stored v2 snapshot into neither view). The retired negative cases asserted the strict recognizer's rejections, which main's recognizer intentionally accepts.
+
+- 2026-11-07 FC-036 and FC-047 sizing propagation (`main` PR #256): a no-fork writer's delta is sized by the request it is sent (the writer's system prompt plus the delta rendered as model messages), not by its stored parts. Compat's request preflight still skips bounded computation agents, the writer among them, so this check stays the only window bound before a writer request, and a writer that still overflows stops through FC-021 as before. `estimateRequestTokens` is not used for it, so the decision is the same on both branches. The merge conflict in the fork-context construction keeps compat's `turnContext` on both the no-fork writer context and the parent-view fork.
+
+- 2026-11-04 FC-035 propagation (`main` PR #211): undo reverts only the patch files the session's write tools wrote (`written`), and redo or a further undo restores only the files the revert stored (`revert.files`). `revert.ts`, `export.ts` and the write gate were identical on both branches; the revert's chronological positions this owner relies on are unchanged.
+
+- 2026-11-03 FC-032 and FC-033 propagation (`main` PRs #207, #208): the bash timeout note for an ssh command and the tool start time (set at gate admission, kept by the `metadata` callback in `prompt.ts`) apply unchanged. Neither touches content caps, the measured preflight or the recovery floor.
+
+- 2026-11-03 measured request preflight: the whole-request estimate ran 1.3 to 2.0 times above the provider's count for the previous step in every preflight overflow recorded that day — seven of seven, across claude-opus-5-5 (1.31, 1.62), kimi-k3.1-pro (1.70), grok-4.7 (1.56) and gpt-6-astra (2.04, 2.00, and once 9.4) — so each routed a request that fit into recovery; gpt-6-astra sessions were rebuilt at about 390K of an 872K window. An estimate that reaches the trigger is now checked against the measured request described below (`measuredRequest` and `classifyRequestOverflow` in `packages/cli/src/session/overflow.ts`, the preflight in `runStep` in `packages/cli/src/session/prompt.ts`). Known limit: tool or system prompt growth since the counted step is not measured; it stays within the trigger's headroom, and a provider overflow error still routes to recovery. Tests: `packages/cli/test/session/overflow.test.ts` "request preflight measured from provider usage" and `packages/cli/test/session/prompt-effect.test.ts` "request preflight measures the request from the previous step's provider count" (under and near the trigger). Ignoring the measurement, dropping what came after the counted step, measuring across a boundary, from a summary or another model, counting output, or letting a measurement raise the estimate each fails a case.
+
+- 2026-11-03 FC-029 propagation (`main` PR #201): the writer task grows by the CURRENT FILES block. Compat's request preflight skips bounded computation agents (`!isBoundedComputation`), the writer among them, so it does not see the block; as on `main`, a writer request that overflows still stops through FC-021, and the block is bounded by `CURRENT_FILE_CHAR_LIMIT` for checkpoint.md and MEMORY.md (notes.md is shown whole because the writer resets it). The 50 KiB model-visible caps (tool output and input replay, skill, MCP and shell text, compaction summary and manifest, inbox content, instructions) do not touch it: the writer task and the `actor.preStop` re-prompts reach the writer as plain user text parts (`spawn.ts` `runAgentLoop`), so a checkpoint above 50 KiB is shown up to `CURRENT_FILE_CHAR_LIMIT`, not cut at the cap.
+
+- 2026-11-03 FC-027 and FC-028 propagation (`main` PRs #198, #199): no interaction with the caps or the request preflight. The writer task gains one sentence, and prune's restart seeding reads persisted messages and actor rows, not request estimates.
+
+- 2026-10-31 FC-021 propagation: main makes a bounded computation agent's provider-signalled overflow terminal (`ContextOverflowError`, actor failure `kind: "overflow"`). Compat's `runStep` therefore no longer writes the empty overflow-recovery placeholder for bounded agents: that `MessageAbortedError` would classify the writer's failure as an abort, and `recoverOverflowPlaceholder` (which includes `isBoundedComputation`) would resume it. Request preflight still skips bounded agents. For every other agent, the placeholder, its exact-message classification, and the no-progress and two-recovery limits are unchanged. The fork and regular paths keep the `"overflow-static"` break ahead of main's new bounded-overflow break.
+
+- 2026-10-21 full sync: upstream `6f83cd0e` removes turn-end prune, the last caller of `pressureLevel`, so `pressureLevel` and `contextPressureLevel` leave `overflow.ts`. Compat keeps `estimateRequestTokens`, `isRequestOverflow` and `classifyRequestOverflow`. Request preflight never read the pressure bands, so its gates and the `overflow`/`overflow-static` classification are unchanged. Upstream `88673c41` deletes the per-message recall reminder. Compat's `shouldInjectActiveRecallReminder` JSON-schema suppression retires with it. The memory paths reminder that replaces it is not format-gated: it only fills in the real paths for the placeholders in the memory instructions, which JSON-schema requests also receive. It is also aimed at one message per context window rather than at the current request. The compat checkpoint stub in `test/tool/actor.test.ts` drops `hasMemoryOrTasks`. The marker-chronology assertion that compat had added to the deleted `rebuild-microcompact.test.ts` stays covered by the shared `checkpoint-rebuild-unify.test.ts`.
+
+- 2026-10-13 full sync: upstream `463cbb28` defers MCP schemas behind `mcp_tool_search` by default and drops the pressure-degraded catalog in the search description. The active and auto-disabled `request preflight handles a large ... MCP schema` cases now opt out of deferral so their preflight still sees the directly exposed 1 MiB schema; the inactive case keeps search on. `contextPressureLevel` stays in `overflow.ts` behind `pressureLevel`, which `prune.ts` still calls; the compat-only catalog-pressure test retires with the description catalog. Run-loop agent resolution uses `resolveStoredAgent`, so a retired stored agent name keeps preflight and bounded-computation policy on the default agent.
+
+- 2026-10-02 full sync: with the committed OpenAPI snapshot deleted upstream, the checkpoint-coverage operation and `CheckpointCoverage` schema are asserted on the runtime OpenAPI document and carried by the generated v2 SDK; every runtime operation's code sample must resolve to a callable client method.
+
+- 2026-09-15 prior validated implementation snapshot: compat
+  `05724a5c433a547d9177ebd8bc8e9184962f128e` inherits main
+  `cdfd1a804599eda21fdc5bced9c0d1de025d07da`. F06 chronology, transactional
+  user admission, checkpoint/loop-streak/TUI position handling, F07 compaction
+  admission guards, and callable SDK examples are now shared contracts, not
+  exclusive compat policies. F04 request preflight and F10 legacy snapshot
+  reads remain compat-owned. Local affected regressions and the two measured
+  integration-test budgets are recorded in [the compat implementation report](compat-audit-followups-2026-09-15.md).
+  This historical snapshot preceded the Codex P2 concerning cache bounds after
+  revert clears. Main PR #131 accepted `89866569ee21e106f3c31c39072d8ec3e976d20a`
+  with behavior `3a12d1800d9bfd002f543764e4ec72047e6e6bb3`; compat behavior is
+  `02cd25b5385dbaffcc629693ca1df2da15af68f2`, and pushed PR head
+  `c407439ff4d213977acf3986d79a4e31627cf9db` inherits accepted main without
+  changing that tree. Session updates and refreshes now release undo history
+  immediately; compat records no-parts marker candidates before deleting evicted
+  parts, keeps the existing 100-candidate cap and retains known coverage for PartRemoved.
+  The layered red/green evidence is recorded in the implementation report.
+  PR #129 is accepted at `ab81af7293ac5ea1ee219bb6aab491d4fd665307` with the same
+  complete tree; its post-merge test/typecheck/lint runs all succeeded, as
+  recorded in the F01–F11 accepted review record, now in
+  [the compat history](dev-compat-registry-history.md#f01f11-accepted-review-record-historical).
+
+- 2026-09-09 full sync: image normalization is inherited through the existing model transform. Keep bounded replay/error media, active-tool preflight, frozen context and chronology; adapt image fixtures to actual containers. Provider/API/schema inputs and compat SDK operations remain unchanged.
+
+- POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
+
+- POLICY-02 review: Preserve monotonic message producers and completed >= created in atomic recovery settlement, alongside metadata-only stale-writer fixes. Frozen catalog, current-turn preflight, checkpoint coverage and continuation provenance remain unchanged.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-10 FD-010/FD-011/FD-012 propagation review: no compat-side change is
+  needed and none is made. The inherited summary fallback promotes reasoning to
+  a synthetic text part, which reaches the projection through the same summary
+  path as a model-authored one and is therefore already bounded by this entry's
+  caps. Its content-filter and error rejections publish `ContentFilterError` and
+  `ModelError` on the session error surface exactly as the conversation path
+  does, and compat adds no listener of its own. FD-012's bounded retry re-enters
+  the same processor rather than building a second request path, so current-turn
+  preflight, active-tool scope and frozen context apply to the retry
+  identically; its completion-marker invariant is orthogonal to this entry.
+  FD-012 also pins compaction `tokens` to the LATEST attempt rather than the sum
+  — compat's own context readout reads that field as the current footprint, so
+  aggregating would inflate it here exactly as it would on main. FD-011's
+  `toolChoice: "none"` matches what compat already sent; the merge conflict
+  there was resolved by keeping compat's `frozenActiveTools` (this entry's
+  active-only membership) and adopting main's `as const`, a type narrowing only.
+  The inherited fixture's compaction budget was raised on main first (90_000,
+  trigger 81_000) because compat preflights every request against the usable
+  window: the earlier 36_000 trigger cleared the seeded usage but not the fixed
+  request prefix, so the turn AFTER a successful compaction failed here while
+  passing on main.
+
+- 2026-09-15 code-inventory subcontracts (existing behavior, no new owner):
+  content caps/serialization; request estimation and current-turn recovery floor;
+  inherited message chronology/idempotent admission; compat checkpoint coverage
+  over a shared logical tail; legacy active-tool snapshot reads; structured-output
+  replay; and inherited generated client examples. These have different retirement
+  conditions and must not be treated as one indivisible product policy.
+  Shared `createMessage` allocates monotonic actor commit timestamps;
+  user and derived-user messages submitted through `commitUserMessage*`
+  admit their message and parts in one transaction,
+  with ownership and current-content equivalence checks. The prompt
+  producer can reuse generated anonymous part IDs in relative order, while
+  explicit identities remain strict; runtime additions can make old input
+  non-equivalent. Debug, inbox, prompt and compaction producers,
+  fork/revert/checkpoint and TUI consumers use chronological position with UTF-8
+  BINARY ID tie-breaking, not caller-ID magnitude. Inbox now joins the shared
+  synchronous admission primitive: its complete synthetic user/parts and live
+  selected queue deletion share one immediate transaction, after cancellation,
+  retirement and receiver-row rechecks. Compat rendering/caps still run before
+  that admission; frozen context and mandatory spawn projection are retained.
+  `shellImpl` writes its message and parts separately; streaming assistant output
+  is not one atomic message/parts transaction. Those two paths remain outside
+  the `commitUserMessage*` transaction. The Inbox guarantee does not extend to
+  exactly-once model execution or crash-durable event publication.
+  `currentUserID` feeds the current-turn projection through `llm-request-prefix`.
+  JSON-schema requests can recover the structured result from a completed
+  StructuredOutput part; their former recall-reminder suppression retired with
+  the reminder on 2026-10-21. These local prompt
+  corrections were previously under-specified; they are candidates for shared
+  correctness review rather than a new compat product feature.
+  Request preflight is heuristic and applies only when its runtime gates allow
+  it: `compaction.auto=false`, unknown context capacity and hidden native bounded
+  agents can bypass it. Provider conversion or later `_noop` insertion can change
+  the wire shape. No exact provider-token or universal request-fit guarantee is
+  claimed.
+  UTF-8 truncation now includes its omission marker and separator within a
+  positive requested byte budget, falling back to a bounded prefix when the
+  marker itself cannot fit. Actor state also respects tiny positive token
+  budgets. Wrappers remain additional bytes; content caps are not a strict
+  total wire bound.
+
+- 2026-09-17 test hygiene: `checkpoint-coverage.test.ts` follows the inherited
+  FC-008 convention. Its fixtures are `root: "cwd"`, and it names the fixture
+  directory on every request, so the suite no longer boots an instance for the
+  checkout and installs dependencies into the repository's `.mimocode`. The
+  endpoint assertions are unchanged.
+
+- 2026-09-05 synchronization: The new default Bash preview can exceed the
+  existing 50 KiB model-replay cap. Completed Bash output with truncated=true
+  and a non-empty archive outputPath now uses the existing head+tail slice
+  within that same cap, retaining the tail and full-output pointer. Other
+  tools and unarchived Bash retain head slicing. HTTP title text/image/part limits
+  remain in force; locale has no schema length cap; automatic/internal ensureTitle-to-genTitle input has no
+  unified cap, a pre-existing limit clarified here rather than a new sync
+  regression.
+
+- 2026-09-07 synchronization: Direct prompt/recovery overlap inherits shared
+  settlement after atomic admission and candidate validation, before admission
+  success or the new loop. Caps, active-tool preflight, current-turn recovery
+  floors, effective windows, checkpoint chronology, external-admission guards,
+  and the published compat contract remain unchanged.
+
+- 2026-09-07 explicit model API propagation: Proxy body/output/concurrency bounds are shared FD-004 behavior; existing request preflight, content caps and generated contracts remain unchanged.
+
+- POLICY-04 review: Real system/prompt/prefix/message/compaction overlap: preserve caps and current-turn recovery floors; reconcile both pin-winner message projections and the strict capped-v2 recognizer.
+
+- 2026-08-28 review: the inherited auto-overflow fixture now declares an empty
+  proactive checkpoint ladder and retains the shared 25K reserve-boundary
+  sentinel. Compat additionally preserves its deterministic short agent prompt,
+  empty tool allowlist, and first-call assertion.
+
+- 2026-09-01 review: compat preserves prefix snapshots and compaction
+  projections, 50 KiB model-visible caps, request-preflight recovery floors,
+  exact overflow placeholders, external-request episode/admission boundaries,
+  bounded recovery attempts, positional checkpoint coverage, and global
+  revert/redo projection. Exact-SHA CI on the first documentation snapshot
+  invalidated its stop-at-marker assumption twice. The final behavior
+  reconstructs checkpoint tails from their persisted coverage seam and binds
+  the runtime, published OpenAPI, and callable v2 SDK samples without
+  establishing a new compat-only capability.
+
+- 2026-09-01 OAuth-branding propagation: no request, preflight, cap,
+  checkpoint, chronology, or generated-contract path overlaps this owner; the
+  complete bounded-context behavior remains unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: model-visible default and
+  system-prompt semantics were re-reviewed. The action guidance introduces no
+  new request payload or generated-contract delta, and all caps, preflight,
+  recovery, checkpoint, and chronology bounds remain intact; 43 owner
+  sentinels passed.
+
+- 2026-09-02 default-model/Compose/voice sync: FC-016's Prompt snapshot is a TUI
+  editor/owner boundary, not an alternate model-request context contract.
+  Provider fallback now rejects unusable chat models, while every compat cap,
+  effective-window preflight, recovery, checkpoint, chronology, and generated
+  contract remains intact.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: adopted the shared full runtime/published
+  `CompactionPart` projection equality guard while retaining compat checkpoint
+  coverage and callable-v2 sample checks. Fresh generation preserves all 141
+  operations and samples, `CheckpointCoverage`, reserve-safe descriptions, and
+  the compat context contract.
+
+- 2026-09-02 WebSearch/session-ID sync: session IDs remain opaque keys; new and
+  legacy formats coexist without migration, while descending message IDs keep
+  their chronology marker. Stable memory paths, checkpoint coverage, request
+  preflight, and existing WebSearch-output truncation remain unchanged.
+
+- 2026-09-03 PR #73 propagation: inherited the shared `prompt_async` queue
+  producer and its 204/400/404 public contract. Compat content caps, prefix
+  snapshots, preflight, compaction, checkpoint chronology, and recovery routes
+  remain unchanged.
+
+- 2026-09-04 PR #74 propagation: inherited closing-run handoff, parent-linked
+  classification, and atomic derived-user admission. The guarded write reuses
+  compat schema, ownership, ID/idempotency, and monotonic actor chronology in
+  one immediate transaction; compaction retains both pending-external checks,
+  projection, preflight, checkpoint coverage, and bounded recovery.
+
+- 2026-09-07 selected-capability review: Actual overlap includes request-prefix
+  construction/capture/snapshots, prompt, compaction, checkpoint, actor context,
+  and SDK/OpenAPI carriers. `currentTurnMessages`, required frozen
+  `turnContext`, active tool/MCP membership, effective-window preflight,
+  chronology, coverage, and callable-v2 contracts remain intact. Shared
+  successful-commit receipts coexist with both pending-external-request
+  guards, `continuationMessageID` cleanup, and the existing projection.
+  Recovery may stop at its owned summary when a continuation CAS loses; this
+  grants no authority to the competing user. SCHEMA-01 remains an experiment
+  and changes neither production validators nor default authority exposure.
+
+- 2026-09-08 compact-tool integration: Prefix snapshots retain the complete
+  request-authorized pool separately from advertised tools. Complete boolean
+  `active` flags in the shared JSON format take precedence over a potentially
+  stale compat `active_tools` column; legacy JSON uses that column, including
+  an empty list, and falls back to all stored tools only when neither format
+  records a mask. Loaded MCP membership remains a separate hash input.
+  Request preflight and compaction-tail budgeting count only advertised
+  descriptors, including exec's compact declarations. Current-turn context,
+  pending-external checks, successful-commit receipts, and continuation cleanup
+  remain intact. Request-local structured schemas participate in snapshot
+  rotation when a session changes output format.
+
+- 2026-09-08 selected Actor/MCP completion: The shared actor recovery entry preserves currentTurnMessages, frozen turnContext, active-tool preflight, reserve-safe overflow, pending-external guards and owned continuation receipts. Fresh generation retains CheckpointCoverage, projection, and callable-v2 samples. The complete context/actor/checkpoint matrix passes 303 tests with two pre-existing timing skips.
+
+### DC-ACTOR-001 (29 notes)
+
+- 2026-11-22 propagation of `main` PR #263: a cold capture that finds a winning row adopts that row's system and tools as before; the system no longer carries a catalog, so there is no system/catalog pair to inherit. Captures and compaction read the row through `SessionPrefixSnapshot.getFrozen`, keeping compat's `active_tools` restoration, loaded MCP identity in the tools hash, `turnContext` and the current-turn projection.
+
+- 2026-11-03 FC-031 propagation (`main` PR #205): `actor send` records the sending lane's actor id on every path (`ctx.actorID ?? "main"`), replacing the agent name on direct calls. Compat's send handler carries the same line and keeps its `delivery` field; a full-context subagent signs with its registry actor id and a peer with its own actor id under its own session, so a reply to the rendered `from` reaches either. Nested subagent sends still go only to the registered parent.
+
+- 2026-11-03 FC-029 propagation (`main` PR #201): the writer task carries a CURRENT FILES block (the current checkpoint.md, MEMORY.md and notes.md text and NOTES_TEMPLATE), and the `actor.preStop` re-prompts carry the current text of the files they name. The merge is clean; compat's `coverage` read and writer `turnContext` are untouched. `composeWriterPrompt` builds the task for default-fork and `fork: false` writers alike, so both modes get the block; it follows the frozen prefix, so prefix-cache alignment is unchanged.
+
+- 2026-11-03 FC-027 and FC-028 propagation (`main` PRs #198, #199): the writer task's last line now asks the writer to close with one short line, and `checkpoint.ts` gains `lastSucceededWriterStart`, from which prune rebuilds its crossed thresholds after a restart. The merge conflicts only in `checkpoint.ts`'s imports and keeps both sides: compat's `NotFoundError`, `sql` and `alias`, and main's `desc` and `ActorRegistryTable`. Default-fork and `fork: false` writers both run as the `checkpoint-writer` actor of a child session created before the spawn, so the seeding reads either mode's outcome. The new restart cases in `prune.test.ts` stub the checkpoint service, so their stub also returns compat's `coverage`, as the file's existing stub does.
+
+- 2026-11-02 PR #189 propagation: main's FC-002 change drops `task` from the checkpoint writer's tools and gives the writer a TASK SNAPSHOT of the parent's tasks in `composeWriterPrompt`; `checkpoint.ts` merges without conflict. Even where a forked writer's frozen tools still list `task`, the per-tool runtime whitelist in `prompt.ts` rejects the call at execution, so the writer cannot change task state from its child session; `checkpoint-writer-runaway.test.ts`, whose scripted writer keeps calling `task`, still ends at the step budget. Compat's `coverage` read and the writer prefix's `turnContext` are unchanged.
+
+- 2026-11-01 PR #185 propagation: main's FC-002 captor registration (`registerPrefixCapture`) merges without conflict into `prefix-capture-ref.ts` and the compat `prompt.ts` overlay. The compat-only `turnContext` field of `PrefixCaptureResult` and the compat capture body are unchanged; only the finalizer now unregisters its own captor instead of clearing the slot. A full-context actor therefore still reads the live layer's frozen system, tools, permissions and turnContext, and disposing another `SessionPrompt` layer in the same process no longer removes it. Overflow handling and the DC-SESSION-001 `preparePrompt` overlay are untouched. `retry.test.ts` and the new `prefix-capture-ref.test.ts` are byte-identical to main.
+
+- 2026-09-24 synchronization: preserve the strict JSON `context` and `lifecycle`
+  selectors, bounded state capture, and frozen full-context actor lifecycle.
+  Retire only the historical shell and no-script argument recovery surfaces
+  with shared FC-018; runtime and HTTP actor recovery remain.
+
+- 2026-09-15 Inbox crash consistency: inherit FC-001's atomic drain without
+  changing full-context capture, system/model actor ownership, persistent-peer
+  retirement or recovery. No model-facing context field is added to main.
+
+- 2026-09-15 ownership adaptation: inherited main now creates only none-context
+  ephemeral model actors. Compat explicitly owns the complete none/state/full
+  schema, shell and no-script recovery interfaces, descriptions and persistent
+  creation, together with its existing bounded state and frozen turnContext.
+  Main retains the shared FD-009 system full-context runtime. Valid recovered
+  values are preserved, malformed or conflicting copies are rejected, and both
+  runtime-created and model-created persistent actors retain recovery coverage.
+
+- 2026-09-09 full sync: no incoming owned production-path change; retain the existing override and shared invariants.
+
+- POLICY-02 wake follow-up: Inherit durable-row rearming through the existing receiver lifecycle; keep content caps, frozen context, cancellation and disposal boundaries.
+
+- POLICY-02 review: Retain full frozen turnContext and native/active tool snapshots while inheriting broader registered targets, trusted task namespaces and commit ownership. Real actor and HTTP fixtures retain isolated append/replace context coverage.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: Inherited the subtask running-only metadata
+  guard and terminal assignments while retaining full-context
+  membership/system/cwd, known-actor replacement, and static-prefix overflow
+  behavior.
+
+- 2026-09-07 synchronization: Direct prompt-path overlap is adjacent to
+  full-context request execution. Recovery remains main-only; frozen actor
+  membership/system/tools/permissions/cwd, known-actor replacement, and
+  static-prefix failure behavior remain unchanged.
+
+- 2026-09-07 explicit model API propagation: Proxy requests create no persistent session or actor; frozen full-context and checkpoint behavior remains unchanged.
+
+- POLICY-04 review: Real frozen-capture/prompt overlap: inherit the winning system/catalog pair with native/active membership, loaded MCP identity, turnContext, and chronological child boundaries.
+
+- 2026-08-28 review: inherited spawn/run schemas reject the former `actor_id`
+  resume argument, while compat retains UTF-8-safe state caps, captured
+  `turnContext`, loaded MCP membership, and failure when completed ephemeral
+  full-context actors no longer own frozen context.
+
+- 2026-09-01 review: compat retains frozen fork system, tools, permissions,
+  turn context, and cwd across request recovery; old child history can compact
+  without losing the active turn, while an unrecoverable frozen prefix fails
+  closed.
+
+- 2026-09-01 OAuth-branding propagation: no actor, frozen-prefix, or overflow
+  path overlaps this owner; admitted membership and static-prefix failure remain
+  unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: actor/task guidance is
+  semantically adjacent to spawning but changes no actor schema or transport.
+  Frozen membership, searchable MCP capture, active-child inclusion, and
+  static-prefix fail-closed behavior remain intact; 8 owner sentinels passed.
+
+- 2026-09-02 default-model/Compose/voice sync: no actor runtime, prefix,
+  permission, child-lifecycle, or static-preflight path overlap. Compose Next
+  guidance and FC-016 remain shared behavior outside this compat owner.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: compaction and effective-window contracts are
+  semantically adjacent, but no actor production path changed. Eight frozen-
+  membership, searchable-tool, and fail-closed preflight sentinels passed.
+
+- 2026-09-02 WebSearch/session-ID sync: a peer still uses the same value for
+  `session_id`, `actor_id`, and child ID under the new format. Actor-selected
+  request models continue through `ctx.extra.model` to WebSearch; frozen
+  membership, system, cwd, permissions, and static-prefix behavior are intact.
+
+- 2026-09-03 PR #73 propagation: FC-001 queue admission is lifecycle-adjacent,
+  but no actor path changed. Frozen membership, system, cwd, permissions, and
+  static-prefix behavior remain intact.
+
+- 2026-09-04 PR #74 propagation: actor prompt and compaction paths inherit
+  atomic derived turns and parent task binding. Full-context membership,
+  frozen system/tools/permissions/cwd, and static-prefix fail-closed behavior
+  remain compat-owned and unchanged.
+
+- 2026-09-07 selected-capability review: Actual overlap includes actor spawn and
+  tool entry, prompt, prefix capture/snapshots, checkpoint, and compaction.
+  Frozen membership/system/tools/permissions/cwd and required `turnContext`
+  remain intact; the same capture also carries `modelIdentity`, including the
+  explicit `fork: false` cold writer. RECOVERY-01 is inherited shared behavior:
+  only an eligible persistent/full-context actor retaining its receiver and
+  frozen context can resume. Owned continuation/compaction receipts preserve
+  the original user and task while foreign hook messages gain no authority.
+  Recoverable child history remains distinct from an unrecoverable static
+  prefix. The earlier dated “Recovery remains main-only” note is historical;
+  internal actor resume is now supported, while public session recovery/resume
+  and its OpenAPI remain main-only with no agent/task selectors.
+
+- 2026-09-08 compact-tool integration: Full-context actors inherit the complete
+  authorized tool pool and its separate advertised subset. Hidden native and
+  MCP schemas that differ from the frozen contract fail closed; each request
+  still owns its StructuredOutput executor. Required frozen `turnContext`,
+  same-capture `modelIdentity` in both checkpoint modes, parent permissions,
+  original receiver/cwd, and static-prefix overflow handling remain intact.
+
+- 2026-09-08 selected Actor/MCP completion: Public recovery now supports the controlled agentID selector through the existing persistent/full-context Actor lifecycle; older dated main-only notes describe their historical state. task_id remains rejected. Nine real HTTP tests preserve original turnContext bytes once in append/replace-agent modes after live parent/receiver updates, including isolated peers. New exec send/status shares the original authority while capStateContext and UTF-8 limits remain in place.
+
+### DC-ACTOR-002 (2 notes)
+
+- 2026-11-22 CI follow-up: upstream `c9c91d7b` (adopted 2026-11-13) offers exactly the reasoning levels a model declares. "an explicit model keeps the agent variant when it resolves to the agent model" and "an explicit variant outranks both the agent and parent variants" now declare the levels they select (`low`, and `medium`) on the fixture model; before, spawn dropped or rejected them, and both cases failed in CI. The owner's precedence is unchanged, and "an unsupported configured variant stays unset despite a supported parent variant" already asserts the declared-level rule.
+
+- 2026-11-04 evidence: parent same/different-model forwarding, explicit-over-agent/parent priority, unsupported configured value, provider-aware group selection and metadata consistency are covered alongside the existing tests. A real group-selected child persists the configured variant and sends its reasoning effort on the wire.
+
+### DC-TUI-001 (23 notes)
+
+- 2026-11-03 FC-030 propagation (`main` PR #203): resuming a session holds the last main-lane user message's variant in memory for that model (`variant.resume`) instead of saving it with `variant.set`; a message without a variant keeps the saved per-model choice. Compat's `local.tsx` matches main and its restore effect is the inherited one, so the change applies unchanged. The `ModelMetadata` preview reads `variant.current()` and so resolves the resumed variant; previews still never write the selected variant store, and submission sends the same `variant.current()` value.
+
+- 2026-11-02 FC-023 rebuild-boundary propagation (`main` PR #193): `insertRebuildBoundary` keeps the variant of the lane's newest user message when the boundary is on that message's model. Compat restores the TUI selection and resolves model-less turns through `SessionModelSelection.resolve`, whose fallback takes the last user message's model and variant; with the boundary now carrying the variant, a session reopened after a rebuild shows it and inbox deliveries keep it. `checkpoint.ts` merges without conflict beside compat's `coverage` read and writer `turnContext`.
+
+- 2026-10-31 FC-023 propagation: main continues the fallback model's variant in `createUserMessage`. Compat creates user messages through `SessionModelSelection.resolve`, so the resolver applies the same rule: only when neither the input nor the agent names a model, and only while the model still offers the variant. The resolver's fallback type now carries the optional variant that `lastModel` returns. The preview endpoint always sends the TUI's selected model, so a preview never reaches the fallback and its results are unchanged; a named model without a variant still previews and resolves to its default. Shell and command continuation come unchanged from main's `prompt.ts`.
+
+- 2026-10-13 full sync: upstream `3c6e6bb0` removes the compose agent and its "(legacy)" label from the Prompt footer. Compat keeps its `flexShrink={0}` agent label and `ModelMetadata` display; only the retired suffix branch is dropped.
+
+- 2026-10-02 full sync: upstream removes the free `mimo-auto` channel, including the Prompt footer guard that hid the provider label for it. Compat keeps `ModelMetadata` as the authoritative footer display, so the upstream-only `currentProviderLabel` row stays absent; provider/model/variant truth and `titleLocale` submission are unchanged.
+
+- 2026-09-18 model-selection correction: ordinary prompt metadata is resolved
+  by `POST /experimental/model-selection`, using the same server resolver as
+  actual user-message creation. The TUI sends its selected model, agent and
+  explicit variant; it no longer mirrors agent model-group or default-model
+  selection. Preview results never update the selected variant store or delay
+  submission. Pending and failed previews display `resolving` and `unknown`,
+  respectively; `none` requires a successful response without a named variant.
+  Replaced requests and disposed components cannot accept late responses.
+  Preview requests carry the submitting session's workspace, or the selected
+  workspace for a new session; an unloaded session cannot publish a result.
+
+- 2026-09-09 full sync: retain provider/model/variant metadata and titleLocale; the multimodal title test now sends actual PNG/JPEG bytes through the inherited image transform.
+
+- POLICY-02 review: No incoming compat-owned production overlap; the existing overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- POLICY-03 review: No changed compat-owned production surface; all incoming TUI/auth files match main, and the existing overlay remains intact.
+
+- 2026-09-05 synchronization: No TUI component or locale submission path
+  changed. Title context now strips leading mentions while
+  provider/model/variant metadata remains authoritative.
+
+- 2026-09-07 synchronization: Only the shared App locale fixture is
+  semantically adjacent; no TUI component path changed. The existing zh-CN
+  fixture and both locale assertions are retained, while TUI request metadata,
+  locale submission, and the known variant-display limits remain unchanged.
+
+- 2026-09-07 explicit model API propagation: Discovery and proxy requests do not change the TUI model/variant selection or titleLocale; all metadata surface blobs remain unchanged.
+
+- POLICY-04 review: No incoming production-path overlap; the existing source overlay is retained. This review does not claim new runtime coverage of this owner.
+
+- 2026-09-01 review: incoming `main` changes had no TUI metadata or locale-path
+  overlap. The compat follow-up changed adjacent prompt, model-ordering,
+  checkpoint-context, and global revert/redo paths without changing the
+  provider/model/variant display or `titleLocale` submission contract.
+
+- 2026-09-01 OAuth-branding propagation: browser callback HTML has no shared
+  component or state with TUI request metadata; provider/model/variant truth and
+  `titleLocale` submission remain unchanged.
+
+- 2026-09-01 tool-guidance/Codex-convergence sync: no TUI component, request
+  metadata, or locale path overlap; provider/model/variant truth and
+  `titleLocale` submission remain unchanged.
+
+- 2026-09-02 default-model/Compose/voice sync: resolved the Prompt conflict
+  semantically. Compat retains `ModelMetadata`, effective provider/model/variant
+  rendering, flex behavior, and both `titleLocale` submission paths; it inherits
+  FC-016's complete voice binding, stop/drain, and grapheme-safe editor flow.
+  The upstream-only `currentProviderLabel` is intentionally absent because the
+  compat metadata component is authoritative.
+
+- 2026-09-02 OpenAPI/0.1.14 sync: no TUI metadata, layout, or locale path
+  overlap; the request-oriented provider/model/variant truth remains unchanged.
+
+- 2026-09-02 WebSearch/session-ID sync: no TUI component path changed. Session
+  IDs remain opaque round-trip values; provider/model/variant truth and both
+  `titleLocale` submission paths remain unchanged.
+
+- 2026-09-03 PR #73 propagation: no TUI component path changed. The existing
+  client-visible queued state now has its shared persisted producer restored;
+  provider/model/variant truth and locale submission remain unchanged.
+
+- 2026-09-04 PR #74 propagation: no TUI component path changed. Shared handoff
+  now drains persisted queued turns; provider/model/variant truth and locale
+  submission remain unchanged.
+
+- 2026-09-07 selected-capability review: No owned TUI metadata or locale-submission
+  implementation overlap. Request provider/model/variant truth, both
+  `titleLocale` paths, narrow-layout behavior, and the existing variant-display
+  limits remain unchanged. The shared backend harness alias does not create
+  a second compat metadata resolver.
+
+- 2026-09-08 selected Actor/MCP completion: No metadata or titleLocale component changed; provider/model/variant presentation and existing known limits remain unchanged.
+
+### DC-WEBSEARCH-001 (4 notes)
+
+- 2026-11-04 FC-035 propagation (`main` PR #211): the processor's two patch-part sites gain `written` (and `cleanup` clears the message's write record); the native-search output display in `completeToolCall` is a separate hunk and merges unchanged.
+
+- 2026-11-02 PR #189 propagation: main's FC-013 change bounds background system agents' retries in the `llm.ts` request ladder and as the processor stream policy's final `cap`; both merge without conflict beside this owner's code. The native-search resend before output stays one-shot per stream attempt and outside the ladder's retry count, so a capped system agent makes at most one extra request per attempt and still stops. The native display path in `processor.ts` is untouched.
+
+- 2026-10-30 synchronization: adopt the removal of Xiaomi gateway search (`d0684a3d`) without retiring this owner. No sidecar or provider-specific automatic exposure remains. Keep explicitly configured native search and standalone fallback models; every provider can reach Exa only under `MIMOCODE_ENABLE_EXA` (or the existing experimental alias), and exhausted routes return a no-results/WebFetch hint. Native permission/replay/failure/display contracts remain. Default and Exa-only opt-in runs cover the fallback suite; default registry tests include Xiaomi API/token-plan, OpenAI and OpenCode.
+
+- 2026-10-29 synchronization: upstream `3e92e0d8` stores Xiaomi token-plan credentials under `xiaomi-token-plan-{cn,ams,sgp}` and widens main's sidecar and tool gate to every `xiaomi`/`xiaomi-*` provider, keyed by the model's own provider. Compat keeps its layered chain and applies the same family gate and key to the sidecar; family sessions still skip Exa after the configured fallbacks. Native search, failure marking, replay and display are unchanged. Evidence: the token-plan sidecar and keyless token-plan fallback cases in `test/tool/websearch.test.ts`, family exposure in `test/tool/registry-toolset.test.ts`.
+
+### DC-SESSION-001 (5 notes)
+
+- 2026-11-22 propagation of `main` pull request #266 (FC-054, FC-008): `test/preload.ts` now also points `os.homedir()` at the isolated home, in the HOME setup well before this owner's teardown. The `release()` call before the data directory is removed is unchanged, and the session-owner suites pass. The bounded log sink (FC-054) does not touch session ownership.
+
+- 2026-11-16 synchronization: inherit same-process live-claim shielding and monotonic claim run ids. The live set does not authorize a process to run another process’s session: ownership checks, immediate transactions, current-controller wake checks and recovery guards remain. On true orphan recovery preserve FC-024 consumed outcomes; a stop-fenced run with no remaining claim interrupts. See C09 in the shared sync record.
+
+- 2026-11-04 FC-038 propagation (`main` PR #216): a keyed resend that revives an unseen row places the owner's wake in the accept transaction like an inserted input (`placeWake`).
+
+- 2026-11-04 durable cron delivery: a durable task's fire for another session goes to that session's inbox instead of being refused there, and the lock holder's own turn no longer holds it back (see the Delivery contract); the FC-034 note below describes the state before it.
+
+- 2026-11-03 FC-034 propagation (`main` PR #209): a scheduler started while another process held `.cron-lock` retries it every 30 seconds while idle, start/stop/ticks are serialized, and `permanent` durable recurring jobs are accepted; the cron files are identical on both branches. A durable task whose target session another process owns still goes through the in-process prompt path, which this override refuses (`OwnedElsewhereError`), so that fire is lost: cross-session durable delivery through the inbox is not part of this propagation, and a per-session wake source should stay a session-only cron.
