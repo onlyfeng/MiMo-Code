@@ -6416,3 +6416,17 @@ Moved verbatim from `docs/dev-compat-overrides.md` at dev/compat `ee152f3358c53a
 - 2026-11-04 durable cron delivery: a durable task's fire for another session goes to that session's inbox instead of being refused there, and the lock holder's own turn no longer holds it back (see the Delivery contract); the FC-034 note below describes the state before it.
 
 - 2026-11-03 FC-034 propagation (`main` PR #209): a scheduler started while another process held `.cron-lock` retries it every 30 seconds while idle, start/stop/ticks are serialized, and `permanent` durable recurring jobs are accepted; the cron files are identical on both branches. A durable task whose target session another process owns still goes through the in-process prompt path, which this override refuses (`OwnedElsewhereError`), so that fire is lost: cross-session durable delivery through the inbox is not part of this propagation, and a per-session wake source should stay a session-only cron.
+
+## 2026-11-26 closed image attachment reminder propagation
+
+- Last reviewed: 2026-11-26. Audited `c538fab349373356623acea5bb80defa7fc279c0..6ad6bbb44acb3600ccc4c09ab3c64c79f5878593`: upstream pull request #2867 (closed image attachment reminder) through this synchronization. No compat pull request merged since the previous review; the `main` alignment review (#273–#278) reached compat through its own propagations.
+
+- Scope: C01–C02 (N=2). See [the shared synchronization record](upstream-sync-2026-11-26.md).
+
+- Starting main: `92d3b8d44902533ccfe15d4e470a279fdf412d75`. Starting compat: `d8d14a2972182440a6f022f24dbdc01e30ec162d` (already containing that `main`). Main runtime snapshot: `d1039edaa94528da317b8668a2e244ec5fa98c9b`. Compat runtime snapshot: `75e37ed2f052e20f7b14a98caee44e7baaed1cf0`.
+
+- Result: inherit the closed `<system-reminder>` for user image attachments and the legacy-only read-time envelope reorder (FC-009) through a clean merge. DC-CONTEXT-001 watches `prompt.ts` and `message-v2.ts`; its compat-owned hunks there lie outside the envelope and `orderUserParts` regions, and preflight sizes image attachments from their pixel dimensions, not from the reminder text. All DC owners are unchanged.
+
+- Validation: `bun run typecheck` in `packages/cli` passes; root lint reports 0 errors. 16 focused files, including `test/session/overflow.test.ts` for DC-CONTEXT-001 image sizing: 705 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-26.md#publication).
+
+This superseded current-review block is retained as history. The 2026-11-26 propagation of upstream `6aed4550` (case-preserving image reminder escape) is recorded in [the shared sync record](upstream-sync-2026-11-26-6aed4550.md); compat runtime/test snapshot `730b7656f6255197d272825c5baa1c97b243f5f4`.
