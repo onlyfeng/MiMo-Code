@@ -3538,7 +3538,10 @@ taskMetadataIt.live(
         expect(result.info.id).not.toBe(assistant.info.id)
         expect(result.parts.findLast((part) => part.type === "text")?.text).toBe("recovered after provider error")
       }),
-      { git: true, config: providerCfg },
+      {
+        git: true,
+        config: providerCfg,
+      },
     ),
 )
 
@@ -3927,9 +3930,7 @@ it.live(
 
           const inputs = yield* llm.inputs
           const system = ((inputs[0].messages ?? []) as { role: string; content: unknown }[])
-            .flatMap((message) =>
-              message.role === "system" && typeof message.content === "string" ? [message.content] : [],
-            )
+            .flatMap((message) => message.role === "system" && typeof message.content === "string" ? [message.content] : [])
             .join("\n")
           expect(system).not.toContain("Working directory:")
           // [skill-catalog-live S2.3] The skill catalog is a user-turn reminder, not system text.
@@ -3985,15 +3986,13 @@ it.live(
           })
 
           const inputs = yield* llm.inputs
-          const systems = inputs
-            .slice(0, 2)
-            .map((input) =>
-              ((input.messages ?? []) as { role: string; content: unknown }[])
-                .flatMap((message) =>
-                  message.role === "system" && typeof message.content === "string" ? [message.content] : [],
-                )
-                .join("\n"),
-            )
+          const systems = inputs.slice(0, 2).map((input) =>
+            ((input.messages ?? []) as { role: string; content: unknown }[])
+              .flatMap((message) =>
+                message.role === "system" && typeof message.content === "string" ? [message.content] : [],
+              )
+              .join("\n"),
+          )
           expect(systems).toHaveLength(2)
           expect(systems[0]).toContain("PREFIX_INSTRUCTION_V1")
           expect(systems[1]).toBe(systems[0])
@@ -5092,7 +5091,9 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
       expect(tool).toBeDefined()
       if (!tool) return
 
-      expect(tool.state.output).toBe('Window updated\n\nStructured content:\n{"changed":true,"windowID":42}')
+      expect(tool.state.output).toBe(
+        'Window updated\n\nStructured content:\n{"changed":true,"windowID":42}',
+      )
       expect(tool.state.metadata.mcp).toEqual({
         structuredContent: mcpSuccessResult.structuredContent,
         isError: false,
@@ -5513,7 +5514,10 @@ mcpIt.live(
         expect(
           (yield* MessageV2.filterCompactedEffect(session.id))
             .flatMap((message) => message.parts)
-            .some((part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed"),
+            .some(
+              (part) =>
+                part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
+            ),
         ).toBe(true)
       }),
       { git: true, config: providerCfg },
@@ -6485,7 +6489,9 @@ mcpIt.live("rejects direct MCP calls disabled for the request", () =>
       expect(
         (yield* MessageV2.filterCompactedEffect(session.id))
           .flatMap((message) => message.parts)
-          .some((part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed"),
+          .some(
+            (part) => part.type === "tool" && part.tool === "mcp_success" && part.state.status === "completed",
+          ),
       ).toBe(false)
     }),
     { git: true, config: providerCfg },
@@ -6518,7 +6524,9 @@ mcpIt.live("rejects direct MCP calls hidden by the agent allowlist", () =>
       expect(
         (yield* MessageV2.filterCompactedEffect(session.id))
           .flatMap((message) => message.parts)
-          .some((part) => part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error"),
+          .some(
+            (part) => part.type === "tool" && part.tool === "mcp_result" && part.state.status === "error",
+          ),
       ).toBe(true)
     }),
     { git: true, config: restrictedAgentProviderCfg },

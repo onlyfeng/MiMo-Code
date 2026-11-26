@@ -359,8 +359,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           // tool parts, but old tool_result-only users must still align on read.
           yield* Effect.sync(() =>
             Database.use((d) =>
-              d
-                .update(PartTable)
+              d.update(PartTable)
                 .set({ data: sql`${JSON.stringify({ type: "tool_result", body: PAD })}` })
                 .where(eq(PartTable.message_id, u2.id))
                 .run(),
@@ -376,8 +375,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           // delta = msgs.slice(0, watermarkIdx + 1) = msgs.slice(0, 3) = [u1, a1, u2].
           yield* Effect.sync(() =>
             Database.use((d) =>
-              d
-                .update(SessionTable)
+              d.update(SessionTable)
                 .set({ last_checkpoint_message_id: a1.id })
                 .where(eq(SessionTable.id, info.id))
                 .run(),
@@ -481,8 +479,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           const u2 = { id: MessageID.ascending() }
           yield* Effect.sync(() =>
             Database.use((d) =>
-              d
-                .insert(MessageTable)
+              d.insert(MessageTable)
                 .values({
                   id: u2.id,
                   session_id: info.id,
@@ -565,7 +562,9 @@ describe("checkpoint writer forkContext shape per mode", () => {
           // Parent's last_checkpoint_message_id is null by default after session.create({}).
           // No setup needed; verify it's null first.
           const before = yield* Effect.sync(() =>
-            Database.use((d) => d.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get()),
+            Database.use((d) =>
+              d.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get(),
+            ),
           )
           expect(before?.last_checkpoint_message_id ?? null).toBeNull()
 
@@ -866,8 +865,7 @@ describe("checkpoint writer forkContext shape per mode", () => {
           // a child session and BEFORE invoking actor.spawn.
           yield* Effect.sync(() =>
             Database.use((d) =>
-              d
-                .update(SessionTable)
+              d.update(SessionTable)
                 .set({ last_checkpoint_message_id: a2.id })
                 .where(eq(SessionTable.id, info.id))
                 .run(),
