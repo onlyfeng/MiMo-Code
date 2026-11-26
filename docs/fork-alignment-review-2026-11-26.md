@@ -35,7 +35,25 @@ fork 未删除任何 upstream 文件（main、compat 均无 D 状态）。
 | A6 | FD/FC/DC 登记表 | 把 2026-10-01 之前的日期注记迁到 history | **不执行。** 逐条核对发现，现行规则常常只写在日期注记里，没写进 Observable contract：FD-009 的“main 的 actor spawn/run 不暴露 `context`”和“非 main agent 的 resume 拒绝模型覆盖”，FC-008 2026-09-17 的测试根目录机制，FC-001 2026-09-15 的消息原子提交与准入。整段迁移会把这些规则移出同步必读范围；要安全地做，等于重写正文。建议以后逐条把仍然有效的注记合并进正文，每条单独审查 |
 | A7 | FC-052 / DC-BUILD-001 | 把 local 版本时间戳上提到 main | 不执行：会增加 main 相对 upstream 的偏离 |
 
-未做逐段溯源的热点：`session/prompt.ts`、`actor/spawn.ts`、`tool/tool-script.ts`。建议每次只取一个面，逐 hunk 找到引入提交与登记项，确认理由是否仍然成立。
+## 三个热点文件的逐段追溯（同日后续）
+
+对象：`session/prompt.ts`、`actor/spawn.ts`、`tool/tool-script.ts`，基线仍为 upstream `c538fab3`。
+
+| PR | 内容 | 结果 |
+| --- | --- | --- |
+| #275 | 恢复 upstream 的缩进与换行：只改两侧括号深度相同且 token 相同的行；fork 改了嵌套或带 fork 注释的范围保持原样 | 三个文件 token 流不变（仅括号前尾随逗号差异）。差异：prompt.ts +2321/−1749 → +1938/−1360，spawn.ts +1310/−383 → +1251/−314，tool-script.ts +729/−281 → +671/−235。空残留清理恢复 upstream 版本（只少一条诊断日志），runLoop 参数注释恢复 |
+| #276 | 退役 Auto-Worktree 提醒，跟随 upstream `71a12699`（#2413） | 删除提醒、Bash 写入/git 变更检测及其元数据、exec 中的 `mainWorktreeHits`、`auto_worktree` 配置键和 SDK 字段、四组测试；旧配置中的键被忽略，`auto_worktree_hint_sent` 保留为惰性列 |
+| #277 | `spawn.ts` 的终态通知改走共享 `makeTerminalNotifier` | 两份手写副本合并；保留 fork 的投递目标（父 Instance 与 run-disposal 作用域）；通知器可接收调用方已持有的 actor，toast 改经注入的 Bus 服务；恢复的持久轮按 continuation 通知、不弹 toast；删除未使用的 `captureNotificationTarget` |
+
+兼容分支：三次传播都在本地验证后推送。#275 的三处冲突没有采用冲突块，而是在 compat 自己的文件上重跑同一对齐，并在 token 级证明 compat 相对 main 的差异不变（55 处编辑，前后一致）。#276/#277 干净合并，SDK 从 compat 源码重新生成后与合并结果一致。
+
+机械筛查结论：
+
+- fork 侧声明但无引用的名字：三个文件中只有 `spawn.ts` 的 `captureNotificationTarget`，已在 #277 删除。
+- upstream 函数在 fork 中调用次数更少的 83 个名字：除已处理的通知器外，均对应已登记决定。例如 resume 截断属 FC-001，`dropEmptyAssistant` 属 FC-013 C04，`forkContextKey` 属 FD-009，删除审批相关属 FD-001，`charWidth` 属 FC-016，`isLegacyBoundary` 被 10-22 同步的显式 `placement` 标记取代（时间戳判断无法区分 fork 记录），`getLastModel` 属 FD-006 POLICY-01，`getAuthorizationHeader` 属 FD-004。
+- 抽查退役条件：FC-033 仍成立（upstream 的 metadata 回调仍写 `time: { start: Date.now() }`）。
+
+其余改动块均落在有效登记条目（FC-001、FD-005/006、FD-009、FC-013 等）之内，未发现新的退役证据。以后若要继续，宜按单个条目，对照 upstream 当前实现逐条复核退役条件，而不是按文件逐段读。
 
 ## 完整清单（N=77）
 
@@ -53,7 +71,7 @@ fork 未删除任何 upstream 文件（main、compat 均无 D 状态）。
 | FD-011 | 压缩请求禁用工具调用 | 保留（抽查） | 继承 | upstream `compaction.ts:484` 仍为 `toolChoice: "auto"` |
 | FD-012 | 空压缩步骤重试 1 次 | 保留 | 继承 | upstream 无压缩专用重试 |
 | FD-013 | 模型配置保留存储源语义 | 保留 | 继承 | 防止 `{env:}` 被展开写回，属正确性修复 |
-| FC-001 | actor 代际与持久 peer 生命周期 | 保留；A5 补登记并补 fork 路径回归测试 | 继承 | 孤儿扫描 |
+| FC-001 | actor 代际与持久 peer 生命周期 | 保留；A5 补登记并补 fork 路径回归测试；spawn 终态通知改走共享通知器（#277） | 继承 | 孤儿扫描 |
 | FC-024 | 启动对账：已投递的 claim 记为 interrupted | 保留 | 继承 | 91872284 处理的是存活 run 的 claim，属于另一问题 |
 | FC-031 | actor send 记录发送 lane | 保留 | 继承 | 退役条件未满足 |
 | FC-037 | actor 回执 | 保留 | 继承 | 同上 |
@@ -72,7 +90,7 @@ fork 未删除任何 upstream 文件（main、compat 均无 D 状态）。
 | FC-004 | MCP 配置与连接生命周期 | 保留 | 继承 | 11-25 C03 已补 `directToolNames` 校验 |
 | FC-005 | 技能发现与调用权限一致 | 保留；A5 已注明 `isSkillCatalogReminder` | 继承 | 孤儿扫描 |
 | FC-006 | 插件写记忆的实例内决策 | 保留 | 继承 | 退役条件未满足 |
-| FC-007 | 受保护根、固定 cwd 等 | 保留 | 继承 | 同上 |
+| FC-007 | 受保护根、固定 cwd 等 | 保留；Auto-Worktree 提醒已退役（#276） | 继承 | 同上 |
 | FC-008 | 有界清理与 CI 隔离 | 保留；A2 已完成；A3 实测后维持路径哈希分片 | 继承（compat 另有 Windows 运行时入口） | `run-cli-tests.sh` 为 path-hash，未使用 `test-shard.ts` |
 | FC-009 | 合成消息来源标记 | 保留 | 继承 | 退役条件未满足 |
 | FC-010 | WebFetch/SSRF 分类 | 保留 | 继承（DC-NET-001 覆盖） | 同上 |
