@@ -29,7 +29,7 @@ fork 未删除任何 upstream 文件（main、compat 均无 D 状态）。
 | --- | --- | --- | --- |
 | A1 | FD-004 | `flag/flag.ts` 密码块恢复 upstream 原文；非回环绑定守卫改读 upstream 的 `MIMOCODE_SERVER_PASSWORD_SUPPLIED`；删除 `MIMOCODE_SERVER_OPERATOR_PASSWORD`、加载时快照与测试用 setter；`project-init-git.test.ts` 回到 upstream 文本（保留 `root: "cwd"`） | PR #273。守卫行为不变：旧 getter 与 `SUPPLIED` 读同一变量；守卫改回 `MIMOCODE_SERVER_PASSWORD` 的突变会使 worker-listener 测试在 `Refusing to bind` 断言处失败 |
 | A2 | FD-006 | 删除 `script/experiments/tool-schema*.ts` 与 `test/experiments/tool-schema*.test.ts`；`tsconfig.scripts.json` 回到 upstream 文本 | PR #273。实验记录保留在 `docs/experiments/tool-schema-2026-09-07.md`，代码可从 `6fe784092fed596eea8d5382d85c9713ed96a378` 取回 |
-| A3 | FC-008 | 评估 CI 改用 upstream 的按耗时分片（`script/test-shard.ts`） | 单独评估，结论记入其 PR 与 FC-008 |
+| A3 | FC-008 | 评估 CI 改用 upstream 的按耗时分片（`script/test-shard.ts`） | **不改。** FC-008 在 2026-11-16 同步时已决定保留路径哈希分片（审计时漏看）。本次实测（`fe97a67a` 的绿色运行）：哈希分片 372/245/175/348 s，按耗时分片为每片 288 s，墙钟约快 84 s，runner 分钟数不变；代价是每新增测试文件或刷新权重都会让文件换分片。实测数据已补进 FC-008 |
 | A4 | FC-013 | 记录 upstream 开关 `MIMOCODE_EMPTY_STEP_DROP_LIMIT` 在 fork 中无读取方 | FC-013 注记；代码保持 upstream 文本 |
 | A5 | FC-001 / FC-005 | 记录生产路径不调用、但 upstream 测试仍在测的辅助函数 | FC-001/FC-005 注记。复核时发现缺口：fork 的 `/summarize` 走 `startSummarize` 内联查找，upstream 回归测试只测未被调用的 `resolveCurrentAgent`。新增 `test/server/summarize-agent-main-slice.test.ts` 驱动真实路由；只改 agent 取值的突变会使它在 agent 断言处失败 |
 | A6 | FD/FC/DC 登记表 | 把 2026-10-01 之前的日期注记迁到 history | **不执行。** 逐条核对发现，现行规则常常只写在日期注记里，没写进 Observable contract：FD-009 的“main 的 actor spawn/run 不暴露 `context`”和“非 main agent 的 resume 拒绝模型覆盖”，FC-008 2026-09-17 的测试根目录机制，FC-001 2026-09-15 的消息原子提交与准入。整段迁移会把这些规则移出同步必读范围；要安全地做，等于重写正文。建议以后逐条把仍然有效的注记合并进正文，每条单独审查 |
@@ -73,7 +73,7 @@ fork 未删除任何 upstream 文件（main、compat 均无 D 状态）。
 | FC-005 | 技能发现与调用权限一致 | 保留；A5 已注明 `isSkillCatalogReminder` | 继承 | 孤儿扫描 |
 | FC-006 | 插件写记忆的实例内决策 | 保留 | 继承 | 退役条件未满足 |
 | FC-007 | 受保护根、固定 cwd 等 | 保留 | 继承 | 同上 |
-| FC-008 | 有界清理与 CI 隔离 | 保留；A2 已完成，A3 单独评估 | 继承（compat 另有 Windows 运行时入口） | `run-cli-tests.sh` 为 path-hash，未使用 `test-shard.ts` |
+| FC-008 | 有界清理与 CI 隔离 | 保留；A2 已完成；A3 实测后维持路径哈希分片 | 继承（compat 另有 Windows 运行时入口） | `run-cli-tests.sh` 为 path-hash，未使用 `test-shard.ts` |
 | FC-009 | 合成消息来源标记 | 保留 | 继承 | 退役条件未满足 |
 | FC-010 | WebFetch/SSRF 分类 | 保留 | 继承（DC-NET-001 覆盖） | 同上 |
 | FC-011 | fork 面向的提示与技能指引 | 保留 | 继承 | 内容契约 |
