@@ -560,52 +560,41 @@ export function viewExecSubtools(metadata: unknown): ExecSubPartSnapshot[] {
       const stateMetadata = optionalMetadata(state.metadata)
       const attachments = normalizeAttachments(state.attachments)
       if (
-        typeof seq !== "number" ||
-        !Number.isInteger(seq) ||
-        seq < 1 ||
+        typeof seq !== "number" || !Number.isInteger(seq) || seq < 1 ||
         type !== "tool" ||
-        typeof callID !== "string" ||
-        callID.length === 0 ||
-        seenSeq.has(seq) ||
-        seenCallID.has(callID) ||
-        typeof tool !== "string" ||
-        tool.length === 0 ||
+        typeof callID !== "string" || callID.length === 0 ||
+        seenSeq.has(seq) || seenCallID.has(callID) ||
+        typeof tool !== "string" || tool.length === 0 ||
         (status !== "running" && status !== "completed" && status !== "error") ||
         !Object.prototype.hasOwnProperty.call(state, "input") ||
-        typeof start !== "number" ||
-        !Number.isFinite(start) ||
+        typeof start !== "number" || !Number.isFinite(start) ||
         ((status === "completed" || status === "error") && (typeof end !== "number" || !Number.isFinite(end))) ||
         (status === "completed" && (typeof state.title !== "string" || typeof state.output !== "string")) ||
         (status === "error" && typeof state.error !== "string")
-      )
-        return []
+      ) return []
       seenSeq.add(seq)
       seenCallID.add(callID)
-      return [
-        {
-          seq,
-          type: "tool" as const,
-          callID,
-          tool,
-          state: {
-            status,
-            input,
-            ...(typeof state.title === "string" ? { title: state.title } : {}),
-            ...(typeof state.output === "string" ? { output: state.output } : {}),
-            ...(typeof state.error === "string" ? { error: state.error } : {}),
-            ...(stateMetadata ? { metadata: stateMetadata } : {}),
-            time: {
-              start,
-              ...(typeof end === "number" && Number.isFinite(end) ? { end } : {}),
-            },
-            ...(attachments ? { attachments } : {}),
-            ...(state.providerOutput !== undefined ? { providerOutput: state.providerOutput } : {}),
-            ...(optionalMetadata(state.providerMetadata)
-              ? { providerMetadata: optionalMetadata(state.providerMetadata) }
-              : {}),
+      return [{
+        seq,
+        type: "tool" as const,
+        callID,
+        tool,
+        state: {
+          status,
+          input,
+          ...(typeof state.title === "string" ? { title: state.title } : {}),
+          ...(typeof state.output === "string" ? { output: state.output } : {}),
+          ...(typeof state.error === "string" ? { error: state.error } : {}),
+          ...(stateMetadata ? { metadata: stateMetadata } : {}),
+          time: {
+            start,
+            ...(typeof end === "number" && Number.isFinite(end) ? { end } : {}),
           },
-        } satisfies ExecSubPartSnapshot,
-      ]
+          ...(attachments ? { attachments } : {}),
+          ...(state.providerOutput !== undefined ? { providerOutput: state.providerOutput } : {}),
+          ...(optionalMetadata(state.providerMetadata) ? { providerMetadata: optionalMetadata(state.providerMetadata) } : {}),
+        },
+      } satisfies ExecSubPartSnapshot]
     })
     .toSorted((a, b) => a.seq - b.seq)
 }
@@ -875,8 +864,8 @@ export const ToolScriptTool = Tool.define(
             ctx.extra?.toolWhitelist instanceof Set
               ? ctx.extra.toolWhitelist
               : Array.isArray(ctx.extra?.toolWhitelist)
-                ? new Set(ctx.extra.toolWhitelist.filter((id): id is string => typeof id === "string"))
-                : undefined
+            ? new Set(ctx.extra.toolWhitelist.filter((id): id is string => typeof id === "string"))
+            : undefined
           const disabledTools = ctx.extra?.disabledTools instanceof Set ? ctx.extra.disabledTools : undefined
           const defs = candidates.filter(
             (def) =>
@@ -941,12 +930,12 @@ export const ToolScriptTool = Tool.define(
           // line above), plus source text — a bare parse error is undebuggable.
           const transpile = (code: string) =>
             ts.transpileModule(`globalThis.__main = async () => {\n${code}\n}`, {
-              reportDiagnostics: true,
-              compilerOptions: {
-                module: ts.ModuleKind.ESNext,
-                target: ts.ScriptTarget.ESNext,
-              },
-            })
+            reportDiagnostics: true,
+            compilerOptions: {
+              module: ts.ModuleKind.ESNext,
+              target: ts.ScriptTarget.ESNext,
+            },
+          })
           const original = transpile(normalized)
           const candidate = normalized.replace(/^(\s*)<(?=(?:const|let|var)\b)/, "$1")
           const repaired = original.diagnostics?.length && candidate !== normalized ? transpile(candidate) : undefined
@@ -1025,7 +1014,9 @@ export const ToolScriptTool = Tool.define(
               recent: recentTail(),
               ...subPartMetadata(),
             }
-            progress.pending = progress.pending.then(() => bridge.promise(ctx.metadata({ metadata }))).catch(() => {})
+            progress.pending = progress.pending
+              .then(() => bridge.promise(ctx.metadata({ metadata })))
+              .catch(() => {})
           }
           const publishProgress = (options?: { immediate?: boolean }) => {
             if (progress.closed) return
@@ -1279,16 +1270,14 @@ export const ToolScriptTool = Tool.define(
               )
             const executeBuiltin = def
               ? executeDef(def).pipe(
-                  Effect.map(
-                    (result): ExecNestedResult => ({
-                      title: result.title,
-                      output: result.output,
-                      metadata: result.metadata,
-                      attachments: normalizeAttachments(result.attachments),
-                      providerOutput: (result as { providerOutput?: unknown }).providerOutput,
-                      providerMetadata: (result as { providerMetadata?: Record<string, unknown> }).providerMetadata,
-                    }),
-                  ),
+                  Effect.map((result): ExecNestedResult => ({
+                    title: result.title,
+                    output: result.output,
+                    metadata: result.metadata,
+                    attachments: normalizeAttachments(result.attachments),
+                    providerOutput: (result as { providerOutput?: unknown }).providerOutput,
+                    providerMetadata: (result as { providerMetadata?: Record<string, unknown> }).providerMetadata,
+                  })),
                 )
               : executeMcp(mcpDef!)
             // Termination still interrupts the guest; one that settled meanwhile reports its real result.
@@ -1472,8 +1461,7 @@ return { __undef: __out.value === undefined, json: __out.value === undefined ? "
                   activeDeadlineMs,
                   signal: AbortSignal.any([nestedAbort, guestController.signal]),
                   interrupt: () => nestedAbort.aborted || Boolean(plan.receipt),
-                },
-              )
+              })
               return evaluation
             },
             (exit) => Effect.gen(function* () {

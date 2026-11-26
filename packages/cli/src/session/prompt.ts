@@ -1830,57 +1830,59 @@ ${entries}
           }),
         )
         const bodyText = userMessage.parts
-          .flatMap((p) => (p.type === "text" && !p.synthetic && !p.ignored ? [p.text] : []))
-          .join("\n")
-        const stripped = bodyText.replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ")
-        const mentioned: string[] = []
-        const seen = new Set<string>()
-        const mentionRe = /(?:^|\s)\/([A-Za-z][A-Za-z0-9_:-]*)(?=[^A-Za-z0-9_:-]|$)/g
-        for (const m of stripped.matchAll(mentionRe)) {
-          const name = m[1]
-          if (!name || seen.has(name)) continue
-          if (!allSkills.some((s) => s.name === name)) continue
-          seen.add(name)
-          mentioned.push(name)
-        }
-
-        if (mentioned.length > 0) {
-          const MAX_AUTOLOAD = 3
-          const toLoad = mentioned.slice(0, MAX_AUTOLOAD)
-          const overflow = mentioned.slice(MAX_AUTOLOAD)
-          for (const name of toLoad) {
-            if (loaded.has(name)) continue
-            const info = allSkills.find((s) => s.name === name)
-            if (!info) continue
-            const part = yield* sessions.updatePart({
-              id: PartID.ascending(),
-              messageID: userMessage.info.id,
-              sessionID: userMessage.info.sessionID,
-              type: "text",
-              text: `<system-reminder>\n<skill_content name="${name}">\n${capSyntheticText(info.content, "skill mention content")}\n</skill_content>\n</system-reminder>`,
-              synthetic: true,
-            })
-            userMessage.parts.push(part)
+            .flatMap((p) => (p.type === "text" && !p.synthetic && !p.ignored ? [p.text] : []))
+            .join("\n")
+          const stripped = bodyText
+            .replace(/```[\s\S]*?```/g, " ")
+            .replace(/`[^`\n]*`/g, " ")
+          const mentioned: string[] = []
+          const seen = new Set<string>()
+          const mentionRe = /(?:^|\s)\/([A-Za-z][A-Za-z0-9_:-]*)(?=[^A-Za-z0-9_:-]|$)/g
+          for (const m of stripped.matchAll(mentionRe)) {
+            const name = m[1]
+            if (!name || seen.has(name)) continue
+            if (!allSkills.some((s) => s.name === name)) continue
+            seen.add(name)
+            mentioned.push(name)
           }
 
-          const alreadyPlanned = userMessage.parts.some(
-            (part) =>
-              part.type === "text" &&
-              part.synthetic &&
-              !part.ignored &&
-              part.text.includes("The user has explicitly referenced multiple skills in this message:"),
-          )
-          if (mentioned.length >= 2 && !alreadyPlanned) {
-            const loadedHint =
-              toLoad.length > 0 ? `SKILL.md for [${toLoad.join(", ")}] has been auto-loaded above.` : ""
-            const overflowHint =
-              overflow.length > 0 ? `For [${overflow.join(", ")}], use the Skill tool to load them on demand.` : ""
-            const part = yield* sessions.updatePart({
-              id: PartID.ascending(),
-              messageID: userMessage.info.id,
-              sessionID: userMessage.info.sessionID,
-              type: "text",
-              text: `<system-reminder>
+          if (mentioned.length > 0) {
+            const MAX_AUTOLOAD = 3
+            const toLoad = mentioned.slice(0, MAX_AUTOLOAD)
+            const overflow = mentioned.slice(MAX_AUTOLOAD)
+            for (const name of toLoad) {
+              if (loaded.has(name)) continue
+              const info = allSkills.find((s) => s.name === name)
+              if (!info) continue
+              const part = yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: userMessage.info.id,
+                sessionID: userMessage.info.sessionID,
+                type: "text",
+                text: `<system-reminder>\n<skill_content name="${name}">\n${capSyntheticText(info.content, "skill mention content")}\n</skill_content>\n</system-reminder>`,
+                synthetic: true,
+              })
+              userMessage.parts.push(part)
+            }
+
+            const alreadyPlanned = userMessage.parts.some(
+              (part) =>
+                part.type === "text" &&
+                part.synthetic &&
+                !part.ignored &&
+                part.text.includes("The user has explicitly referenced multiple skills in this message:"),
+            )
+            if (mentioned.length >= 2 && !alreadyPlanned) {
+              const loadedHint =
+                toLoad.length > 0 ? `SKILL.md for [${toLoad.join(", ")}] has been auto-loaded above.` : ""
+              const overflowHint =
+                overflow.length > 0 ? `For [${overflow.join(", ")}], use the Skill tool to load them on demand.` : ""
+              const part = yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: userMessage.info.id,
+                sessionID: userMessage.info.sessionID,
+                type: "text",
+                text: `<system-reminder>
 The user has explicitly referenced multiple skills in this message: ${mentioned.join(", ")}.
 ${loadedHint} ${overflowHint}
 
@@ -3126,6 +3128,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       if (!task.command) return
+
       const summaryUserMsg: MessageV2.User = {
         id: MessageID.ascending(),
         sessionID,
@@ -4537,39 +4540,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       parentMessageID: MessageID
       sessionBusy?: boolean
       force?: boolean
-      /** Default true: keep error-marked empty shells for recovery; user-resume pre-clean passes false. */
       preserveError?: boolean
+      exceptMessageID?: MessageID
     }) {
       const busy = input.sessionBusy ?? (yield* status.get(input.sessionID)).type !== "idle"
       const preserveError = input.preserveError ?? true
       const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: input.agentID ?? "main" })
       const removed: MessageID[] = []
-      let skippedLive = 0
-      let skippedError = 0
       for (const msg of msgs) {
         if (msg.info.role !== "assistant") continue
         if (msg.info.parentID !== input.parentMessageID) continue
+        if (input.exceptMessageID && msg.info.id === input.exceptMessageID) continue
         if (!isEmptyAssistantResidue(msg.info, msg.parts)) continue
-        if (preserveError && msg.info.error) {
-          skippedError += 1
-          continue
-        }
+        if (preserveError && msg.info.error) continue
         const liveOwned = !input.force && busy && !msg.info.error && !("completed" in msg.info.time)
-        if (liveOwned) {
-          skippedLive += 1
-          continue
-        }
+        if (liveOwned) continue
         yield* sessions.removeMessage({ sessionID: input.sessionID, messageID: msg.info.id })
         removed.push(msg.info.id)
       }
-      if (removed.length > 0 || skippedLive > 0 || skippedError > 0)
-        elog.info("empty-residue-assistants-cleanup", {
-          sessionID: input.sessionID,
-          parentMessageID: input.parentMessageID,
-          removed,
-          skippedLive,
-          skippedError,
-        })
       return removed
     })
 
@@ -4814,353 +4802,369 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       recoveryParentID?: MessageID,
       resumeFrom?: MessageID,
       modelOverride?: { providerID: string; modelID: string },
+      /** user-resume: force a new turn from the parent user; step-0 skips classify of old siblings. */
       userRedispatch?: boolean,
+      /** Prompt source of this turn; "hook" must never re-enter uncommitted-hint. */
       turnSource?: "user" | "spawn" | "hook",
+      /**
+       * [R003/D16f] Locked parent user for user-resume first step. When set on step 0,
+       * lastUser must be this message (not silently replaced by a newer inbox/steer user).
+       */
       parentUserID?: MessageID,
+      /**
+       * [R003] When true, parent must remain the slice tail (no later user/assistant).
+       * Trailing-user resume sets this; empty-shell user-resume allows completed siblings.
+       */
       strictParentTail?: boolean,
+      /**
+       * Inbox claim frontier (C-01). Mid-turn pickup of a newer user requires
+       * extendClaim before treating `id > claimFrontier` as part of this run.
+       */
       claimFrontier?: MessageID,
       claimOwner?: ClaimOwner,
-    ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
-      sessionID: SessionID,
-      agentID?: string,
-      titleLocale?: string,
-      resumeIdentity?: string,
-      recoveryParentID?: MessageID,
-      resumeFrom?: MessageID,
-      modelOverride?: { providerID: string; modelID: string },
-      userRedispatch = false,
-      turnSource?: "user" | "spawn" | "hook",
-      parentUserID?: MessageID,
-      strictParentTail?: boolean,
-      claimFrontier?: MessageID,
-      claimOwner?: ClaimOwner,
-    ) {
-      claimOwner ??= { runId: nextClaimRunId(), receipts: [], frontier: claimFrontier }
-      const ctx = yield* InstanceState.context
-      const slog = elog.with({ sessionID })
-      let structured: unknown | undefined
-      let step = 0
-      const sessionPrompt = yield* sessions.resolvePrompt({ sessionID })
-      const session = yield* sessions.get(sessionID)
-      let outputLengthContinuations = 0
-      // Shared local counter for "model finished but produced nothing usable"
-      // (think-only / empty). T04's generic-invalid retries reuse this same
-      // counter — do not add a second one. Local to runLoop so a fresh user
-      // turn resets it (no cross-message pollution), same as outputLengthContinuations.
-      let invalidContinuations = 0
-      // structured-output 专用 retry：上限来自 lastUser.format.retryCount（默认 2），
-      // 与 invalidContinuations（generic invalid）分离，互不污染。局部于 runLoop，
-      // 新一轮用户 turn 自动归零。
-      let structuredRetries = 0
-      // Bounded retries for text-form tool calls (model wrote a tool call as
-      // prose text instead of a structured tool_use). Local to runLoop so each
-      // fresh user turn starts clean.
-      let textToolCallRetries = 0
-      let runFirstUserID: MessageID | undefined
-      const resolvedAgentID = agentID ?? "main"
-      const hintToken: MainHintToken = resolvedAgentID === "main" && turnSource === "user"
-        ? openMainHintToken(sessionID, ctx.directory)
-        : { cancelled: true }
-      const recovery = recoveryParentID
-        ? { currentUserID: recoveryParentID, source: undefined as MessageV2.User | undefined }
-        : undefined
-      const mcpContext: MCP.TurnContext = {
-        sessionId: sessionID,
-        turnId: ulid(),
-        actorId: resolvedAgentID,
-      }
-      // Tracks plugin-driven cancellation (session.pre OR any session.userQuery.pre)
-      // so session.post reports outcome="cancelled" instead of "error".
-      let cancelled = false
-      let cancelReason: string | undefined
-      let currentTaskID: string | undefined
-      let sessionPrepared = false
-      let lastSystemPrompt: string[] | undefined = undefined
+    ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
+      function* (
+        sessionID: SessionID,
+        agentID?: string,
+        titleLocale?: string,
+        resumeIdentity?: string,
+        recoveryParentID?: MessageID,
+        resumeFrom?: MessageID,
+        modelOverride?: { providerID: string; modelID: string },
+        userRedispatch = false,
+        turnSource?: "user" | "spawn" | "hook",
+        parentUserID?: MessageID,
+        strictParentTail?: boolean,
+        claimFrontier?: MessageID,
+        claimOwner?: ClaimOwner,
+      ) {
+        claimOwner ??= { runId: nextClaimRunId(), receipts: [], frontier: claimFrontier }
+        const ctx = yield* InstanceState.context
+        const slog = elog.with({ sessionID })
+        let structured: unknown | undefined
+        let step = 0
+        const sessionPrompt = yield* sessions.resolvePrompt({ sessionID })
+        const session = yield* sessions.get(sessionID)
+        let outputLengthContinuations = 0
+        // Shared local counter for "model finished but produced nothing usable"
+        // (think-only / empty). T04's generic-invalid retries reuse this same
+        // counter — do not add a second one. Local to runLoop so a fresh user
+        // turn resets it (no cross-message pollution), same as outputLengthContinuations.
+        let invalidContinuations = 0
+        // structured-output 专用 retry：上限来自 lastUser.format.retryCount（默认 2），
+        // 与 invalidContinuations（generic invalid）分离，互不污染。局部于 runLoop，
+        // 新一轮用户 turn 自动归零。
+        let structuredRetries = 0
+        // Bounded retries for text-form tool calls (model wrote a tool call as
+        // prose text instead of a structured tool_use). Local to runLoop so each
+        // fresh user turn starts clean.
+        let textToolCallRetries = 0
+        let runFirstUserID: MessageID | undefined
+        const resolvedAgentID = agentID ?? "main"
+        const hintToken: MainHintToken = resolvedAgentID === "main" && turnSource === "user"
+          ? openMainHintToken(sessionID, ctx.directory)
+            : { cancelled: true }
+        const recovery = recoveryParentID
+          ? { currentUserID: recoveryParentID, source: undefined as MessageV2.User | undefined }
+          : undefined
+        const mcpContext: MCP.TurnContext = {
+          sessionId: sessionID,
+          turnId: ulid(),
+          actorId: resolvedAgentID,
+        }
+        // Tracks plugin-driven cancellation (session.pre OR any session.userQuery.pre)
+        // so session.post reports outcome="cancelled" instead of "error".
+        let cancelled = false
+        let cancelReason: string | undefined
+        let currentTaskID: string | undefined
+        let sessionPrepared = false
+        let lastSystemPrompt: string[] | undefined = undefined
 
-      const renderTurnMessages = (messages: MessageV2.WithParts[]) => Effect.sync(() => {
-        const rows = Database.use((db) => db.select().from(InboxTable).where(and(
-          eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, resolvedAgentID),
-        )).all())
-        return MessageV2.renderedOrder(messages, rows, sessionID, new Set(claimOwner.receipts.map((receipt) => receipt.id)),
-          (messageID) => MessageV2.get({ sessionID, messageID }))
-      })
+        const renderTurnMessages = (messages: MessageV2.WithParts[]) => Effect.sync(() => {
+          const rows = Database.use((db) => db.select().from(InboxTable).where(and(
+            eq(InboxTable.receiver_session_id, sessionID), eq(InboxTable.receiver_actor_id, resolvedAgentID),
+          )).all())
+          return MessageV2.renderedOrder(messages, rows, sessionID, new Set(claimOwner.receipts.map((receipt) => receipt.id)),
+            (messageID) => MessageV2.get({ sessionID, messageID }))
+        })
 
-      // Fires session.post exactly once via Effect.onExit on the body below.
-      // Without this wrapper any yielded failure inside the while loop (provider
-      // error, network error, thrown defect) would skip the hook entirely.
-      //
-      // Trajectory parity: uses MessageV2.filterCompactedEffect with the session's
-      // contextFrom / contextWatermark so compaction boundaries trim history to
-      // what the agent actually saw, and child-session parent prefixes are
-      // included — matching session.userQuery.post semantics.
-      const firePostSession = (exit: Exit.Exit<MessageV2.WithParts, unknown>) =>
-        Effect.gen(function* () {
-          const sliceMsgs = yield* MessageV2.filterCompactedEffect(sessionID, {
-            contextFrom: session.contextFrom,
-            contextWatermark: session.contextWatermark,
-            agentID: resolvedAgentID,
-          }).pipe(Effect.flatMap(renderTurnMessages), Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
-          const lastSlice = sliceMsgs.findLast((m) => m.info.role === "assistant")
-          const finalAsst = lastSlice && lastSlice.info.role === "assistant" ? lastSlice.info : undefined
-          const finalParts = lastSlice?.parts ?? []
-          const failed = Exit.isFailure(exit)
-          const finalIsError = !!finalAsst?.error
-          const outcome: "completed" | "error" | "cancelled" = cancelled
-            ? "cancelled"
-            : failed || finalIsError
-              ? "error"
-              : "completed"
-          const error = cancelled
-            ? cancelReason
-            : failed
-              ? Cause.pretty(exit.cause)
-              : finalAsst
-                ? sessionErrorText(finalAsst.error)
-                : undefined
-          const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
-          const lifecycleStatus: MCP.TurnStatus =
-            cancelled || interrupted ? "cancelled" : failed || finalIsError ? "error" : "completed"
-          yield* Effect.all(
-            [
-              plugin
-                .trigger(
-                  "session.post",
-                  {
-                    sessionID,
-                    agentID: resolvedAgentID,
-                    task_id: currentTaskID,
-                    outcome,
-                    error,
-                    finalText: finalAsst ? assistantFinalText(finalAsst, finalParts) : undefined,
-                    assistantMessageID: finalAsst?.id,
-                    trajectory: serializeTrajectoryMessages(sliceMsgs),
-                    systemPrompt: lastSystemPrompt,
-                  },
-                  {},
-                )
-                .pipe(Effect.ignore),
-              mcp.clients().pipe(
-                Effect.flatMap((clients) => MCP.notifyTurnLifecycle(clients, mcpContext, lifecycleStatus)),
-                Effect.ignore,
-              ),
-            ],
-            { concurrency: "unbounded", discard: true },
-          )
-          // experimental.uncommitted_hint (default off): completed MAIN + explicit USER source
-          // + dirty git → soft commit reminder. Fail-closed: non-user sources never inject.
-          // Live MIMOCODE_CONFIG_CONTENT wins over cached config so lab toggles apply next turn.
-          if (outcome === "completed" && resolvedAgentID === "main") {
-            // Optional test seam BEFORE begin (late-register window); default unset.
-            if (turnSource === "user" && (hintFirePostBarrier.onReached || hintFirePostBarrier.wait)) {
-              hintFirePostBarrier.onReached?.()
-              if (hintFirePostBarrier.wait) yield* Effect.promise(() => hintFirePostBarrier.wait!())
-            }
-            const pending =
-              resolvedAgentID === "main" && turnSource === "user"
-                ? beginPendingHint(sessionID, hintToken)
-                : beginPendingHint(sessionID, { cancelled: true })
-            yield* Effect.gen(function* () {
-              try {
-                const liveContent = process.env.MIMOCODE_CONFIG_CONTENT
-                const cachedCfg = (yield* config.get()).experimental?.uncommitted_hint
-                const stopCfg = resolveUncommittedHintConfig({ liveContent, cached: cachedCfg })
-                const enabled = uncommittedHintEnabledFromConfig(stopCfg)
-                if (!enabled || turnSource !== "user") {
-                  yield* slog.warn(
-                    "uncommitted-hint",
-                    uncommittedHintLogFields({
-                      decision: "skip",
-                      reason: !enabled ? "disabled" : "non_user_source",
-                      enabled,
-                      turnSource,
-                    }),
+        // Fires session.post exactly once via Effect.onExit on the body below.
+        // Without this wrapper any yielded failure inside the while loop (provider
+        // error, network error, thrown defect) would skip the hook entirely.
+        //
+        // Trajectory parity: uses MessageV2.filterCompactedEffect with the session's
+        // contextFrom / contextWatermark so compaction boundaries trim history to
+        // what the agent actually saw, and child-session parent prefixes are
+        // included — matching session.userQuery.post semantics.
+        const firePostSession = (exit: Exit.Exit<MessageV2.WithParts, unknown>) =>
+          Effect.gen(function* () {
+            const sliceMsgs = yield* MessageV2.filterCompactedEffect(sessionID, {
+              contextFrom: session.contextFrom,
+              contextWatermark: session.contextWatermark,
+              agentID: resolvedAgentID,
+            }).pipe(Effect.flatMap(renderTurnMessages), Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
+            const lastSlice = sliceMsgs.findLast((m) => m.info.role === "assistant")
+            const finalAsst =
+              lastSlice && lastSlice.info.role === "assistant" ? lastSlice.info : undefined
+            const finalParts = lastSlice?.parts ?? []
+            const failed = Exit.isFailure(exit)
+            const finalIsError = !!finalAsst?.error
+            const outcome: "completed" | "error" | "cancelled" = cancelled
+              ? "cancelled"
+              : failed || finalIsError
+                ? "error"
+                : "completed"
+            const error = cancelled
+              ? cancelReason
+              : failed
+                ? Cause.pretty(exit.cause)
+                : finalAsst
+                  ? sessionErrorText(finalAsst.error)
+                  : undefined
+            const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+            const lifecycleStatus: MCP.TurnStatus =
+              cancelled || interrupted ? "cancelled" : failed || finalIsError ? "error" : "completed"
+            yield* Effect.all(
+              [
+                plugin
+                  .trigger(
+                    "session.post",
+                    {
+                      sessionID,
+                      agentID: resolvedAgentID,
+                      task_id: currentTaskID,
+                      outcome,
+                      error,
+                      finalText: finalAsst ? assistantFinalText(finalAsst, finalParts) : undefined,
+                      assistantMessageID: finalAsst?.id,
+                      trajectory: serializeTrajectoryMessages(sliceMsgs),
+                      systemPrompt: lastSystemPrompt,
+                    },
+                    {},
                   )
-                  return
-                }
-                if (!finalAsst?.agent) {
-                  yield* slog.warn(
-                    "uncommitted-hint",
-                    uncommittedHintLogFields({
-                      decision: "skip",
-                      reason: "missing_agent_context",
-                      enabled,
-                      turnSource,
-                    }),
-                  )
-                  return
-                }
-                const directory = session.directory ?? ctx.directory
-                const hasDirectory = typeof directory === "string" && directory.length > 0
-                let isGitRepo = false
-                let dirty = false
-                let statusOut = ""
-                if (hasDirectory) {
-                  hintGitProbeBarrier.onReached?.()
-                  if (hintGitProbeBarrier.wait) yield* Effect.promise(() => hintGitProbeBarrier.wait!())
-                  if (!isPendingHintLive(pending)) return
-                  const probe = yield* Effect.promise(async () => {
-                    const { execFile } = await import("node:child_process")
-                    const { promisify } = await import("node:util")
-                    const run = promisify(execFile)
-                    const opts = { cwd: directory, timeout: UNCOMMITTED_HINT_GIT_TIMEOUT_MS } as const
-                    try {
-                      await run("git", ["rev-parse", "--is-inside-work-tree"], opts)
-                    } catch {
-                      return { isGitRepo: false, dirty: false, statusOut: "" }
-                    }
-                    try {
-                      const { stdout } = await run("git", ["status", "--porcelain"], opts)
-                      return { isGitRepo: true, dirty: isWorkingTreeDirty(stdout), statusOut: stdout }
-                    } catch {
-                      return { isGitRepo: true, dirty: false, statusOut: "" }
-                    }
-                  }).pipe(Effect.catch(() => Effect.succeed({ isGitRepo: false, dirty: false, statusOut: "" })))
-                  if (!isPendingHintLive(pending)) return
-                  isGitRepo = probe.isGitRepo
-                  dirty = probe.dirty
-                  statusOut = probe.statusOut
-                }
-                const consecutiveHints = getHintCount(sessionID)
-                const decision = decideUncommittedHint({
-                  enabled,
-                  outcome,
-                  agentID: resolvedAgentID,
-                  hasDirectory,
-                  isGitRepo,
-                  dirty,
-                  consecutiveHints,
-                  turnSource,
-                })
-                yield* slog.warn(
-                  "uncommitted-hint",
-                  uncommittedHintLogFields({
-                    decision: decision.action,
-                    reason: decision.reason,
-                    dirty,
-                    enabled,
-                    turnSource,
-                  }),
-                )
-                if (!dirty) {
-                  recordHintOutcome(sessionID, { dirty: false, injected: false, consecutiveHints })
-                  return
-                }
-                if (decision.action !== "inject" || !isPendingHintLive(pending)) return
-                yield* Effect.sleep("400 millis")
-                if (!isPendingHintLive(pending)) {
-                  yield* slog.warn(
-                    "uncommitted-hint",
-                    uncommittedHintLogFields({
-                      decision: "skip",
-                      reason: "cancelled",
-                      enabled,
-                      turnSource,
-                      dirty,
-                    }),
-                  )
-                  return
-                }
-                const liveAfter = resolveUncommittedHintConfig({
-                  liveContent: process.env.MIMOCODE_CONFIG_CONTENT,
-                  cached: cachedCfg,
-                })
-                if (!uncommittedHintEnabledFromConfig(liveAfter)) {
-                  yield* slog.warn(
-                    "uncommitted-hint",
-                    uncommittedHintLogFields({
-                      decision: "skip",
-                      reason: "disabled_after_delay",
-                      enabled: false,
-                      turnSource,
-                      dirty,
-                    }),
-                  )
-                  return
-                }
-                if (hasDirectory) {
-                  const reprobe = yield* Effect.promise(async () => {
-                    const { execFile } = await import("node:child_process")
-                    const { promisify } = await import("node:util")
-                    const run = promisify(execFile)
-                    const opts = { cwd: directory, timeout: UNCOMMITTED_HINT_GIT_TIMEOUT_MS } as const
-                    try {
-                      await run("git", ["rev-parse", "--is-inside-work-tree"], opts)
-                      const { stdout } = await run("git", ["status", "--porcelain"], opts)
-                      return { dirty: isWorkingTreeDirty(stdout), statusOut: stdout }
-                    } catch {
-                      return { dirty: false, statusOut: "" }
-                    }
-                  }).pipe(Effect.catch(() => Effect.succeed({ dirty: false, statusOut: "" })))
-                  if (!reprobe.dirty) {
-                    recordHintOutcome(sessionID, { dirty: false, injected: false, consecutiveHints })
+                  .pipe(Effect.ignore),
+                mcp.clients().pipe(
+                  Effect.flatMap((clients) => MCP.notifyTurnLifecycle(clients, mcpContext, lifecycleStatus)),
+                  Effect.ignore,
+                ),
+              ],
+              { concurrency: "unbounded", discard: true },
+            )
+            // experimental.uncommitted_hint (default off): completed MAIN + explicit USER source
+            // + dirty git → soft commit reminder. Fail-closed: non-user sources never inject.
+            // Live MIMOCODE_CONFIG_CONTENT wins over cached config so lab toggles apply next turn.
+            if (outcome === "completed" && resolvedAgentID === "main") {
+              // Optional test seam BEFORE begin (late-register window); default unset.
+              if (turnSource === "user" && (hintFirePostBarrier.onReached || hintFirePostBarrier.wait)) {
+                hintFirePostBarrier.onReached?.()
+                if (hintFirePostBarrier.wait) yield* Effect.promise(() => hintFirePostBarrier.wait!())
+              }
+              const pending =
+                resolvedAgentID === "main" && turnSource === "user"
+                  ? beginPendingHint(sessionID, hintToken)
+                  : beginPendingHint(sessionID, { cancelled: true })
+              yield* Effect.gen(function* () {
+                try {
+                  const liveContent = process.env.MIMOCODE_CONFIG_CONTENT
+                  const cachedCfg = (yield* config.get()).experimental?.uncommitted_hint
+                  const stopCfg = resolveUncommittedHintConfig({ liveContent, cached: cachedCfg })
+                  const enabled = uncommittedHintEnabledFromConfig(stopCfg)
+                  if (!enabled || turnSource !== "user") {
                     yield* slog.warn(
                       "uncommitted-hint",
                       uncommittedHintLogFields({
                         decision: "skip",
-                        reason: "cleaned",
+                        reason: !enabled ? "disabled" : "non_user_source",
                         enabled,
                         turnSource,
-                        dirty: false,
                       }),
                     )
                     return
                   }
-                  statusOut = reprobe.statusOut || statusOut
-                }
-                if (!isPendingHintLive(pending)) return
-                // Handshake immediately before claim; identity checks run INSIDE claimed work.
-                hintClaimBarrier.onReached?.()
-                if (hintClaimBarrier.wait) yield* Effect.promise(() => hintClaimBarrier.wait!())
-                if (!isPendingHintLive(pending)) return
-                const agentName = finalAsst.agent
-                const model =
-                  finalAsst.providerID && finalAsst.modelID
-                    ? {
-                        providerID: finalAsst.providerID,
-                        modelID: finalAsst.modelID,
-                        variant: finalAsst.variant,
+                  if (!finalAsst?.agent) {
+                    yield* slog.warn(
+                      "uncommitted-hint",
+                      uncommittedHintLogFields({
+                        decision: "skip",
+                        reason: "missing_agent_context",
+                        enabled,
+                        turnSource,
+                      }),
+                    )
+                    return
+                  }
+                  const directory = session.directory ?? ctx.directory
+                  const hasDirectory = typeof directory === "string" && directory.length > 0
+                  let isGitRepo = false
+                  let dirty = false
+                  let statusOut = ""
+                  if (hasDirectory) {
+                    hintGitProbeBarrier.onReached?.()
+                    if (hintGitProbeBarrier.wait) yield* Effect.promise(() => hintGitProbeBarrier.wait!())
+                    if (!isPendingHintLive(pending)) return
+                    const probe = yield* Effect.promise(async () => {
+                      const { execFile } = await import("node:child_process")
+                      const { promisify } = await import("node:util")
+                      const run = promisify(execFile)
+                      const opts = { cwd: directory, timeout: UNCOMMITTED_HINT_GIT_TIMEOUT_MS } as const
+                      try {
+                        await run("git", ["rev-parse", "--is-inside-work-tree"], opts)
+                      } catch {
+                        return { isGitRepo: false, dirty: false, statusOut: "" }
                       }
-                    : undefined
-                const followUp = Effect.gen(function* () {
-                  if (!isPendingHintLive(pending)) return undefined as never
-                  const latestAsst = yield* lastAssistant(sessionID, resolvedAgentID).pipe(
-                    Effect.catch(() => Effect.succeed(undefined as never)),
-                  )
-                  if (!latestAsst || latestAsst.info.role !== "assistant") return undefined as never
-                  if (finalAsst && latestAsst.info.id !== finalAsst.id) return undefined as never
-                  const source = sliceMsgs.find((message) => message.info.id === finalAsst.parentID)?.info
-                  if (!source || source.role !== "user" || source.source !== "user") return undefined as never
-                  if (!isPendingHintLive(pending)) return undefined as never
-                  const msgId = MessageID.ascending()
-                  const committed = yield* sessions.commitUserMessageIfLatest({
-                    expectedUserID: source.id,
-                    shouldCommit: () => isPendingHintLive(pending),
-                    message: {
-                      id: msgId, sessionID, role: "user", agentID: resolvedAgentID,
-                      time: { created: Date.now() }, agent: agentName,
-                      model: model ?? source.model, task_id: source.task_id, source: "hook",
-                    },
-                    parts: [{ id: PartID.ascending(), messageID: msgId, sessionID,
-                      type: "text", text: buildHintText(statusOut), synthetic: true }],
+                      try {
+                        const { stdout } = await run("git", ["status", "--porcelain"], opts)
+                        return { isGitRepo: true, dirty: isWorkingTreeDirty(stdout), statusOut: stdout }
+                      } catch {
+                        return { isGitRepo: true, dirty: false, statusOut: "" }
+                      }
+                    }).pipe(Effect.catch(() => Effect.succeed({ isGitRepo: false, dirty: false, statusOut: "" })))
+                    if (!isPendingHintLive(pending)) return
+                    isGitRepo = probe.isGitRepo
+                    dirty = probe.dirty
+                    statusOut = probe.statusOut
+                  }
+                  const consecutiveHints = getHintCount(sessionID)
+                  const decision = decideUncommittedHint({
+                    enabled,
+                    outcome,
+                    agentID: resolvedAgentID,
+                    hasDirectory,
+                    isGitRepo,
+                    dirty,
+                    consecutiveHints,
+                    turnSource,
                   })
-                  if (!committed) return undefined as never
-                  // Diagnostic counter only — does not cap re-hint. Product: later dirty
-                  // USER turns may inject again; hook/spawn never re-enter.
-                  recordHintOutcome(sessionID, { dirty: true, injected: true, consecutiveHints })
-                  const result = yield* runLoop(sessionID, resolvedAgentID, titleLocale, undefined, undefined, undefined, undefined, false, "hook")
-                  return result
-                }).pipe(Effect.catch(() => Effect.succeed(undefined as never)))
-                yield* state
-                  .start(sessionID, resolvedAgentID, lastAssistant(sessionID, resolvedAgentID), followUp)
-                  .pipe(Effect.catch(() => Effect.void))
-              } finally {
-                endPendingHint(pending)
-              }
-            }).pipe(RunApproval.provide(undefined), Effect.forkIn(scope), Effect.ignore)
-          }
-        }).pipe(Effect.ignore)
+                  yield* slog.warn(
+                    "uncommitted-hint",
+                    uncommittedHintLogFields({
+                      decision: decision.action,
+                      reason: decision.reason,
+                      dirty,
+                      enabled,
+                      turnSource,
+                    }),
+                  )
+                  if (!dirty) {
+                    recordHintOutcome(sessionID, { dirty: false, injected: false, consecutiveHints })
+                    return
+                  }
+                  if (decision.action !== "inject" || !isPendingHintLive(pending)) return
+                  yield* Effect.sleep("400 millis")
+                  if (!isPendingHintLive(pending)) {
+                    yield* slog.warn(
+                      "uncommitted-hint",
+                      uncommittedHintLogFields({
+                        decision: "skip",
+                        reason: "cancelled",
+                        enabled,
+                        turnSource,
+                        dirty,
+                      }),
+                    )
+                    return
+                  }
+                  const liveAfter = resolveUncommittedHintConfig({
+                    liveContent: process.env.MIMOCODE_CONFIG_CONTENT,
+                    cached: cachedCfg,
+                  })
+                  if (!uncommittedHintEnabledFromConfig(liveAfter)) {
+                    yield* slog.warn(
+                      "uncommitted-hint",
+                      uncommittedHintLogFields({
+                        decision: "skip",
+                        reason: "disabled_after_delay",
+                        enabled: false,
+                        turnSource,
+                        dirty,
+                      }),
+                    )
+                    return
+                  }
+                  if (hasDirectory) {
+                    const reprobe = yield* Effect.promise(async () => {
+                      const { execFile } = await import("node:child_process")
+                      const { promisify } = await import("node:util")
+                      const run = promisify(execFile)
+                      const opts = { cwd: directory, timeout: UNCOMMITTED_HINT_GIT_TIMEOUT_MS } as const
+                      try {
+                        await run("git", ["rev-parse", "--is-inside-work-tree"], opts)
+                        const { stdout } = await run("git", ["status", "--porcelain"], opts)
+                        return { dirty: isWorkingTreeDirty(stdout), statusOut: stdout }
+                      } catch {
+                        return { dirty: false, statusOut: "" }
+                      }
+                    }).pipe(Effect.catch(() => Effect.succeed({ dirty: false, statusOut: "" })))
+                    if (!reprobe.dirty) {
+                      recordHintOutcome(sessionID, { dirty: false, injected: false, consecutiveHints })
+                      yield* slog.warn(
+                        "uncommitted-hint",
+                        uncommittedHintLogFields({
+                          decision: "skip",
+                          reason: "cleaned",
+                          enabled,
+                          turnSource,
+                          dirty: false,
+                        }),
+                      )
+                      return
+                    }
+                    statusOut = reprobe.statusOut || statusOut
+                  }
+                  if (!isPendingHintLive(pending)) return
+                  // Handshake immediately before claim; identity checks run INSIDE claimed work.
+                  hintClaimBarrier.onReached?.()
+                  if (hintClaimBarrier.wait) yield* Effect.promise(() => hintClaimBarrier.wait!())
+                  if (!isPendingHintLive(pending)) return
+                  const agentName = finalAsst.agent
+                  const model =
+                    finalAsst.providerID && finalAsst.modelID
+                      ? {
+                          providerID: finalAsst.providerID,
+                          modelID: finalAsst.modelID,
+                          variant: finalAsst.variant,
+                        }
+                      : undefined
+                  const followUp = Effect.gen(function* () {
+                    if (!isPendingHintLive(pending)) return undefined as never
+                    const latestAsst = yield* lastAssistant(sessionID, resolvedAgentID).pipe(
+                      Effect.catch(() => Effect.succeed(undefined as never)),
+                    )
+                    if (!latestAsst || latestAsst.info.role !== "assistant") return undefined as never
+                    if (finalAsst && latestAsst.info.id !== finalAsst.id) return undefined as never
+                    const source = sliceMsgs.find((message) => message.info.id === finalAsst.parentID)?.info
+                    if (!source || source.role !== "user" || source.source !== "user") return undefined as never
+                    if (!isPendingHintLive(pending)) return undefined as never
+                    const msgId = MessageID.ascending()
+                    const committed = yield* sessions.commitUserMessageIfLatest({
+                      expectedUserID: source.id,
+                      shouldCommit: () => isPendingHintLive(pending),
+                      message: {
+                        id: msgId, sessionID, role: "user", agentID: resolvedAgentID,
+                        time: { created: Date.now() }, agent: agentName,
+                        model: model ?? source.model, task_id: source.task_id, source: "hook",
+                      },
+                      parts: [{ id: PartID.ascending(), messageID: msgId, sessionID,
+                        type: "text", text: buildHintText(statusOut), synthetic: true }],
+                    })
+                    if (!committed) return undefined as never
+                    // Diagnostic counter only — does not cap re-hint. Product: later dirty
+                    // USER turns may inject again; hook/spawn never re-enter.
+                    recordHintOutcome(sessionID, { dirty: true, injected: true, consecutiveHints })
+                    const result = yield* runLoop(sessionID, resolvedAgentID, titleLocale, undefined, undefined, undefined, undefined, false, "hook")
+                    return result
+                  }).pipe(Effect.catch(() => Effect.succeed(undefined as never)))
+                  yield* state
+                    .start(sessionID, resolvedAgentID, lastAssistant(sessionID, resolvedAgentID), followUp)
+                    .pipe(Effect.catch(() => Effect.void))
+                } finally {
+                  endPendingHint(pending)
+                }
+              }).pipe(RunApproval.provide(undefined), Effect.forkIn(scope), Effect.ignore)
+            }
+          }).pipe(Effect.ignore)
 
-      return yield* Effect.gen(function* () {
+        return yield* Effect.gen(function* () {
         const agentMetrics = { tokens_in: 0, tokens_out: 0, files_changed: 0 }
         const trajectoryForStep = (currentMsgs: MessageV2.WithParts[], assistant: MessageV2.Assistant) =>
           serializeTrajectoryMessages(
@@ -6479,7 +6483,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 task_id: lastUser.task_id,
                 expectedUserID: lastUser.id,
                 onUserCommitted: recoveryCommitted(lastUser.id),
-              })
+                })
               // After inserting the boundary, the actor's filterCompactedEffect
               // slice begins at the boundary marker — context is freed for the
               // next iteration's stream. Skip the next overflow check so the
@@ -7047,7 +7051,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     }),
                   )
                   if (structuredOutput) forkTools.StructuredOutput = structuredOutput
-                  const queryParts = turnMsgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
+                  const queryParts =
+                    turnMsgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
                   const query = userQueryText(queryParts)
                   const preQuery = {
                     cancel: undefined as boolean | undefined,
@@ -7231,7 +7236,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       task_id: lastUser.task_id,
                       expectedUserID: lastUser.id,
                       onUserCommitted: recoveryCommitted(lastUser.id),
-                    })
+                      })
                     if (compacted) skipOverflowCheck = true
                   }
                   return "continue" as const
@@ -7564,7 +7569,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       task_id: lastUser.task_id,
                       expectedUserID: lastUser.id,
                       onUserCommitted: recoveryCommitted(lastUser.id),
-                    })
+                      })
                     if (compacted) skipOverflowCheck = true
                     return "continue" as const
                   }
@@ -7750,25 +7755,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
         )
         return final
-      }).pipe(
-        Effect.onExit(firePostSession),
-        Effect.onExit((exit) => settleClaims({ sessionID, agentID: resolvedAgentID }, claimOwner, exit)),
-        Effect.ensuring(MCP.releaseTurnClients(mcpContext)),
-        Effect.catchCause((cause) =>
-          // A failing post hook must not erase an earlier cancellation decision.
-          Effect.failCause(
-            cancelled && !isTurnCancelled(Exit.failCause(cause))
-              ? Cause.fromReasons([
-                  ...cause.reasons,
-                  ...Cause.fail(new PluginCancelledError({ message: cancelReason ?? "Session cancelled by plugin" }))
-                    .reasons,
-                ])
-              : cause,
+        }).pipe(
+          Effect.onExit(firePostSession),
+          Effect.onExit((exit) => settleClaims({ sessionID, agentID: resolvedAgentID }, claimOwner, exit)),
+          Effect.ensuring(MCP.releaseTurnClients(mcpContext)),
+          Effect.catchCause((cause) =>
+            // A failing post hook must not erase an earlier cancellation decision.
+            Effect.failCause(
+              cancelled && !isTurnCancelled(Exit.failCause(cause))
+                ? Cause.fromReasons([
+                    ...cause.reasons,
+                    ...Cause.fail(new PluginCancelledError({ message: cancelReason ?? "Session cancelled by plugin" }))
+                      .reasons,
+                  ])
+                : cause,
+            ),
           ),
-        ),
-        Effect.orDie,
-      )
-    })
+          Effect.orDie,
+        )
+      },
+    )
 
     const executeLoop = Effect.fn("SessionPrompt.executeLoop")(function* (
       input: z.infer<typeof LoopInput>,
@@ -7979,7 +7985,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const settle = Effect.fn("SessionPrompt.rebuild.settle")(function* (message: string) {
           yield* status.set(input.sessionID, { type: "busy", message }).pipe(Effect.catch(() => Effect.void))
           if (!runnerOwnsIdle)
-            yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.catch(() => Effect.void))
+          yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.catch(() => Effect.void))
         })
         const compactedInsteadMsg =
           "No checkpoint could be written (the checkpoint writer failed), so the context was compacted instead — earlier messages were dropped rather than rebuilt from a checkpoint."
@@ -8173,8 +8179,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       let parts: PromptInput["parts"]
       if (isSubtask) {
-        const promptText =
-          cmd.source === "skill"
+        const promptText = cmd.source === "skill"
             ? capSyntheticText(templateCommand, "skill command content") +
               (input.arguments.trim() ? "\n\n" + input.arguments : "")
             : (templateParts.find((y): y is typeof y & { type: "text"; text: string } => y.type === "text")?.text ?? "")
@@ -8564,7 +8569,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         ...input,
         resumeIdentity: input.modelIdentity,
         validate: validateActorRecovery(input).pipe(Effect.andThen(input.validate)),
-      })
+    })
 
     const resume = Effect.fn("SessionPrompt.resume")(function* (input: ResumeTurnInput) {
       return yield* yield* startResume(input, true)
@@ -8582,17 +8587,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
           if (actor.status !== "idle" || (yield* executions.current(sessionID, actor.actorID))) {
-            outcomes.push({ actorID: actor.actorID, status: "skipped", reason: "live" })
-            continue
-          }
+          outcomes.push({ actorID: actor.actorID, status: "skipped", reason: "live" })
+          continue
+        }
           const service = boundActor ?? spawnRef.current
           const candidates = yield* (service?.recovery?.({ sessionID, actorID: actor.actorID }) ?? Effect.succeed([]))
             .pipe(Effect.catch(() => Effect.succeed([])))
           const latest = candidates.at(-1)
           if (!latest || latest.kind !== "assistant" || !service?.resume) {
-            outcomes.push({ actorID: actor.actorID, status: "skipped", reason: "no-recovery-candidate" })
-            continue
-          }
+          outcomes.push({ actorID: actor.actorID, status: "skipped", reason: "no-recovery-candidate" })
+          continue
+        }
           const controller = new AbortController()
           const pending = cascadeAdmissions.get(sessionID) ?? new Set<AbortController>()
           pending.add(controller)
@@ -8614,16 +8619,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           )
           outcomes.push({ actorID: actor.actorID, status: Exit.isSuccess(admission) ? "resumed" : "failed",
             ...(Exit.isFailure(admission) ? { reason: "not-admitted" } : {}) })
-        }
-        return outcomes
-      },
-    )
+      }
+      return outcomes
+    })
 
     const resumeMainCascading: Interface["resumeMainCascading"] = Effect.fn("SessionPrompt.resumeMainCascading")(
       function* (input) {
         yield* startResume(input)
-      },
-    )
+    })
 
     const impl = Service.of({
       cancel,
@@ -8864,52 +8867,50 @@ export const PromptInput = z.object({
       "Harness mode selected by the session's first user query. Later values are ignored. Explicit codex or default is authoritative. Auto follows MIMOCODE_CODEX_MODE true/false when set and uses the default harness when unset. The model never selects the harness.",
     ),
   variant: z.string().optional(),
-  parts: z
-    .array(
-      z.discriminatedUnion("type", [
-        MessageV2.TextPart.omit({
-          messageID: true,
-          sessionID: true,
+  parts: z.array(
+    z.discriminatedUnion("type", [
+      MessageV2.TextPart.omit({
+        messageID: true,
+        sessionID: true,
+      })
+        .partial({
+          id: true,
         })
-          .partial({
-            id: true,
-          })
-          .meta({
-            ref: "TextPartInput",
-          }),
-        MessageV2.FilePart.omit({
-          messageID: true,
-          sessionID: true,
+        .meta({
+          ref: "TextPartInput",
+        }),
+      MessageV2.FilePart.omit({
+        messageID: true,
+        sessionID: true,
+      })
+        .partial({
+          id: true,
         })
-          .partial({
-            id: true,
-          })
-          .meta({
-            ref: "FilePartInput",
-          }),
-        MessageV2.AgentPart.omit({
-          messageID: true,
-          sessionID: true,
+        .meta({
+          ref: "FilePartInput",
+        }),
+      MessageV2.AgentPart.omit({
+        messageID: true,
+        sessionID: true,
+      })
+        .partial({
+          id: true,
         })
-          .partial({
-            id: true,
-          })
-          .meta({
-            ref: "AgentPartInput",
-          }),
-        MessageV2.SubtaskPart.omit({
-          messageID: true,
-          sessionID: true,
+        .meta({
+          ref: "AgentPartInput",
+        }),
+      MessageV2.SubtaskPart.omit({
+        messageID: true,
+        sessionID: true,
+      })
+        .partial({
+          id: true,
         })
-          .partial({
-            id: true,
-          })
-          .meta({
-            ref: "SubtaskPartInput",
-          }),
-      ]),
-    )
-    .min(1, "parts must contain at least one element"),
+        .meta({
+          ref: "SubtaskPartInput",
+        }),
+    ]),
+  ).min(1, "parts must contain at least one element"),
 })
 export type PromptInput = z.infer<typeof PromptInput>
 
