@@ -619,20 +619,6 @@ own source list remains the complete watch surface.
 
 ### FC-002 — canonical checkpoint writer and mode-specific frozen context
 
-- 2026-11-04 reminder synchronization (`10b03cf0`, validated): identify memory paths by `{ key: "memory-paths", rev: sessionMemoryDir }` and places a `session-env` reminder before them, with the receiving `Instance.directory`, git root only inside git, and platform. `SessionReminder.windowTarget` selects only an unanswered own user in the current window; prior sent history and frozen system bytes stay unchanged. The environment reminder also reaches subagents that do not serve checkpoints, but excludes native hidden bounded agents. Strict `MessageV2.usageRecovered`, receipt-aware window ordering and FC-042's `compactsOnUsage` gate are preserved. Old untagged memory paths can be repeated once on the next eligible user before tag-based deduplication takes over; legacy file-tool placeholders remain supported.
-
-- 2026-11-02: the writer has no `task` tool and gets the parent session's tasks instead. It runs in a child session, so `task` read and wrote the child's empty list: in production 4,868 of 4,907 writer `task` calls in 72 hours returned "No tasks.", §4 Task trees came out empty, one checkpoint recorded "the DB keeps no tasks", and a writer `done` on a parent task failed its foreign key. Before spawning, the writer prompt now carries a TASK SNAPSHOT of the parent's tasks (`taskRegistry.list` with terminal tasks, rendered as a tree, capped at 300 tasks with unfinished tasks and their ancestors kept first, then the most recently active finished ones), and §4 comes only from it; the writer no longer changes task state, which never worked from the child session. Evidence: `test/session/checkpoint-child-session.test.ts` asserts the tool list without `task` and the snapshot lines for an open parent task and its finished subtask; the snapshot case fails when the block is removed from the prompt; `test/session/checkpoint-progress-reconcile.test.ts` "renderTaskSnapshot" keeps an active subtask under a finished root and an active task created after 400 finished ones, and fails when the cap keeps creation order.
-
-- 2026-11-01: `prefixCaptureRef` is filled through `registerPrefixCapture`. Disposing a SessionPrompt layer hands the slot to the most recent captor that is still live, never to a disposed one, instead of clearing it. Production holds one layer, so nothing changes there. A test process that builds its own layer beside the process-wide AppRuntime no longer strands AppRuntime without a captor; that was the cause of the combined-run "Missing actual prefix captor" failures in `subagent-resume-negatives`, `subagent-resume-route` and `session-actor-recovery`. Covered by `test/session/prefix-capture-ref.test.ts`.
-
-- 2026-10-31 (FC-021): the writer's full receipt-aware history is bounded by the usable window. When the projected view exceeds it, the writer forks the parent's own view; the full view is kept whenever it fits.
-
-- 2026-10-22 synchronization: new rebuild parts carry `placement: "after-tail"`; legacy records retain exact chronological seam reconstruction. Model requests use the boundary digest and unanswered text/media, while the writer and logical turn recover full receipt-aware history. Queued inputs are excluded until delivery or terminal settlement. Task provenance, run approval and fail-closed frozen capture remain unchanged. The appended window and legacy collapse are covered by placement, writer-tail, legacy golden, rebuild-unify and tail-digest tests.
-
-- 2026-10-21 synchronization: upstream `88673c41` replaces the per-message recall reminder and `SessionCheckpoint.hasMemoryOrTasks` with one memory paths reminder per context window, and names the project and session segments `<project_id>`/`<session_id>` in the memory instructions. Adopted unchanged in the system text, which therefore no longer names the real project ID or tells the model to keep `{current_session_id}` verbatim. Read/Write/Edit/Glob/Grep and `apply_patch` still resolve `{current_session_id}`: system prompts frozen in an existing session's prefix snapshot keep that sentence, and the runLoop reuses the frozen system instead of rebuilding it. Writer modes, frozen prefix ownership and FD-009 admission are unchanged.
-
-- 2026-10-20 synchronization: checkpoint writer context uses `MessageV2.renderedOrder` with consumed receipts, so unclaimed inputs do not enter a writer snapshot and first-delivery order survives queue reconstruction. The same queue-aware view feeds post-hook trajectories and goal judging; context-boundary continuation identity and run-approval ownership remain distinct from historical input reconstruction. Frozen new MCP captures carry a fixed dispatcher and complete authorized hidden pool; legacy active/loaded masks remain readable under FD-005/FD-006. Canonical writer modes and fail-closed admission do not retire.
-
 - Status: active
 - Canonical owner: fork `main` checkpoint/session runtime
 - Observable contract: checkpoint generation uses one canonical writer tool and
@@ -651,12 +637,42 @@ own source list remains the complete watch surface.
   separately for both writer modes, including independently frozen native
   Actor input contracts in warm and cold capture; explicit non-fork writers
   also retain their own resolved model identity when no warm prefix exists.
-- 2026-11-21 synchronization: catalog generation retires from cold/warm frozen
-  prefixes. Capture and compaction use `getFrozen` for one-time historical
-  catalog removal; full-context Actors/writers inherit user reminder metadata
-  and complete frozen native-tool authority. FC-005 owns historical migration;
-  fail-closed capture admission and pin-winner/native-tool contracts remain.
+  Skill catalogs are no longer generated into cold or warm frozen prefixes;
+  capture and compaction remove historical catalogs once through `getFrozen`
+  (FC-005 owns that migration), and full-context Actors and writers inherit
+  user reminder metadata and complete frozen native-tool authority.
+  Memory and environment reminders: the memory paths reminder is identified by
+  `{ key: "memory-paths", rev: sessionMemoryDir }`, and a `session-env`
+  reminder (receiving `Instance.directory`, git root only inside git, platform)
+  is placed before it. `SessionReminder.windowTarget` selects only an
+  unanswered own user in the current window, so sent history and frozen system
+  bytes never change. The environment reminder also reaches subagents that do
+  not serve checkpoints but not native hidden bounded agents. Strict
+  `MessageV2.usageRecovered`, receipt-aware window ordering and FC-042's
+  `compactsOnUsage` gate apply. An old untagged memory paths reminder may repeat
+  once on the next eligible user; legacy file-tool placeholders stay supported.
+  Writer context and tasks: the writer's context uses `MessageV2.renderedOrder`
+  with consumed receipts, so unclaimed input never enters a writer snapshot and
+  first-delivery order survives queue reconstruction; the same queue-aware view
+  feeds post-hook trajectories and goal judging. New rebuild parts carry
+  `placement: "after-tail"`, while legacy records keep exact chronological seam
+  reconstruction; model requests use the boundary digest plus unanswered text
+  and media, the writer and logical turn recover the full receipt-aware history,
+  and queued inputs stay out until delivery or terminal settlement. FC-021
+  bounds that history by the usable window. The writer has no `task` tool, since
+  it runs in a child session whose task list is empty: its prompt carries a
+  TASK SNAPSHOT of the parent's tasks (`taskRegistry.list` including terminal
+  tasks, rendered as a tree and capped at 300, keeping unfinished tasks and
+  their ancestors first, then the most recently active finished ones), §4 of
+  the checkpoint comes only from it, and the writer never changes task state.
+  The elision marker points at `history around` followed by `get(part_id)`.
+  Disposing a SessionPrompt layer hands `prefixCaptureRef` to the most recent
+  captor that is still live, never to a disposed one, so a test layer built
+  beside the process-wide AppRuntime cannot strand it without a captor.
 - Upstream relationship: fork extension plus adapted request construction.
+  Upstream `9780b2e5` adopted the fork's disabled-checkpoint memory clause;
+  the writer modes, frozen prefix authority and file-tool placeholders stay
+  fork-owned.
 - Watch surfaces: `packages/cli/src/session/checkpoint.ts`,
   `packages/cli/src/session/checkpoint-paths.ts`,
   `packages/cli/src/session/llm-request-prefix.ts`,
@@ -676,6 +692,12 @@ own source list remains the complete watch surface.
   gains no part. Its historical-task case and `skill-catalog-reopen.test.ts`
   exclude the reminder only on a never-sent user, and the reopen case asserts
   exactly one.
+  `checkpoint-child-session.test.ts` asserts the tool list without `task` and
+  the snapshot lines (removing the block from the prompt fails it);
+  `checkpoint-progress-reconcile.test.ts` "renderTaskSnapshot" covers the cap
+  order; placement, writer-tail, legacy golden, rebuild-unify and tail-digest
+  tests cover the appended window; `prefix-capture-ref.test.ts` covers captor
+  hand-off.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `0b665c7e681e44cac6f1a6acf18732015fb2bf86`.
 - Retirement condition: upstream exposes the same canonical writer, isolated
@@ -683,20 +705,6 @@ own source list remains the complete watch surface.
   guidance behavior; FD-009 remains separately satisfied or retired. The legacy
   `{current_session_id}` resolution retires only when frozen system prompts that
   carry it are rewritten or invalidated, or upstream resolves it.
-
-- 2026-09-11 history-escalation copy review: the verbatim elision marker and its
-  doc comment now point at `history around` followed by `get(part_id)` instead of
-  `around` alone, because upstream's bounded history returns summaries from
-  `around` and the original text from `get`. That is factually correct in this
-  fork, which merged the same history tool. The two lines are the entire
-  incoming change to `src/session/checkpoint.ts`; the writer modes, frozen
-  context, watermark advancement and token budget are untouched.
-
-- 2026-09-15 memory convergence: upstream `9780b2e5` adopts the fork's
-  disabled-checkpoint memory behavior. Only that clause converges: canonical
-  writer modes, frozen prefix authority and stable filesystem placeholders remain
-  shared. FD-002 still separates memory eligibility from fail-closed actor
-  identity replacement.
 
 ### FC-021 — the checkpoint writer stops, fits the window, and has a step budget
 
@@ -995,14 +1003,10 @@ own source list remains the complete watch surface.
   window" (usable 1000 forks with the parent's agent; usable 1000000 keeps the
   writer's own). Dropping the fallback fails the first case. The test's prefix
   capture renders messages with the real `MessageV2.toModelMessagesEffect`.
-- 2026-11-07 sizing change: on a coordinator session whose code-mode tool
-  stores nested traces, stored parts were about three times the rendered
-  request (3 hours: 12.9 MB stored, 6.3 MB of it tool metadata and 2 MB
-  reasoning metadata). Sizing the stored parts sent 9 of 54 writers a day to a
-  parent-model fork at about eight times the configured writer's cost, while
-  the rendered parent view was about 600 KB. "fork:false sizes the delta by the
-  writer's rendered request, not the stored parts" fails when the check goes
-  back to the stored parts.
+  "fork:false sizes the delta by the writer's rendered request, not the stored
+  parts" fails when the check goes back to the stored parts: on a coordinator
+  session with code-mode traces the stored parts were about three times the
+  rendered request, which sent writers to an expensive parent-model fork.
 - Retirement condition: upstream bounds the no-fork writer's delta.
 ### FC-044 — the checkpoint writer returns only `.output` from exec calls
 
