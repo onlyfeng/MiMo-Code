@@ -2400,16 +2400,16 @@ describe("session.message-v2.fromError", () => {
     expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
   })
 
-  test("abort cause wins over a retryable network cause", () => {
-    const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
-    const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause })
-    const result = MessageV2.fromError(error, { providerID })
-    expect(result.name).toBe("MessageAbortedError")
-  })
+ test("abort cause wins over a retryable network cause", () => {
+   const cause = Object.assign(new Error("socket reset"), { code: "ECONNRESET" })
+   const error = Object.assign(new DOMException("user aborted", "AbortError"), { cause })
+   const result = MessageV2.fromError(error, { providerID })
+   expect(result.name).toBe("MessageAbortedError")
+ })
 
-  test("recognizes normalized credential rejection as an auth error", () => {
+ test("recognizes normalized credential rejection as an auth error", () => {
     const error = new MessageV2.APIError({ message: "Unauthorized", statusCode: 401, isRetryable: false }).toObject()
-    expect(MessageV2.isAuthError(error)).toBe(true)
+   expect(MessageV2.isAuthError(error)).toBe(true)
   })
 
   test("does not treat a generic 403 permission failure as authentication", () => {
@@ -2428,11 +2428,7 @@ describe("session.message-v2.fromError", () => {
   })
 
   test("does not treat an unrelated unauthorized word as authentication", () => {
-    const error = new MessageV2.APIError({
-      message: "CORS unauthorized origin",
-      statusCode: 403,
-      isRetryable: false,
-    }).toObject()
+    const error = new MessageV2.APIError({ message: "CORS unauthorized origin", statusCode: 403, isRetryable: false }).toObject()
     expect(MessageV2.isAuthError(error)).toBe(false)
   })
 

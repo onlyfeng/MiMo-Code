@@ -221,8 +221,6 @@ export function computeContextUsage(input: {
     return { context: frame ? `—/${frame}` : "—", cost, pending: true }
   }
 
-  const context = frame
-    ? `${Locale.number(tokens)}/${frame} (${Math.round((tokens / win!.usable) * 100)}%)`
-    : Locale.number(tokens)
+  const context = frame ? `${Locale.number(tokens)}/${frame} (${Math.round((tokens / win!.usable) * 100)}%)` : Locale.number(tokens)
   return { context, cost, pending: false }
 }

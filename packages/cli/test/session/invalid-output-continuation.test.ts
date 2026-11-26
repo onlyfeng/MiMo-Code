@@ -575,9 +575,7 @@ describe("invalid-output continuation — integration", () => {
               expect(retry).toContain("checkpoint writer")
               expect(retry).toContain("CHECKPOINT_COMPLETE")
               expect(retry).not.toContain("final answer to the user")
-              expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(
-                true,
-              )
+              expect(result.parts.some((part) => part.type === "text" && part.text === "CHECKPOINT_COMPLETE")).toBe(true)
             }),
           ),
       })
