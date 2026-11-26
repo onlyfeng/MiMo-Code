@@ -256,8 +256,7 @@ export function turnContextMessages(user: MessageV2.User): ModelMessage[] {
   return [{
       role: "user",
       content: `<system-reminder>\n${context}\n</system-reminder>`,
-    },
-  ]
+  }]
 }
 
 export function appendTurnContext(messages: ModelMessage[], user: MessageV2.User, mergeWithLastUser = false) {

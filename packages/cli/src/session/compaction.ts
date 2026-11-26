@@ -514,10 +514,14 @@ export const layer: Layer.Layer<
           .join("\n\n")
       const msgs = structuredClone(history)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
-        ...(input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true }),
-        languageProvider: (yield* provider.getLanguage(model)).provider,
-      })
+      const modelMessages = yield* MessageV2.toModelMessagesEffect(
+        msgs,
+        model,
+        {
+          ...(input.overflow ? { stripMedia: true } : { collapseCheckpointTail: true }),
+          languageProvider: (yield* provider.getLanguage(model)).provider,
+        },
+      )
       const ctx = yield* InstanceState.context
       const msg: MessageV2.Assistant = yield* session.createMessage({
         id: MessageID.ascending(),
