@@ -1680,29 +1680,6 @@ own source list remains the complete watch surface.
 
 ## FC-009 — synthetic-message provenance and text-part adaptation
 
-- 2026-11-26 synchronization: upstream `6ad6bbb4` (#2867) replaces the user image attachment envelope with a closed `<system-reminder>` appended after the user parts. Its part ID order is therefore its in-memory order, and the `# Files mentioned by the user … ## My request:` divider and the `isEnvelopeAnchorPart` splice are gone. The fork keeps its `metadata.userImageAttachment` tag. On read, `orderUserParts` (`session/message-v2.ts`) now moves only a legacy envelope (tagged text ending in `## My request:`, persisted from 2026-09-17 until this sync) ahead of the user body, so the 2026-09-17 reload rule below applies only to those rows. Moving the new reminder would give a reloaded message a different prompt from the one first sent. The legacy branch can retire once rows from before this sync no longer need their original order. Evidence: `test/session/image-envelope-read-order.test.ts` covers legacy and current order and fails if either the legacy guard or the reorder is removed; the `prompt.test.ts` persisted read-back cases also assert that `MessageV2.parts` and `sessions.messages` equal the in-memory parts.
-
-- 2026-11-04 reminder synchronization (`10b03cf0`, validated): replace text/`syntheticMarker` matching in `ensurePersistedUserSynthetic` with validated `metadata.reminder = { key, rev }`. Only non-ignored synthetic text counts; equal key and revision dedupe independently of wording. Memory paths, loop streak and MCP callers migrate; MCP keeps its separate announcement metadata. There is no text-only compatibility shim: an old memory reminder can be repeated once on the next eligible user, and loop streak can repeat if detection fires again on the same user. Hook/spawn provenance, stable persisted part identities, queue delivery and side-effect retry boundaries remain unchanged. Existing `TextPartInput.metadata` carries client tags without a public schema change.
-
-- 2026-10-21 synchronization: upstream `a7440d13` resets a dropped empty step by removing its parts instead of deleting and rebuilding the assistant under the same ID, so no `message.removed` is published for a turn that still delivers content. Adopted into the fork's pure-empty branch only: reasoning-only output keeps the run loop's scoped continuation, so upstream's think-only identity case is adapted to a pure-empty stop in `invalid-output-continuation.test.ts`. Upstream `88673c41` retires the persisted recall reminder; the memory paths reminder is persisted through the same marker-deduplicated `ensurePersistedUserSynthetic`, at most once per context window on an unsent own user message.
-
-- 2026-10-20 synchronization: inbox acceptance persists complete synthetic agent input and provenance with a durable receipt; later rendering hides unconsumed rows and places consumed input at its first delivery. Import/export/sync/fork preserve referenced message identity and queue visibility without cloning runnable receipts into a fork. Mid-turn direct user text is sent verbatim rather than wrapped against a moving last-finished assistant, preserving byte identity around signed thinking. This does not claim to repair every other history rewrite or an already poisoned signature. Pure empty, tool-free replay uses the scoped retry policy; reasoning-only and settled-tool continuation retain their existing bounded, atomic provenance paths.
-
-- 2026-10-16 synchronization: upstream `bf0563dd` extends the user image attachment envelope and replay provenance. The envelope's local path now derives from an absolute `source.path` or, when absent, a `file:` URL; a new sentence names `[Image: <file name>]` / `[PDF: <file name>]` markers as session-stable attachment identity, matched by the same file name. An attachment-only all-synthetic prompt keeps the caller `system` on the persisted user message (`prompt.system ?? input.system`) while still skipping the `resolvePrompt` fallback, so `session.prompt` is not pinned. The overflow replay copies media `file` parts verbatim (the `[Attached <mime>: <filename>]` substitution is gone) under FC-001's atomic `commitUserMessageIfLatest`, retaining `source: "hook"` and `task_id`. The fork's `userImageAttachment` metadata and hook/spawn provenance rules are unchanged. Evidence: `test/session/prompt.test.ts` envelope and attachment-only-system cases, `test/session/prompt-effect.test.ts` keeps-replayed-media case.
-
-- 2026-10-14 synchronization: upstream `002cb4c9` records a tool's execution boundary (`ToolPart.execution`, `ToolStateError.inputComplete`) through transactional `Session.mutateToolPart`, closes a per-attempt tool scope on cleanup instead of waiting 250 ms for unsettled calls, and lets `ToolSettlement` persist a tool's real result after an interruption; projectors and imports refuse tool identity changes and never downgrade `started`. Adopted with the side-effect replay boundary unchanged; completed tools still merge running metadata and failed tools keep the record guard. Evidence: `test/session/processor-effect.test.ts`, `test/session/tool-gate-cancel.test.ts`, `test/history/import.test.ts`.
-
-- 2026-09-19 synchronization: Machine provenance joins hook provenance as an explicit union. Internal GitHub/command/inbox source labels remain non-user. Optional uncommitted hints persist source=hook with inherited task/model variant and atomic latest-user/token checks; their worker owns no prior run-approval scope.
-
-- 2026-09-17 synchronization: Compose, recall and loop-streak reminders are persisted with stable IDs. Hydration restores Compose protocol priority. User image attachments use a synthetic provenance envelope rather than a fabricated Read result; its tagged envelope is placed before genuine user content after reload without changing IDs. Responses tool images remain tied to their tool call, using the actual adapter provider and shared image limits.
-
-- 2026-09-10 title isolation: automatic titles use persisted genuine user text,
-  configured lite then the exact source model, and an isolated StructuredOutput
-  request. Attachment-only input keeps a filename fallback; image bytes never
-  enter this title request. Ephemeral generation bypasses mutable chat parameter
-  and header hooks and rejects workflow connectors. Preserve the stronger fork
-  rule that only non-ephemeral main requests publish global retry state/events.
-
 - Status: adapted
 - Canonical owner: shared `main` session runtime
 - Observable contract: synthetic user messages carry `source: "spawn"` or
@@ -1718,6 +1695,51 @@ own source list remains the complete watch surface.
   repeated assistant messages only at request construction, records the span on
   the existing parent user as ignored synthetic metadata, and never deletes the
   persisted trajectory or fabricates a new user turn.
+- Carried provenance rules: persisted synthetic reminders dedupe through
+  validated `metadata.reminder = { key, rev }` in
+  `ensurePersistedUserSynthetic`; only non-ignored synthetic text counts, equal
+  key and revision dedupe regardless of wording, and there is no text-only
+  shim, so an old untagged memory reminder may repeat once and loop streak may
+  repeat if detection fires again on the same user. `TextPartInput.metadata`
+  carries client tags without a public schema change. Compose and loop-streak
+  reminders persist with stable IDs, and hydration restores Compose protocol
+  priority (`promoteComposeProtocolFirst`). Machine provenance joins hook
+  provenance as an explicit union; internal GitHub, command and inbox source
+  labels stay non-user. Optional uncommitted hints persist `source: "hook"` with
+  the inherited task and model variant under atomic latest-user and token
+  checks, and their worker owns no earlier run-approval scope. Inbox acceptance
+  persists complete synthetic agent input and provenance with its receipt;
+  import, export, sync and fork preserve referenced message identity and queue
+  visibility without cloning runnable receipts into a fork. Mid-turn direct
+  user text is sent verbatim rather than wrapped against a moving last-finished
+  assistant, keeping byte identity around signed thinking. A dropped pure-empty
+  step resets by removing its parts (upstream `a7440d13`, no `message.removed`
+  for a turn that still delivers), while reasoning-only output keeps the run
+  loop's scoped continuation; pure-empty tool-free replay uses the scoped retry
+  policy. Tool execution boundaries (`ToolPart.execution`,
+  `ToolStateError.inputComplete`, transactional `Session.mutateToolPart`,
+  upstream `002cb4c9`) are adopted with the side-effect replay boundary
+  unchanged: completed tools still merge running metadata and failed tools
+  keep the record guard. The model-visible session error carries a
+  NamedError's `data.message` (`session/trajectory.ts`), not its whole payload.
+- User image attachments: a closed `<system-reminder>` appended after the user
+  parts (upstream `6ad6bbb4`) lists each image with the local path from an
+  absolute `source.path` or a `file:` URL, never a fabricated Read result, and
+  the fork tags it with `metadata.userImageAttachment`. On read, `orderUserParts`
+  (`session/message-v2.ts`) moves only a legacy envelope (tagged text ending in
+  `## My request:`, persisted 2026-09-17 to 2026-11-26) ahead of the user body;
+  moving the current reminder would make a reloaded prompt differ from the
+  first send. An attachment-only all-synthetic prompt keeps the caller `system`
+  on the persisted user (`prompt.system ?? input.system`) while still skipping
+  the `resolvePrompt` fallback. Overflow replay copies media `file` parts
+  verbatim under FC-001's `commitUserMessageIfLatest`, keeping `source: "hook"`
+  and `task_id`. Responses tool images stay tied to their tool call, using the
+  actual adapter provider and shared image limits.
+- Automatic titles use persisted genuine user text, the configured lite model
+  then the exact source model, and an isolated StructuredOutput request;
+  attachment-only input keeps a filename fallback and image bytes never enter
+  it. Ephemeral generation bypasses mutable chat parameter and header hooks and
+  rejects workflow connectors.
 - POLICY-01 synthetic producer: an approved plan continuation remains
   `source: "hook"` with a synthetic text part and the actual user's model,
   tools, format, system, harness, provenance and task binding. Failed conditional
@@ -1729,7 +1751,14 @@ own source list remains the complete watch surface.
   `packages/cli/src/session/processor.ts`,
   `packages/cli/src/session/compaction.ts`, and synthetic producers in
   prompt, checkpoint, plan, dream, and distill flows.
-- Tests/evidence: `packages/cli/test/session/processor-effect.test.ts`,
+- Tests/evidence: `test/session/image-envelope-read-order.test.ts` (fails if
+  the legacy guard or the reorder is removed), the persisted read-back,
+  envelope and attachment-only-system cases of `test/session/prompt.test.ts`,
+  the keeps-replayed-media case of `test/session/prompt-effect.test.ts`,
+  `test/session/tool-gate-cancel.test.ts`, `test/history/import.test.ts`,
+  the pure-empty identity case of `invalid-output-continuation.test.ts`, the
+  `sessionErrorText` regression, and
+  `packages/cli/test/session/processor-effect.test.ts`,
   `packages/cli/test/session/main-runloop-history-invariant.test.ts`,
   `packages/cli/test/session/trajectory.test.ts`, prompt regressions, and
   generated SDK/OpenAPI `source` fields at the reviewed main behavior. Processor
@@ -1738,19 +1767,14 @@ own source list remains the complete watch surface.
   plus retry isolation for ephemeral title requests.
 - Review basis: upstream `6203ea2e292b86e0f45d2ff2043f19bcfdcfbc85`;
   main behavior `aa2dbe494fb5903f918d8d7cd8b6d04404acb031`.
-- Retirement condition: upstream provides equivalent provenance and complete
+- Retirement condition: the legacy image-envelope reorder retires on its own
+  once rows persisted before 2026-11-26 no longer need their original order.
+  Otherwise: upstream provides equivalent provenance and complete
   hook/retry text-part lifecycle, no-side-effect-replay behavior, and local-only
   retry publication for ephemeral or non-main requests, and regenerated
   artifacts preserve the same source discriminator.
 
-- 2026-09-15 error-summary carrier: `session/trajectory.ts` extracts a
-  NamedError's `data.message` for the model-visible session error instead of
-  serializing its complete data/metadata. The `sessionErrorText` regression
-  covers this helper; it does not prove end-to-end provider exception redaction.
-
 ## FC-010 — WebFetch and SSRF destination classification, authorization, and resource bounds
-
-- 2026-10-15 fork hardening (prompted by the dropped June stash review): DNS classification resolves every record (`lookup` with `all: true`) instead of trusting the first answer — a hostname returning a public and a private address together fails closed, and an empty answer list fails closed as a resolution failure. The upstream base still checks the first answer only. The check still races the request's own resolution (TOCTOU), so it remains defense-in-depth. The injected-resolver API now passes `{ all: true }` and expects the record list. Evidence: `test/util/ssrf.test.ts` adds the mixed-answer fail-closed and empty-answer cases (29/29 with `test/tool/webfetch.test.ts` 5/5).
 
 - Status: active
 - Canonical owner: shared `main` WebFetch and SSRF destination-classification boundary
@@ -1766,6 +1790,12 @@ own source list remains the complete watch surface.
   A Content-Length above 5 MiB is rejected early; otherwise the complete buffer
   is read before the 5 MiB check. This rejects oversized results but does not
   bound streamed-body allocation or total body-read time.
+- DNS classification resolves every record (`lookup` with `all: true`) rather
+  than trusting the first answer: a hostname answering with a public and a
+  private address fails closed, and an empty answer fails closed as a
+  resolution failure. Upstream still checks the first answer only. The check
+  races the request's own resolution, so it stays defense-in-depth;
+  `test/util/ssrf.test.ts` covers the mixed and empty answers.
 - Upstream relationship: adapts the shared upstream WebFetch contract while
   retaining fork per-hop authorization and resource bounds, and hardens the
   fork's destination classification to block the complete IPv6 `fe80::/10` range.
