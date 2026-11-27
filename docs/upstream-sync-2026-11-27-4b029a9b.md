@@ -52,4 +52,16 @@ for its own scope.
 
 ## Publication
 
-Pending push and exact-SHA CI.
+The two branches were fast-forwarded in one atomic push to
+`onlyfeng/MiMo-Code`. The push workflows ran on the following exact SHAs.
+
+| Branch | Tested SHA | Lint | Typecheck | Test |
+| --- | --- | --- | --- | --- |
+| `main` | `061d9ecdbe602474e4b61693c9547e27a114127e` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538756) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538732) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538692) |
+| `dev/compat` | `b6068f9e44b39cd7d0b3543a509855b899062018` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538860) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538770) | [success, including Windows runtime](https://github.com/onlyfeng/MiMo-Code/actions/runs/45926538774) |
+
+The publication record and its propagation change only `docs/`. The tested
+SHAs are ancestors of the publication tips, and
+`git diff --quiet <tested-sha> <tip> -- . ':(exclude)docs'` verifies that their
+trees outside `docs/` are identical. The required ancestry is upstream
+`4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` → final main → final dev/compat.
