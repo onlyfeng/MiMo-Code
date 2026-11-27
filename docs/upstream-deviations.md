@@ -14,14 +14,14 @@ renumbered to close gaps.
 
 - Status: active
 - Canonical owner: fork `main`; inherited unchanged by `dev/compat`
-- Last reviewed: 2026-11-26
-- Upstream: `6aed4550c95a25204e50ae73f1d9893312d1782a`
-- Prior reviewed upstream: `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` (2026-11-26)
-- Review completion: `main` adopts upstream's case-preserving escape of a closing `</system-reminder>` tag in the image attachment reminder (C01). No FD entry covers this surface and no FD contract changes; FD-005's `neutralizeHarnessTags` is a separate escape for MCP text. `dev/compat` inherits it through a clean merge. See [the synchronization record](upstream-sync-2026-11-26-6aed4550.md).
-- Main behavior (runtime/tests): `72dc3114b2eebc7deb26a497e3ba6e3ad8df8b86` (synchronization merge over pull request #285)
-- Inherited compat behavior: `730b7656f6255197d272825c5baa1c97b243f5f4` (propagation merge over the pull request #285 propagation)
+- Last reviewed: 2026-11-27
+- Upstream: `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0`
+- Prior reviewed upstream: `6aed4550c95a25204e50ae73f1d9893312d1782a` (2026-11-26)
+- Review completion: `main` adopts upstream's request for a compaction summary in the reply body (C01). FD-010 through FD-012 retain their summary acceptance, disabled tools and bounded retry contracts. `dev/compat` inherits the prompt and regression coverage. See [the synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
+- Main behavior (runtime/tests): `8c57554c3229ef7ac9654ee0f32293779e794512` (synchronization merge)
+- Inherited compat behavior: `a7c494174f20b8b7d2a570980aaa822a9a264ba9` (propagation merge)
 - Bundled guidance content: `79c6e5a01d15cf376a4033524de387a932fd6a7f` (categorized skills, provider reference, corrected explicit-session harness precedence; fork guidance retained).
-- Prior fork `main` tip: `3d268917d29a0c30c54372ea7c286e9512fce690`. Prior fork `dev/compat` tip: `25c859e82c775f6249b4a871c1daa8ff1d778723`
+- Prior fork `main` tip: `869c4a961774b58d5b541565729f91c088aac61f`. Prior fork `dev/compat` tip: `0563324ca3697c4f607653b7a2d964d2e323bd99`.
 - Complete code-difference audit: [2026-09-15 implementation closure](fork-difference-closure-2026-09-15.md), with fixed Git trees, per-file ownership, completed F01–F11 decisions and retained boundaries.
 - Original audit baseline: [2026-09-15 findings](fork-difference-audit-2026-09-15.md); its 529 file pairs, source snapshots and pre-implementation findings remain historical.
 - History: [fork-registry-history.md](fork-registry-history.md)
@@ -35,7 +35,7 @@ entry names its own evidence, and the next synchronization reviews it. The
 selected released capability audit is recorded in
 [the model API review](released-model-api-review-2026-09-08.md).
 
-Latest reviewed synchronization is the [2026-11-26 path-preserving image reminder escape](upstream-sync-2026-11-26-6aed4550.md), C01 (N=1).
+Latest reviewed synchronization is the [2026-11-27 direct compaction summary prompt](upstream-sync-2026-11-27-4b029a9b.md), C01 (N=1).
 
 Path note: living registry entries use the `packages/cli/` and `packages/sdk/` layout from the 2026-10-02 synchronization, including inside older dated bullets; dated synchronization records keep the paths of their time.
 
