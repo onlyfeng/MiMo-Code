@@ -6430,3 +6430,7 @@ Moved verbatim from `docs/dev-compat-overrides.md` at dev/compat `ee152f3358c53a
 - Validation: `bun run typecheck` in `packages/cli` passes; root lint reports 0 errors. 16 focused files, including `test/session/overflow.test.ts` for DC-CONTEXT-001 image sizing: 705 pass, 0 fail (2 skipped) on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-26.md#publication).
 
 This superseded current-review block is retained as history. The 2026-11-26 propagation of upstream `6aed4550` (case-preserving image reminder escape) is recorded in [the shared sync record](upstream-sync-2026-11-26-6aed4550.md); compat runtime/test snapshot `730b7656f6255197d272825c5baa1c97b243f5f4`.
+
+## 2026-11-27 direct compaction summary propagation
+
+Compat runtime/test snapshot `a7c494174f20b8b7d2a570980aaa822a9a264ba9` inherits the one-capability upstream `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` sync. DC-CONTEXT-001 retains its compaction filter and budget. See [the shared synchronization record](upstream-sync-2026-11-27-4b029a9b.md).

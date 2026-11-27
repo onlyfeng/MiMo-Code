@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-26. Audited `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593..6aed4550c95a25204e50ae73f1d9893312d1782a`: upstream pull request #2868 (case-preserving escape in the image attachment reminder) through this synchronization. Compat pull requests merged since the previous review: #281 (restores `main`'s text in 8 layout-only hunks, token stream unchanged) and #284 (DC registry consolidation, documentation only).
+- Last reviewed: 2026-11-27. Audited `6aed4550c95a25204e50ae73f1d9893312d1782a..4b029a9b4cf838f72ecb729345ddf10d8cef9ad0`, upstream pull request #2870 (reply-body compaction summaries). The prior compat tip included the publication record for the previous sync.
 
-- Scope: C01 (N=1). See [the shared synchronization record](upstream-sync-2026-11-26-6aed4550.md).
+- Scope: C01 (N=1). See [the shared synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
 
-- Starting main: `3d268917d29a0c30c54372ea7c286e9512fce690`. Starting compat: `25c859e82c775f6249b4a871c1daa8ff1d778723` (already containing that `main`). Main runtime snapshot: `72dc3114b2eebc7deb26a497e3ba6e3ad8df8b86`. Compat runtime snapshot: `730b7656f6255197d272825c5baa1c97b243f5f4`.
+- Starting main: `869c4a961774b58d5b541565729f91c088aac61f`. Starting compat: `0563324ca3697c4f607653b7a2d964d2e323bd99`. Main runtime snapshot: `8c57554c3229ef7ac9654ee0f32293779e794512`. Compat runtime snapshot: `a7c494174f20b8b7d2a570980aaa822a9a264ba9`.
 
-- Result: inherit the case-preserving `</system-reminder>` escape in `userImageAttachmentEnvelope` through a clean merge. DC-CONTEXT-001's compat-owned `prompt.ts` hunks lie outside that function, and preflight sizes image attachments from their pixel dimensions, not from the reminder text. The compat overlay delta against `main` is unchanged apart from blob ids. All DC owners are unchanged.
+- Result: inherit the default reply-body summary prompt and both frozen-prefix cases through a clean merge. DC-CONTEXT-001 continues to own the frozen active-tool filter and projection budget. Both cases assert the frozen wire prefix and `tool_choice: "none"`.
 
-- Validation: `bun run typecheck` in `packages/cli` passes; root lint reports 0 errors. `test/session/prompt.test.ts`, `test/session/image-envelope-read-order.test.ts` and `test/session/message-v2.test.ts`: 152 pass, 0 fail on Bun 1.3.14. Exact-SHA CI is recorded in [the shared record](upstream-sync-2026-11-26-6aed4550.md#publication).
+- Validation: CLI typecheck passes and root lint reports zero errors. Both changed cases and all 45 adjacent tests pass on Bun 1.3.14. See [the publication record](upstream-sync-2026-11-27-4b029a9b.md#publication) for CI evidence.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 
