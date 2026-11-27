@@ -4933,3 +4933,7 @@ ownership to the real parent` polled the `InboxTable` row its assertion is
 ## 2026-11-26 path-preserving image reminder escape
 
 The one-commit review advances from `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` to `6aed4550c95a25204e50ae73f1d9893312d1782a` (upstream pull request #2868). C01 adopts the case-preserving escape of a closing `</system-reminder>` tag in the image attachment reminder on main `72dc3114b2eebc7deb26a497e3ba6e3ad8df8b86`; compat `730b7656f6255197d272825c5baa1c97b243f5f4` inherits it through a clean merge. No entry changes. See [the synchronization record](upstream-sync-2026-11-26-6aed4550.md).
+
+## 2026-11-27 direct compaction summary prompt
+
+The one-commit review advances from `6aed4550c95a25204e50ae73f1d9893312d1782a` to `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` (upstream pull request #2870). C01 adopts the default reply-body summary prompt in main `8c57554c3229ef7ac9654ee0f32293779e794512` and inherits it in compat `a7c494174f20b8b7d2a570980aaa822a9a264ba9`. FD-010 through FD-012, FC-015 and the compat overlay still apply. See [the synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
