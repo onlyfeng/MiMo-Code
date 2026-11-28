@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "bun:test"
-import { Deferred, Effect, Schedule } from "effect"
+import { Effect, Schedule } from "effect"
 import { eq } from "drizzle-orm"
 import { Database } from "../../src/storage"
 import { SessionTable } from "../../src/session/session.sql"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Instance } from "../../src/project/instance"
-import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageID } from "../../src/session/schema"
 import { Log } from "../../src/util"
 import { ToolRegistry } from "../../src/tool"
@@ -16,8 +15,6 @@ import { tmpdir } from "../fixture/fixture"
 void Log.init({ print: false })
 
 afterEach(() => Instance.disposeAll())
-
-const model = { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") }
 
 import { withActor } from "../fixture/retained-recovery-actor"
 
