@@ -15,7 +15,7 @@ import { SessionPrefixSnapshotTable } from "../../src/session/session.sql"
 import { Database, eq } from "../../src/storage"
 import { ToolRegistry } from "../../src/tool"
 import { provideTmpdirServer, tmpdirScoped } from "../fixture/fixture"
-import { TestLLMServer, reply } from "../lib/llm-server"
+import { TestLLMServer } from "../lib/llm-server"
 import { testEffect } from "../lib/effect"
 import { withEnv } from "../lib/env"
 
