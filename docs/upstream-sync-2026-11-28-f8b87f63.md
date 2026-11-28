@@ -24,7 +24,7 @@ The integration used dedicated worktrees on `sync/upstream-f8b87f63` and
 | C03 | `dream.auto` and `distill.auto` are documented as off by default in the README files and the bundled `mimocode-docs` skill. | Adopted. `session/auto-dream.ts` enables either run only when the value `=== true` on both branches, so the text matches behavior. The fork's other bundled-guidance rows merged without conflict. | Inherited; the compat README overlay is unchanged. | `README.md`, `README.zh.md`, `.bundle/mimocode-docs/SKILL.md`, `reference/config.md`, `reference/guide.md`; `test/skill/mimocode-docs.test.ts`. |
 | C04 | Version 0.1.18 for the `cli`, `plugin`, `sdk` and `shared` packages. | Adopted with the lockfile's matching version fields; no other lockfile line changes, and no `0.1.17` reference remains outside `docs/`. | Inherited. | Four `package.json` files and `bun.lock`. |
 | C05 | The inbox queue suites save, clear and restore `schedulerRef.current`; the sync suite sets `MIMOCODE_EXPERIMENTAL_WORKSPACES` only inside the instance callback. | Adopted through a clean merge onto the fork's queue-controller cases. | Inherited. Compat's `src/sync/index.ts` and `src/inbox/controller.ts` overlays are untouched by this change. | `test/inbox/queue-controller.test.ts`, `test/inbox/queue-steer-integration.test.ts`, `test/sync/index.test.ts`. |
-| C06 | #2879 cancels the main session that upstream's route test resumes, so its retry loop cannot outlive the test and write into a later suite's database. | Kept the fork's route test. Under FD-009 the fork replaced upstream's registry-only ephemeral-recovery case with a retained full-context actor case through `test/fixture/retained-recovery-actor.ts`; the test upstream fixed does not exist here. | Inherited the same test. | `test/actor/subagent-resume-route.integration.test.ts`. A temporary probe (not committed) wrapped `fetch` and ran the fork case four times. No provider request followed teardown within 9 s. The parent reported `busy` ("Waiting for 1 subagent(s)") at teardown in two runs. See the recommendation below. |
+| C06 | #2879 cancels the main session that upstream's route test resumes, so its retry loop cannot outlive the test and write into a later suite's database. | Kept the fork's route test. Under FD-009 the fork replaced upstream's registry-only ephemeral-recovery case with a retained full-context actor case through `test/fixture/retained-recovery-actor.ts`; the test upstream fixed does not exist here. | Inherited the same test. | `test/actor/subagent-resume-route.integration.test.ts`. A temporary probe (not committed) wrapped `fetch` and ran the fork case four times. No provider request followed teardown within 9 s. The parent reported `busy` ("Waiting for 1 subagent(s)") at teardown in two runs. See the follow-up below. |
 
 FD-009 (frozen-context recovery), FC-019 and FC-055 (dependency patches),
 FC-053 (`@ai-sdk/openai` reasoning options and the `xai` key) and the shared
@@ -32,10 +32,18 @@ bundled-guidance rows were reviewed against the merged trees. No entry's
 contract changes. The wire schema, migration journal and SDK inputs are
 unchanged, so no generated artifact was regenerated.
 
-Recommendation, not implemented: `withActor` cancels the spawned and controller
-actors but not the parent session that a main resume wakes. Cancelling that
-session in the fixture's teardown would close the window the probe observed.
-No failure is attributed to it today.
+Follow-up after publication: `withActor` cancelled the spawned and controller
+actors but not the parent session that a main resume wakes. A closer probe
+showed that the parent session goes idle on its own within about 55 ms of the
+child's cancellation, without another provider request, so it was not a
+leaked retry loop. Across 42 teardowns of the three suites that use the
+fixture, one run still held its instance claim when the servers would have
+stopped, and it released 32 ms later. The fixture now cancels the parent
+session, disposes each fixture directory while both servers still answer,
+and requires `Instance.refreshStatus` to reach `applied`. A temporary case
+that holds an instance claim past teardown fails that assertion with
+`pending`, and an idle fixture in the same tree passes. No failure had been
+attributed to the window.
 
 ## Local validation
 
