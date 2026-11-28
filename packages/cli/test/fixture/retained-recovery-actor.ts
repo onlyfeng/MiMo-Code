@@ -156,6 +156,7 @@ export async function withActor(
   await using receiver = options.isolated ? await tmpdir({ git: true, root: "cwd", config }) : undefined
   const resumeURLs: URL[] = []
   const app = Server.Default().app
+  let settled: Awaited<ReturnType<typeof settle>> = []
   const http = Bun.serve({
     port: 0,
     fetch(request) {
@@ -193,12 +194,30 @@ export async function withActor(
             await AppRuntime.runPromise(
               fixture.actor.cancel(fixture.controller.sessionID, fixture.controller.actorID, "forced"),
             )
+          // A main resume also runs the parent session, which can still be settling here.
+          await AppRuntime.runPromise(SessionPrompt.Service.use((prompt) => prompt.cancel(fixture.parent.id)))
         }
       },
     })
   } finally {
     gate.resolve()
+    // Dispose while both servers still answer: disposal waits until every run releases its
+    // instance claim, so no run outlives the fixture or meets a stopped provider.
+    settled = await settle([directory.path, receiver?.path])
     await http.stop(true)
     await provider.stop(true)
   }
+  for (const item of settled) expect(item).toEqual({ directory: item.directory, state: "applied" })
+}
+
+async function settle(directories: (string | undefined)[]) {
+  const result: { directory: string; state: string }[] = []
+  for (const directory of directories) {
+    if (!directory) continue
+    await Instance.disposeDirectory(directory)
+    const deadline = Date.now() + 10_000
+    while (Instance.refreshStatus(directory).state !== "applied" && Date.now() < deadline) await Bun.sleep(10)
+    result.push({ directory, state: Instance.refreshStatus(directory).state })
+  }
+  return result
 }
