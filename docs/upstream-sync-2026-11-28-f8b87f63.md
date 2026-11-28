@@ -62,5 +62,16 @@ home, XDG and fixture paths, `MIMOCODE_DISABLE_DEFAULT_PLUGINS=true` and
 
 ## Publication
 
-Pending: the exact-SHA push CI for both branch tips is recorded in a
-follow-up documentation commit.
+The two branches were fast-forwarded in one atomic push to
+`onlyfeng/MiMo-Code`. The push workflows ran on the following exact SHAs.
+
+| Branch | Tested SHA | Lint | Typecheck | Test |
+| --- | --- | --- | --- | --- |
+| `main` | `42f8c54d2cdbfcb2b05294bdcf310b1e92f8dc15` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583039) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583057) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583002) |
+| `dev/compat` | `836c7fcff5ea15f9f529679b7e2ca01eccfae722` | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583119) | [success](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583065) | [success, including Windows runtime](https://github.com/onlyfeng/MiMo-Code/actions/runs/46103583035) |
+
+The publication record and its propagation change only `docs/`. The tested
+SHAs are ancestors of the publication tips, and
+`git diff --quiet <tested-sha> <tip> -- . ':(exclude)docs'` verifies that their
+trees outside `docs/` are identical. The required ancestry is upstream
+`f8b87f631277fc99f956740f7c83122132f87d3e` → final main → final dev/compat.
