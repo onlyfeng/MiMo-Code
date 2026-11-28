@@ -2761,7 +2761,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
     headers: {},
   } as any
 
-  test("strips openai itemId and preserves reasoningEncryptedContent when store=false", () => {
+  test("strips non-reasoning openai itemId and keeps reasoning grouping key when store=false", () => {
     const msgs = [
       {
         role: "assistant",
@@ -2785,6 +2785,17 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
               },
             },
           },
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "task",
+            input: {},
+            providerOptions: {
+              openai: {
+                itemId: "fc_789",
+              },
+            },
+          },
         ],
       },
       { role: "user", content: [{ type: "text", text: "next" }] },
@@ -2793,13 +2804,15 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
     const result = ProviderTransform.message(msgs, openaiModel, { store: false }) as any[]
 
     expect(result).toHaveLength(2)
-    expect(result[0].content[0].providerOptions?.openai?.itemId).toBeUndefined()
+    expect(result[0].content[0].providerOptions?.openai?.itemId).toBe("rs_123")
     expect(result[0].content[0].providerOptions?.openai?.reasoningEncryptedContent).toBe("encrypted")
     expect(result[0].content[1].providerOptions?.openai?.itemId).toBeUndefined()
+    expect(result[0].content[2].providerOptions?.openai?.itemId).toBeUndefined()
   })
 
-  test("strips itemId based on SDK package namespace, not provider ID", () => {
-    // Custom providerID but @ai-sdk/openai npm (e.g. a proxy) still strips via the openai key.
+  test("strips non-reasoning itemId based on SDK package namespace, not provider ID", () => {
+    // Custom providerID but @ai-sdk/openai npm (e.g. a proxy) remaps to the openai key,
+    // keeps reasoning itemId for SDK grouping, and strips non-reasoning itemId.
     const zenModel = {
       ...openaiModel,
       providerID: "zen",
@@ -2812,7 +2825,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
             type: "reasoning",
             text: "thinking...",
             providerOptions: {
-              openai: {
+              zen: {
                 itemId: "rs_123",
                 reasoningEncryptedContent: "encrypted",
               },
@@ -2822,7 +2835,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
             type: "text",
             text: "Hello",
             providerOptions: {
-              openai: {
+              zen: {
                 itemId: "msg_456",
               },
             },
@@ -2835,7 +2848,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
     const result = ProviderTransform.message(msgs, zenModel, { store: false }) as any[]
 
     expect(result).toHaveLength(2)
-    expect(result[0].content[0].providerOptions?.openai?.itemId).toBeUndefined()
+    expect(result[0].content[0].providerOptions?.openai?.itemId).toBe("rs_123")
     expect(result[0].content[0].providerOptions?.openai?.reasoningEncryptedContent).toBe("encrypted")
     expect(result[0].content[1].providerOptions?.openai?.itemId).toBeUndefined()
   })
