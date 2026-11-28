@@ -73,7 +73,8 @@ describe("restore snapshot ordering", () => {
       }
       const previous = schedulerRef.current
       let dispatched = 0
-      schedulerRef.current = { kick: () => Effect.sync(() => { dispatched++ }) }
+      // Process-wide ref: count only this session's lanes, not an earlier file's background kicks.
+      schedulerRef.current = { kick: (lane) => Effect.sync(() => { if (lane.sessionID === sessionID) dispatched++ }) }
       GlobalBus.on("event", listener)
       try {
         expect(yield* Effect.sync(() => installRestore(input))).toBe(sessionID)
