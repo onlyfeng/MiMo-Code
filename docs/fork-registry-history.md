@@ -4937,3 +4937,7 @@ The one-commit review advances from `6ad6bbb44acb3600ccc4c09ab3c64c79f5878593` t
 ## 2026-11-27 direct compaction summary prompt
 
 The one-commit review advances from `6aed4550c95a25204e50ae73f1d9893312d1782a` to `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` (upstream pull request #2870). C01 adopts the default reply-body summary prompt in main `8c57554c3229ef7ac9654ee0f32293779e794512` and inherits it in compat `a7c494174f20b8b7d2a570980aaa822a9a264ba9`. FD-010 through FD-012, FC-015 and the compat overlay still apply. See [the synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
+
+## 2026-11-28 grouped stateless Responses reasoning
+
+The seven-commit review advances from `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` to `f8b87f631277fc99f956740f7c83122132f87d3e` (upstream pull requests #2873 through #2879). Main `4bde16cd18bff0ddb5ac35cf2531e6459461e6e2` adopts reasoning `itemId` retention for stateless Responses, the opt-in dream and distill documentation, version 0.1.18 and the inbox and sync test isolation; compat `5f6366209212dfefbfc7516a3430323281ac02e7` inherits them through a clean merge. The fork's FD-009 route test replaces the upstream case that #2879 fixes. The bundled guidance snapshot advances from `79c6e5a01d15cf376a4033524de387a932fd6a7f` to the synchronization merge. No entry changes. See [the synchronization record](upstream-sync-2026-11-28-f8b87f63.md).
