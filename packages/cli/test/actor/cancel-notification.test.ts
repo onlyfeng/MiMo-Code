@@ -1181,7 +1181,12 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       firstCancelListGate = { sessionID: parent.id, actorID, entered, release, armed: true }
       let wakes = 0
       const previousScheduler = schedulerRef.current
-      const scheduler = { kick: () => Effect.sync(() => { wakes++ }).pipe(Effect.andThen(Effect.interrupt)) }
+      // schedulerRef is process-wide: an earlier file's controller can kick its own lanes
+      // through this scheduler mid-test. Only a kick of this parent is the owner's wake.
+      const scheduler = {
+        kick: (lane: { sessionID: SessionID }) =>
+          Effect.sync(() => { if (lane.sessionID === parent.id) wakes++ }).pipe(Effect.andThen(Effect.interrupt)),
+      }
       schedulerRef.current = scheduler
       const restore = () => { if (schedulerRef.current === scheduler) schedulerRef.current = previousScheduler }
       yield* Effect.addFinalizer(() => Effect.sync(restore))
