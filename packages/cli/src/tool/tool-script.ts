@@ -1339,9 +1339,7 @@ export const ToolScriptTool = Tool.define(
                       if (progress.closed || subPart.state.status !== "running") throw new Error(`${id}: ${message}`)
                       const durationMs = Date.now() - start
                       const toolResultMetadata = getToolResultMetadata(err)
-                      const toolResultAttachments = relayAttachments(
-                        normalizeAttachments(getToolResultAttachments(err)),
-                      )
+                      relayAttachments(normalizeAttachments(getToolResultAttachments(err)))
                       const currentMetadata = subPart.state.metadata
                       subPart.state = {
                         status: "error",

@@ -1,5 +1,5 @@
-import { inboxControllerRef, schedulerRef } from "../../src/inbox"
-import { observeAcceptedInbox, acceptedInboxEvent, receiptText } from "../fixture/accepted-inbox"
+import { inboxControllerRef } from "../../src/inbox"
+import { observeAcceptedInbox } from "../fixture/accepted-inbox"
 import { ActorExecution } from "../../src/actor/execution"
 import { InboxTable } from "../../src/inbox/inbox.sql"
 import { NodeFileSystem } from "@effect/platform-node"
@@ -69,7 +69,6 @@ import { TestLLMServer } from "../lib/llm-server"
 import { reply } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { inboxServiceRef } from "../../src/inbox/inbox-ref"
-import { Flag } from "../../src/flag/flag"
 import { prefixModelIdentity, prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 
 let recoveryCommitGate: { hit: Deferred.Deferred<void>; release: Deferred.Deferred<void>; done: Deferred.Deferred<void> } | undefined
@@ -2832,7 +2831,6 @@ pauseIt.live("resume binds an unbound original task before hooks and provider ex
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
       const actor = yield* Actor.Service
-      const sessions = yield* Session.Service
       const spawned = yield* interruptedActor()
       const user = spawned.messages.find((message) => message.info.role === "user")!
       if (user.info.role !== "user") return yield* Effect.die("missing recovery user")
@@ -3107,9 +3105,8 @@ for (const phase of ["owned continuation", "compaction CAS"] as const) {
 for (const retirement of ["ephemeral", "cancelled"] as const) {
   it.live(`resume rejects ${retirement} context without rewriting interrupted messages`, () =>
     provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir }) {
+      Effect.fnUntraced(function* () {
         const actor = yield* Actor.Service
-        const sessions = yield* Session.Service
         const spawned = yield* interruptedActor(retirement === "ephemeral" ? "ephemeral" : "persistent")
         if (retirement === "cancelled") yield* actor.cancel(spawned.sessionID, spawned.actorID, "forced")
         expect(actor.resume).toBeDefined()
@@ -3481,7 +3478,6 @@ it.live("resume rejects changed session harness decision without settling the ca
   provideTmpdirServer(
     Effect.fnUntraced(function* () {
       const actor = yield* Actor.Service
-      const sessions = yield* Session.Service
       const spawned = yield* interruptedActor()
       yield* Effect.sync(() =>
         Database.use((db) =>

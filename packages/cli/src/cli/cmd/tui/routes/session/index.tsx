@@ -1579,7 +1579,6 @@ export function UserMessageView(props: {
   const rebuildBoundary = createMemo(() => props.parts.some((x) => x.type === "checkpoint"))
   const { theme } = useTheme()
   const t = useLanguage().t
-  const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && compareMessageOrder(props.message, props.pending) > 0)
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))

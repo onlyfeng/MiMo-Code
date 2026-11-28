@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "bun:test"
-import { Deferred, Effect, Schedule } from "effect"
+import { Effect, Schedule } from "effect"
 import { eq } from "drizzle-orm"
 import { Database } from "../../src/storage"
 import { SessionTable } from "../../src/session/session.sql"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Instance } from "../../src/project/instance"
-import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageID } from "../../src/session/schema"
 import { Log } from "../../src/util"
 import { ToolRegistry } from "../../src/tool"
@@ -17,9 +16,7 @@ void Log.init({ print: false })
 
 afterEach(() => Instance.disposeAll())
 
-const model = { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") }
 import { withActor, frozenTurnContext, liveTurnContext } from "../fixture/retained-recovery-actor"
-
 
 for (const mode of ["subagent", "peer", "isolated peer", "peer with appended turn context"] as const) {
   test(`HTTP actor recovery lists and atomically resumes the exact retained ${mode} candidate`, async () => {

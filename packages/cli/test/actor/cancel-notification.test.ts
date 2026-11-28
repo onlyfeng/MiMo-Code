@@ -1,5 +1,5 @@
 import { inboxControllerRef, schedulerRef } from "../../src/inbox"
-import { observeAcceptedInbox, acceptedInboxEvent, receiptText } from "../fixture/accepted-inbox"
+import { observeAcceptedInbox, receiptText } from "../fixture/accepted-inbox"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect } from "bun:test"
@@ -1168,7 +1168,6 @@ describe("Actor cancel notification (T41 unified terminal-status bridge)", () =>
       const actor = yield* Actor.Service
       const sessions = yield* Session.Service
       const registry = yield* ActorRegistry.Service
-      const inbox = yield* Inbox.Service
       const parent = yield* sessions.create({ title: "quiet cancel follower" })
       const actorID = "pending-child"
       yield* registry.register({

@@ -932,7 +932,7 @@ for (const fork of [true, false]) {
           yield* reset
           installRecordingCapture()
           const sessions = yield* SessionNs.Service
-          const { info, u1, a1, u2, a2 } = yield* seedFourMessages()
+          const { info, u1, u2, a2 } = yield* seedFourMessages()
           // The next assistant continued the first input without claiming the queued second one.
           yield* sessions.updateMessage({ ...a2, parentID: u1.id })
           Database.use((db) =>

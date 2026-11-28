@@ -13,7 +13,7 @@ const write = (dir: string, file: string, text: string) =>
   Effect.promise(() => fs.writeFile(path.join(dir, file), text))
 
 // Tracks the worktree, lets `change` edit it, tracks again, and diffs the two.
-const diffAround = Effect.fnUntraced(function* (dir: string, change: Effect.Effect<void>) {
+const diffAround = Effect.fnUntraced(function* (change: Effect.Effect<void>) {
   const snapshot = yield* Snapshot.Service
   const before = yield* snapshot.track()
   expect(before).toBeTruthy()
@@ -32,7 +32,6 @@ describe("Snapshot.diffFull patch budgets", () => {
           const line = "x".repeat(99) + "\n"
           const lines = Math.ceil(Snapshot.PATCH_FILE_BYTES / line.length) + 1
           const diffs = yield* diffAround(
-            dir,
             Effect.all([write(dir, "big.txt", line.repeat(lines)), write(dir, "small.txt", "small content")]).pipe(
               Effect.asVoid,
             ),
@@ -60,7 +59,6 @@ describe("Snapshot.diffFull patch budgets", () => {
           const count = Math.ceil(Snapshot.PATCH_TOTAL_BYTES / size) + 2
           const names = Array.from({ length: count }, (_, i) => `part-${i.toString().padStart(2, "0")}.txt`)
           const diffs = yield* diffAround(
-            dir,
             Effect.forEach(names, (name) => write(dir, name, "y".repeat(size - 1) + "\n"), { discard: true }),
           )
           expect(diffs.map((item) => item.file).toSorted()).toEqual(names)
@@ -77,7 +75,7 @@ describe("Snapshot.diffFull patch budgets", () => {
       (dir) =>
         Effect.gen(function* () {
           yield* write(dir, "a.txt", "before")
-          const diffs = yield* diffAround(dir, write(dir, "a.txt", "changed"))
+          const diffs = yield* diffAround(write(dir, "a.txt", "changed"))
           expect(diffs).toHaveLength(1)
           expect(diffs[0]?.patch).toContain("+changed")
           expect(diffs[0]?.status).toBe("modified")

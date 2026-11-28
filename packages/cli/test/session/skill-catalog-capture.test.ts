@@ -79,7 +79,7 @@ it.live(
           const prompt = yield* SessionPrompt.Service
           const registry = yield* ToolRegistry.Service
           const session = yield* sessions.create({ title: "Repeated cold capture" })
-          const user = yield* prompt.prompt({
+          yield* prompt.prompt({
             sessionID: session.id,
             agent: "build",
             model,
