@@ -10,15 +10,15 @@ registry/history commit does not advance either behavior reference below.
 
 ## Current review record
 
-- Last reviewed: 2026-11-27. Audited `6aed4550c95a25204e50ae73f1d9893312d1782a..4b029a9b4cf838f72ecb729345ddf10d8cef9ad0`, upstream pull request #2870 (reply-body compaction summaries). The prior compat tip included the publication record for the previous sync.
+- Last reviewed: 2026-11-28. Audited `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0..f8b87f631277fc99f956740f7c83122132f87d3e`, upstream pull requests #2873 through #2879 (stateless Responses reasoning grouping, opt-in dream and distill documentation, version 0.1.18, test isolation). The prior compat tip included the publication record for the previous sync.
 
-- Scope: C01 (N=1). See [the shared synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
+- Scope: C01–C06 (N=6). See [the shared synchronization record](upstream-sync-2026-11-28-f8b87f63.md).
 
-- Starting main: `869c4a961774b58d5b541565729f91c088aac61f`. Starting compat: `0563324ca3697c4f607653b7a2d964d2e323bd99`. Main runtime snapshot: `8c57554c3229ef7ac9654ee0f32293779e794512`. Compat runtime snapshot: `a7c494174f20b8b7d2a570980aaa822a9a264ba9`.
+- Starting main: `ba999dda14cf214a3dab04ad719657e900d4c6fb`. Starting compat: `ca28595bddfbbf3328edbd97776af8357cb2db78`. Main runtime snapshot: `4bde16cd18bff0ddb5ac35cf2531e6459461e6e2`. Compat runtime snapshot: `5f6366209212dfefbfc7516a3430323281ac02e7`.
 
-- Result: inherit the default reply-body summary prompt and both frozen-prefix cases through a clean merge. DC-CONTEXT-001 continues to own the frozen active-tool filter and projection budget. Both cases assert the frozen wire prefix and `tool_choice: "none"`.
+- Result: inherit every capability through a clean merge; the compat merge brings in exactly the paths of the main synchronization delta. DC-WEBSEARCH-001's Anthropic reorder and its `transform.test.ts` cases are a separate hunk from the reasoning `itemId` exemption, and the compat overlay lines in `transform.ts`, `transform.test.ts` and both README files are unchanged. DC-SESSION-001's `inbox/controller.ts` and `sync/index.ts` additions are untouched by the inbox and sync test isolation. All DC owners are unchanged.
 
-- Validation: CLI typecheck passes and root lint reports zero errors. Both changed cases and all 45 adjacent tests pass on Bun 1.3.14. See [the publication record](upstream-sync-2026-11-27-4b029a9b.md#publication) for CI evidence.
+- Validation: CLI typecheck passes and root lint reports zero errors. On Bun 1.3.14, the affected matrix passes 81 files and 1,078 tests (one process per file), and upstream's shared-process leak combination passes 49/49. See [the shared record](upstream-sync-2026-11-28-f8b87f63.md#local-validation); exact-SHA CI is recorded in its publication section.
 
 Earlier review records and dated propagation notes (75 sections, dated 2026-09-09 to 2026-11-06) moved verbatim to [the compat history](dev-compat-registry-history.md#2026-11-07-registry-normalization). They record past decisions; the DC entries below and the current review record above are the live contract.
 

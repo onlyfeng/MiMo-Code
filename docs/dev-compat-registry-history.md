@@ -6434,3 +6434,7 @@ This superseded current-review block is retained as history. The 2026-11-26 prop
 ## 2026-11-27 direct compaction summary propagation
 
 Compat runtime/test snapshot `a7c494174f20b8b7d2a570980aaa822a9a264ba9` inherits the one-capability upstream `4b029a9b4cf838f72ecb729345ddf10d8cef9ad0` sync. DC-CONTEXT-001 retains its compaction filter and budget. See [the shared synchronization record](upstream-sync-2026-11-27-4b029a9b.md).
+
+## 2026-11-28 grouped stateless Responses reasoning propagation
+
+Compat runtime/test snapshot `5f6366209212dfefbfc7516a3430323281ac02e7` inherits the six-capability upstream `f8b87f631277fc99f956740f7c83122132f87d3e` sync through a clean merge. DC-WEBSEARCH-001 and DC-SESSION-001 keep their overlays. See [the shared synchronization record](upstream-sync-2026-11-28-f8b87f63.md).
